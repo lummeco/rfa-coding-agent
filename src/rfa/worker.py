@@ -200,11 +200,17 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
     output.mkdir(parents=True, exist_ok=True)
 
     # The card's own `model:` is what the board and `rfa new -m` set; the command still wins.
-    chosen = settings.pick(config, model or str(task.meta.get("model") or ""))
+    chosen, level = settings.for_task(config, task.meta, model, reasoning)
     task = tasks.move(
-        task, "under-work", actor="worker", status="coding", attempts=task.attempts + 1, model=chosen
+        task,
+        "under-work",
+        actor="worker",
+        status="coding",
+        attempts=task.attempts + 1,
+        model=chosen,
+        reasoning=level or None,
     )
-    tasks.log(type="run_started", id=task.id, attempt=task.attempts, model=chosen)
+    tasks.log(type="run_started", id=task.id, attempt=task.attempts, model=chosen, reasoning=level)
     env = None
     try:
         env = get_environment(config.get("environment", {}), default_type="docker")
@@ -220,7 +226,7 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         baseline = {r["command"]: r["ok"] for r in run_checks(env, checks, cwd)}
         tasks.log(type="baseline", id=task.id, failing=[c for c, ok in baseline.items() if not ok])
         agent = CoderAgent(
-            get_model(config=settings.model_config(config, chosen, reasoning)),
+            get_model(config=settings.model_config(config, chosen, level)),
             env,
             checks=checks,
             cwd=cwd,

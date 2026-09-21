@@ -131,6 +131,28 @@ def pick(config: dict, name: str = "") -> str:
     return picked
 
 
+def for_task(config: dict, meta: dict, model: str = "", reasoning: str = "") -> tuple[str, str]:
+    """The model and the reasoning level this card runs with.
+
+    What the command said wins, then what the card says. The preset's own level is left out on
+    purpose: it is applied later, by `model_config`, so a card only ever carries a level somebody
+    actually chose for it -- otherwise every card would freeze today's default into itself.
+    """
+    return pick(config, model or str(meta.get("model") or "")), reasoning or str(meta.get("reasoning") or "")
+
+
+def validate(config: dict, model: str = "", reasoning: str = "") -> None:
+    """Refuse a model or a level a run could not use, while the card is still being written.
+
+    The same checks `model_config` makes, but now rather than in half an hour when the daemon picks
+    the card up and the person who chose them has gone to lunch.
+    """
+    if model:
+        pick(config, model)
+    if reasoning and reasoning not in REASONING:
+        raise ValueError(f"reasoning must be one of {', '.join(REASONING)}, not `{reasoning}`")
+
+
 def model_config(config: dict, name: str = "", reasoning: str = "") -> dict:
     """The model config a run hands to `get_model`.
 

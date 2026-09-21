@@ -153,14 +153,17 @@ def new(
     branch: list[str] = typer.Option([], "-b", "--branch", help="owner/name@branch the work starts from"),
     context: list[str] = typer.Option([], "-c", "--context", help="owner/name@branch to read beside it"),
     model: str = typer.Option("", "-m", "--model", help="Run this card with a particular model"),
+    reasoning: str = typer.Option("", "-R", "--reasoning", help="none | low | medium | high"),
 ):
     """Capture an idea as a draft."""
+    settings.validate(settings.load(), model, reasoning)
     task = tasks.create(
         idea,
         list(repo),
         branches=list(branch) or None,
         context_branches=list(context)[: settings.MAX_CONTEXT] or None,
         model=model or None,
+        reasoning=reasoning or None,
     )
     console.print(f"[bold green]Draft[/] {task.id}")
 
@@ -259,31 +262,17 @@ def list_branches(
     as_json: bool = typer.Option(False, "--json", help="For the capture overlay"),
 ):
     """The branches you can start work from, live from each repository's own remote."""
-    from rfa.planner import branches
+    from rfa.planner import options
 
-    config = settings.load()
-    configured = config.get("repos") or {}
-    wanted = list(repos) if repos else list(configured)
-    found, errors = [], []
-    for name in wanted:
-        if name not in configured:
-            errors.append(f"{name} is not listed under `repos:` in {settings.path()}")
-            continue
-        path, _, default = str(configured[name]).partition("@")
-        try:
-            names = branches(Path(path).expanduser().resolve(), default)
-        except (OSError, subprocess.SubprocessError) as e:
-            errors.append(f"{name}: {str(e).splitlines()[0]}")
-            continue
-        found += [{"repo": name, "branch": b, "default": b == default} for b in names]
+    found = options(settings.load(), list(repos) or None)
     if as_json:
-        print(json.dumps({"branches": found, "errors": errors}))
+        print(json.dumps(found))
         return
-    for name in wanted:
-        mine = [b for b in found if b["repo"] == name]
+    for name in dict.fromkeys(b["repo"] for b in found["branches"]):
+        mine = [b for b in found["branches"] if b["repo"] == name]
         listed = "  ".join(f"[bold]{b['branch']}[/]" if b["default"] else b["branch"] for b in mine)
-        console.print(f"  [dim]{name}[/]  {listed or '[dim](none)[/]'}")
-    for problem in errors:
+        console.print(f"  [dim]{name}[/]  {listed}")
+    for problem in found["errors"]:
         console.print(f"  [red]✗[/] {problem}")
 
 

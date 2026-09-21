@@ -162,6 +162,28 @@ def branches(repo: Path, default: str = "") -> list[str]:
     return sorted(set(names), key=lambda n: (n != default, n.lower()))
 
 
+def options(config: dict, names: list[str] | None = None) -> dict:
+    """Every branch you could start from, for whoever is drawing a picker.
+
+    Errors come back beside the branches rather than instead of them: one unreachable repository
+    should not empty the list for the rest.
+    """
+    configured = config.get("repos") or {}
+    found, errors = [], []
+    for name in names or list(configured):
+        if name not in configured:
+            errors.append(f"{name} is not listed under `repos:`")
+            continue
+        location, _, default = str(configured[name]).partition("@")
+        try:
+            listed = branches(Path(location).expanduser().resolve(), default)
+        except (OSError, subprocess.SubprocessError) as e:
+            errors.append(f"{name}: {str(e).splitlines()[0]}")
+            continue
+        found += [{"repo": name, "branch": b, "default": b == default} for b in listed]
+    return {"branches": found, "errors": errors}
+
+
 def unpack(env: Environment, into: str, path: Path, ref: str) -> None:
     """One repository's tree at one commit, into the container.
 
@@ -251,14 +273,14 @@ def plan_task(task: Task, config: dict, model: str = "", reasoning: str = "") ->
     repos = pin(settings.repo_paths(config, task.meta.get("repos") or [], settings.start_branches(task.meta)))
     reference = pin(settings.reference_paths(config, task.meta))
     # The card's own `model:` is what the board and `rfa new -m` set; the command still wins.
-    chosen = settings.pick(config, model or str(task.meta.get("model") or ""))
-    tasks.save(task, status="planning", model=chosen)
+    chosen, level = settings.for_task(config, task.meta, model, reasoning)
+    tasks.save(task, status="planning", model=chosen, reasoning=level or None)
     env = get_environment(config.get("environment", {}), default_type="docker")
     try:
         agent = plan(
             task.body,
             repos,
-            get_model(config=settings.model_config(config, chosen, reasoning)),
+            get_model(config=settings.model_config(config, chosen, level)),
             env,
             reference,
             **config.get("agent", {}),

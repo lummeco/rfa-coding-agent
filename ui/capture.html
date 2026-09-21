@@ -71,6 +71,11 @@
     padding: 6px 14px; border-radius: 999px; cursor: pointer;
   }
   .save:disabled { opacity: .4; cursor: default }
+  .with { display: flex; align-items: center; gap: 8px; padding: 10px 18px 0; color: var(--muted); font-size: 12px }
+  select {
+    border: 0; background: var(--chip); color: var(--text); font: inherit; font-size: 12px;
+    padding: 5px 9px; border-radius: 999px; cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -80,6 +85,11 @@
   <div class="find">
     <input id="branch" placeholder="branch…" autocomplete="off" spellcheck="false">
     <ul class="results" id="results" hidden></ul>
+  </div>
+  <div class="with">
+    run with
+    <select id="model" title="Model"></select>
+    <select id="reasoning" title="Reasoning"></select>
   </div>
   <textarea id="idea" placeholder="What should happen?"></textarea>
   <div class="foot">
@@ -101,6 +111,7 @@ let branches = [];     // [{repo, branch, default}] for the chosen repos
 let picks = [];        // [{repo, branch}] in the order picked: first per repo starts the work
 let cursor = 0;
 let loading = false;
+let setup = { models: [], model: "", reasoning: [] };
 
 // --- what has been picked ---------------------------------------------------------------------
 
@@ -108,6 +119,18 @@ let loading = false;
 // One rule, so there is no mode to be in and nothing to explain.
 const role = (pick, i) => (picks.findIndex(p => p.repo === pick.repo) === i ? "start" : "reference");
 const refs = () => picks.filter((p, i) => role(p, i) === "reference");
+
+// Blank means "whatever the workspace is set to": a card should only pin a model or a level when
+// you actually chose one, or every card would freeze today's default into itself forever.
+function drawRun() {
+    const option = (value, label, chosen) =>
+      `<option value="${esc(value)}"${value === chosen ? " selected" : ""}>${esc(label)}</option>`;
+    document.getElementById("model").innerHTML =
+      option("", setup.model ? `${setup.model} (default)` : "default", "")
+      + setup.models.map(m => option(m, m, "")).join("");
+    document.getElementById("reasoning").innerHTML =
+      option("", "reasoning: default", "") + setup.reasoning.map(r => option(r, `reasoning: ${r}`, "")).join("");
+}
 
 function drawRepos() {
   document.getElementById("repos").innerHTML = repos.map(r =>
@@ -191,6 +214,8 @@ async function save() {
     repos: [...chosen],
     branches: picks.filter((p, i) => role(p, i) === "start").map(p => `${p.repo}@${p.branch}`),
     context_branches: refs().map(p => `${p.repo}@${p.branch}`),
+    model: document.getElementById("model").value,
+    reasoning: document.getElementById("reasoning").value,
   }).catch(e => ({ error: String(e) }));
   if (reply?.error) return drawHint(reply.error, true);
   call("close");
@@ -247,7 +272,9 @@ window.rfa = {
     document.getElementById("branch").value = "";
     drawPicks();
     drawResults(false);
-    const reply = await call("repos");
+    const reply = await call("setup");
+    setup = { models: reply?.models || [], model: reply?.model || "", reasoning: reply?.reasoning || [] };
+    drawRun();
     repos = reply?.repos || [];
     chosen = new Set([...chosen].filter(r => repos.includes(r)));
     drawRepos();

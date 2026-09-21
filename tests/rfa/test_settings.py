@@ -72,3 +72,38 @@ def test_reasoning_becomes_litellms_reasoning_effort(name, asked, effort):
 def test_a_reasoning_level_nobody_understands_is_refused():
     with pytest.raises(ValueError):
         settings.model_config(settings.load("planner"), "qwen3.6", "extreme")
+
+
+@pytest.mark.parametrize(
+    ("meta", "model", "reasoning", "expected"),
+    [
+        ({}, "", "", ("qwen3.6", "")),  # nothing chosen: the stage default, and the preset's own level
+        ({"model": "qwen3.8", "reasoning": "low"}, "", "", ("qwen3.8", "low")),  # the card's own
+        ({"model": "qwen3.8", "reasoning": "low"}, "qwen3.6", "high", ("qwen3.6", "high")),  # the command's
+        ({"reasoning": "none"}, "", "", ("qwen3.6", "none")),  # a level without a model is fine
+    ],
+)
+def test_a_card_carries_its_own_model_and_level_until_a_command_says_otherwise(meta, model, reasoning, expected):
+    assert settings.for_task(settings.load("planner"), meta, model, reasoning) == expected
+
+
+def test_an_empty_level_leaves_the_preset_to_decide():
+    """`for_task` never invents a level, so a card only pins one somebody chose for it. The preset's
+    level is applied later, where changing rfa.yaml still changes what old cards run with."""
+    assert settings.for_task(settings.load("planner"), {})[1] == ""
+    assert settings.model_config(settings.load("planner"), "qwen3.6", "")["model_kwargs"]["reasoning_effort"] == "high"
+
+
+@pytest.mark.parametrize(
+    ("model", "reasoning"),
+    [("qwen9", ""), ("", "extreme"), ("qwen9", "high")],
+)
+def test_a_card_is_refused_at_capture_rather_than_half_an_hour_later(model, reasoning):
+    """The board and the overlay both check here, so a typo comes back while you are still looking."""
+    with pytest.raises((KeyError, ValueError)):
+        settings.validate(settings.load(), model, reasoning)
+
+
+def test_validate_passes_what_a_run_would_accept():
+    settings.validate(settings.load(), "qwen3.8", "none")
+    settings.validate(settings.load(), "", "")  # both blank: the workspace decides

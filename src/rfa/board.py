@@ -17,6 +17,7 @@ import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from rfa import daemon, settings, tasks
 
@@ -39,6 +40,7 @@ def snapshot() -> dict:
                 "branches": task.meta.get("branches") or [],
                 "context_branches": task.meta.get("context_branches") or [],
                 "model": task.meta.get("model"),
+                "reasoning": task.meta.get("reasoning"),
                 "created": task.meta.get("created"),
                 "error": task.meta.get("error"),
                 "landed": task.meta.get("landed") or {},
@@ -128,6 +130,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, snapshot())
         elif self.path.startswith("/api/run"):
             self._json(200, progress(self.path.rpartition("id=")[2]))
+        elif self.path.startswith("/api/branches"):
+            from rfa.planner import options
+
+            asked = parse_qs(urlparse(self.path).query).get("repos", [""])[0]
+            self._json(200, options(settings.load(), [r for r in asked.split(",") if r] or None))
         else:
             self._json(404, {"error": "not found"})
 
@@ -143,12 +150,19 @@ class Handler(BaseHTTPRequestHandler):
             if not (idea := str(payload.get("idea", "")).strip()):
                 self._json(400, {"error": "an idea needs some words"})
                 return
+            model, reasoning = str(payload.get("model") or ""), str(payload.get("reasoning") or "")
+            try:
+                settings.validate(settings.load(), model, reasoning)
+            except (KeyError, ValueError) as e:
+                self._json(400, {"error": str(e).strip("'")})
+                return
             task = tasks.create(
                 idea,
                 list(payload.get("repos") or []),
                 branches=list(payload.get("branches") or []) or None,
                 context_branches=list(payload.get("context_branches") or [])[: settings.MAX_CONTEXT] or None,
-                model=str(payload.get("model") or "") or None,
+                model=model or None,
+                reasoning=reasoning or None,
             )
             self._json(200, {"id": task.id, "stage": task.stage, "status": task.status})
             return

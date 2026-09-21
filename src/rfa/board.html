@@ -273,10 +273,26 @@ button.action.quiet { background: transparent; color: var(--text-2); padding-lef
 #strip .dot.hold { background: var(--amber); }
 #strip .shut { color: var(--amber); }
 
+/* Capture: what this one card should run with. */
+.with { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 6px; }
+.with select {
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--text);
+  font: inherit; font-size: 12px; padding: 4px 9px; border-radius: 980px; cursor: pointer;
+}
+.with .lab { color: var(--text-3); font-size: 12px; }
+.brow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 6px; }
+.brow .name { font-size: 12px; color: var(--text-3); min-width: 108px; }
+.tok {
+  display: inline-flex; align-items: center; gap: 5px; border: 1px dashed var(--line);
+  border-radius: 980px; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 3px 5px 3px 9px;
+}
+.tok button { border: 0; background: none; color: var(--text-3); cursor: pointer; font: inherit; padding: 0 2px; }
+.tok button:hover { color: var(--red); }
+
 /* The run log: a link until you want it, then the commands as they happen. */
 .watch {
   background: none; border: 0; padding: 0; font: inherit; font-size: 13px;
-  color: var(--blue); cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
+  color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
 }
 .run { margin-top: 10px; display: grid; gap: 8px; }
 .run .step {
@@ -284,7 +300,7 @@ button.action.quiet { background: transparent; color: var(--text-2); padding-lef
   font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .run .step.bad { border-left-color: var(--red); }
-.run .step.now { border-left-color: var(--blue); }
+.run .step.now { border-left-color: var(--accent); }
 .run .cmd { color: var(--text); white-space: pre-wrap; word-break: break-word; }
 .run .out {
   color: var(--text-2); white-space: pre-wrap; word-break: break-word;
@@ -427,21 +443,89 @@ function actionsFor(t) {
 }
 
 let picked = new Set();
+let options = { branches: [], errors: [] };   // what /api/branches said for the picked repos
+let start = {};                                // repo -> the branch its work begins on
+let refs = [];                                 // [{repo, branch}] read beside it, at most MAX_REF
+const MAX_REF = 3;
 
 function showCapture() {
   openId = null;
   picked = new Set();
+  options = { branches: [], errors: [] };
+  start = {};
+  refs = [];
   document.getElementById("d-title").textContent = "New idea";
   document.getElementById("d-sub").textContent = "It lands in Draft. You decide when it gets planned.";
-  document.getElementById("d-body").innerHTML =
-    `<textarea id="idea" placeholder="What do you want to happen?"></textarea>
-     <h2 style="font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--text-3);margin:0 0 8px">Repositories</h2>
-     <div class="pick">${(state.repos || []).map(r =>
-       `<button data-repo="${esc(r)}" aria-pressed="false">${esc(r.split("/").pop())}</button>`).join("")}</div>`;
+  drawCapture();
   document.getElementById("d-actions").innerHTML =
     `<button class="action primary" id="save">Save draft</button><span class="hint" style="color:var(--text-3);font-size:12px">⌘↵</span>`;
   openPanel();
   document.getElementById("idea").focus();
+}
+
+function heading(text) {
+  return `<h2 style="font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--text-3);margin:0 0 8px">${text}</h2>`;
+}
+
+// Redrawn whole on every change, and the idea is carried across by hand: the panel is small enough
+// that a full redraw is simpler than tracking which parts went stale.
+function drawCapture() {
+  const body = document.getElementById("d-body");
+  const idea = document.getElementById("idea")?.value ?? "";
+  const models = state.system?.models || [];
+  const levels = state.system?.reasoning || [];
+  // A blank choice means "whatever the workspace is set to". A card should only pin a model or a
+  // level when you picked one, or it would freeze today's default into itself forever.
+  const pick = (id, blank, values) =>
+    `<select id="${id}"><option value="">${blank}</option>${values.map(v =>
+      `<option value="${esc(v)}">${esc(v)}</option>`).join("")}</select>`;
+
+  body.innerHTML =
+    `<textarea id="idea" placeholder="What do you want to happen?">${esc(idea)}</textarea>`
+    + heading("Repositories")
+    + `<div class="pick">${(state.repos || []).map(r =>
+        `<button data-repo="${esc(r)}" aria-pressed="${picked.has(r)}">${esc(r.split("/").pop())}</button>`).join("")}</div>`
+    + (picked.size ? heading("Branches") + drawBranches() : "")
+    + heading("Run with")
+    + `<div class="with">${pick("cap-model", state.system?.model ? `${esc(state.system.model)} (default)` : "default", models)}`
+    + `${pick("cap-reasoning", "reasoning: default", levels)}</div>`;
+}
+
+function drawBranches() {
+  if (!options.branches.length && !options.errors.length) return `<div class="hint">reading branches…</div>`;
+  const rows = [...picked].map(repo => {
+    const mine = options.branches.filter(b => b.repo === repo);
+    if (!mine.length) return "";
+    const chosen = start[repo];
+    const mineRefs = refs.filter(r => r.repo === repo);
+    return `<div class="brow">
+      <span class="name">${esc(repo.split("/").pop())}</span>
+      <select data-start="${esc(repo)}" title="Where the work starts">${mine.map(b =>
+        `<option${b.branch === chosen ? " selected" : ""}>${esc(b.branch)}</option>`).join("")}</select>
+      <select data-ref="${esc(repo)}" title="Also read this branch">
+        <option value="">also read…</option>${mine.filter(b => b.branch !== chosen
+          && !mineRefs.some(r => r.branch === b.branch)).map(b => `<option>${esc(b.branch)}</option>`).join("")}
+      </select>
+      ${mineRefs.map(r => `<span class="tok">${esc(r.branch)}<button data-drop="${esc(r.repo)}@${esc(r.branch)}">✕</button></span>`).join("")}
+    </div>`;
+  }).join("");
+  const note = options.errors.length ? `<div class="hint">${esc(options.errors[0])}</div>` : "";
+  return rows + note + `<div class="hint">${refs.length}/${MAX_REF} reference branches — read, never changed.</div>`;
+}
+
+async function loadBranches() {
+  options = { branches: [], errors: [] };
+  drawCapture();
+  if (!picked.size) return;
+  const res = await api(`/api/branches?repos=${encodeURIComponent([...picked].join(","))}`);
+  options = res.ok ? await res.json() : { branches: [], errors: ["could not read branches"] };
+  // Write down the branch each select is showing, so the card says what you were looking at rather
+  // than falling back to whatever rfa.yaml happens to be pinned to.
+  for (const repo of picked) {
+    const mine = options.branches.filter(b => b.repo === repo);
+    if (mine.length && !start[repo]) start[repo] = (mine.find(b => b.default) || mine[0]).branch;
+  }
+  drawCapture();
 }
 
 async function saveIdea() {
@@ -450,7 +534,14 @@ async function saveIdea() {
   const res = await api("/api/new", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idea, repos: [...picked] }),
+    body: JSON.stringify({
+      idea,
+      repos: [...picked],
+      branches: [...picked].filter(r => start[r]).map(r => `${r}@${start[r]}`),
+      context_branches: refs.map(r => `${r.repo}@${r.branch}`),
+      model: document.getElementById("cap-model")?.value || "",
+      reasoning: document.getElementById("cap-reasoning")?.value || "",
+    }),
   });
   if (!res.ok) { alert((await res.json()).error); return; }
   closeDetail();
@@ -511,15 +602,15 @@ function showDetail(id) {
   document.getElementById("d-title").textContent = t.title;
   document.getElementById("d-sub").textContent =
     `${LABEL[t.stage] || t.stage} · ${t.status}${t.attempts ? ` · ${t.attempts} retries` : ""}`
-    + `${t.model ? ` · ${t.model}` : ""} · ${when(t.created)}`;
+    + `${t.model ? ` · ${t.model}` : ""}${t.reasoning ? ` (${t.reasoning})` : ""} · ${when(t.created)}`;
   const from = (t.branches || []).map(b => b.split("@")[1]).join(", ");
-  const refs = (t.context_branches || []).map(b => b.split("/").pop()).join(", ");
+  const reading = (t.context_branches || []).map(b => b.split("/").pop()).join(", ");
 
   let head = "";
   if (t.error) head += `<div class="note bad">${esc(t.error)}</div>`;
-  if (from || refs)
+  if (from || reading)
     head += `<div class="note">${from ? `Starts from <code>${esc(from)}</code>` : ""}`
-      + `${refs ? `${from ? " · " : ""}reading <code>${esc(refs)}</code>` : ""}</div>`;
+      + `${reading ? `${from ? " · " : ""}reading <code>${esc(reading)}</code>` : ""}</div>`;
   const landed = Object.entries(t.landed || {});
   if (landed.length)
     head += `<div class="note">Landed on ${landed.map(([r, b]) => `<code>${esc(b)}</code> in ${esc(r)}`).join(", ")} — local, nothing pushed.</div>`;
@@ -594,11 +685,34 @@ document.getElementById("d-body").addEventListener("click", e => {
     watching = watching === openId ? null : openId;
     return showDetail(openId);
   }
+  if (e.target.closest("button[data-drop]")) {
+    const [repo, branch] = e.target.closest("button[data-drop]").dataset.drop.split(/@(.*)/s);
+    refs = refs.filter(r => !(r.repo === repo && r.branch === branch));
+    return drawCapture();
+  }
   const chip = e.target.closest("button[data-repo]");
   if (!chip) return;
-  const on = chip.getAttribute("aria-pressed") === "true";
-  chip.setAttribute("aria-pressed", String(!on));
-  on ? picked.delete(chip.dataset.repo) : picked.add(chip.dataset.repo);
+  const repo = chip.dataset.repo;
+  picked.has(repo) ? picked.delete(repo) : picked.add(repo);
+  delete start[repo];
+  refs = refs.filter(r => picked.has(r.repo));
+  loadBranches();
+});
+
+// The two branch selects: one says where the work starts, the other adds something to read.
+document.getElementById("d-body").addEventListener("change", e => {
+  const from = e.target.closest("select[data-start]");
+  if (from) {
+    const repo = from.dataset.start;
+    start[repo] = from.value;
+    refs = refs.filter(r => !(r.repo === repo && r.branch === from.value));
+    return drawCapture();
+  }
+  const also = e.target.closest("select[data-ref]");
+  if (!also || !also.value) return;
+  if (refs.length >= MAX_REF) { also.value = ""; return; }
+  refs.push({ repo: also.dataset.ref, branch: also.value });
+  drawCapture();
 });
 document.getElementById("close").addEventListener("click", closeDetail);
 document.getElementById("scrim").addEventListener("click", closeDetail);

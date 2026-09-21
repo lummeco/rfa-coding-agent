@@ -36,6 +36,7 @@ struct Status: Decodable {
     let home: String
     let model: String
     let models: [String]
+    let reasoning: [String]
     let repos: [String]
     let boardUrl: String
     let services: [String: Int]  // 0 when that one is not running
@@ -198,8 +199,16 @@ final class Overlay: NSObject, WKScriptMessageHandlerWithReply {
         case "close":
             hide()
             replyHandler(nil, nil)
-        case "repos":
-            background({ Rfa.status()?.repos ?? [] }, { replyHandler(["repos": $0], nil) })
+        case "setup":
+            // One call: the box needs the repositories, the models and the levels before it can draw.
+            background({ Rfa.status() }) { status in
+                replyHandler([
+                    "repos": status?.repos ?? [],
+                    "models": status?.models ?? [],
+                    "model": status?.model ?? "",
+                    "reasoning": status?.reasoning ?? [],
+                ], nil)
+            }
         case "branches":
             let repos = (body["repos"] as? [String] ?? []).filter(Rfa.isRepoId)
             guard !repos.isEmpty else { return replyHandler(["branches": [], "errors": []], nil) }
@@ -215,6 +224,9 @@ final class Overlay: NSObject, WKScriptMessageHandlerWithReply {
             for repo in repos { args += ["-r", repo] }
             for pick in (body["branches"] as? [String] ?? []).filter(Rfa.isRepoBranch) { args += ["-b", pick] }
             for pick in (body["context_branches"] as? [String] ?? []).filter(Rfa.isRepoBranch) { args += ["-c", pick] }
+            // Blank means the workspace default; `rfa new` refuses anything it does not know.
+            if let model = body["model"] as? String, !model.isEmpty { args += ["-m", model] }
+            if let level = body["reasoning"] as? String, !level.isEmpty { args += ["-R", level] }
             background({ Rfa.run(args) }) { result in
                 replyHandler(result.ok ? ["ok": true] : ["error": String(result.output.suffix(300))], nil)
             }
@@ -261,6 +273,7 @@ final class Controller: NSObject, NSMenuDelegate {
     var status: Status?
     var overlay: Overlay?
     var busy: String?
+    var hotKeyProblem: String?
     var timer: Timer?
     var isOpen = false
     var announced: String?
@@ -340,7 +353,8 @@ final class Controller: NSObject, NSMenuDelegate {
         menu.addItem(action("Restart", #selector(restart), enabled: up))
         menu.addItem(action("Down", #selector(bringDown), enabled: up))
         menu.addItem(.separator())
-        menu.addItem(action("New Idea    ⌥Space", #selector(capture)))
+        menu.addItem(action(hotKeyProblem == nil ? "New Idea    ⌥Space" : "New Idea", #selector(capture)))
+        if let hotKeyProblem { menu.addItem(note("   \(hotKeyProblem) — use this item instead")) }
         menu.addItem(models())
         menu.addItem(.separator())
         menu.addItem(action("Open Board", #selector(openBoard), enabled: status?.boardUp ?? false))
@@ -477,6 +491,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerHotKey()
     }
 
+    /// Registration fails when another app already owns the combination, and it fails quietly --
+    /// so the status is kept and the menu says so, rather than leaving you pressing a dead key.
     func registerHotKey() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetApplicationEventTarget(), { _, _, context in
@@ -485,7 +501,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return noErr
         }, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), nil)
         let id = EventHotKeyID(signature: OSType(0x5246_4141), id: 1)  // 'RFAA'
-        RegisterEventHotKey(hotKeyCode, hotKeyModifiers, id, GetApplicationEventTarget(), 0, &hotKey)
+        let status = RegisterEventHotKey(hotKeyCode, hotKeyModifiers, id, GetApplicationEventTarget(), 0, &hotKey)
+        controller.hotKeyProblem = status == noErr ? nil : "⌥Space is taken (OSStatus \(status))"
     }
 }
 

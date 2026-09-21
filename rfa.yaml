@@ -1,0 +1,35 @@
+# Workspace settings. Anything at the top level applies to both stages; a `planner:` or `coder:`
+# block applies to that one only. See src/rfa/settings.py.
+
+# The repositories tasks may name in their `repos:` front matter, mapped to local checkouts.
+# The last segment is the name the packet and the container use: `lummepro-web/src/...`.
+# Everything is pinned to `@main` on purpose: a run must not depend on what you happen to have
+# checked out. Change the ref here, or per task, when work should start somewhere else.
+repos:
+  lummeco/lummepro-web: ~/dev/lummepro-web@main
+  lummeco/customer-app: ~/dev/customer-app@main
+  lummeco/customer-portal: ~/dev/customer-portal@main
+  lummeco/deliveryPlanner: ~/dev/delivery-planner@main
+  lummeco/esignature-service: ~/dev/esignature-service@main
+  lummeco/pricing-calculator: ~/dev/pricing-calculator@main
+  lummeco/lummecofi: ~/dev/lummecofi@main
+  lummeco/base: ~/dev/base@main
+  lummeco/infra-ops: ~/dev/infra-ops@main
+  lummeco/rfa-coding-agent: ~/dev/rfa-coding-agent@main
+
+model:
+  model_name: ollama_chat/rfa-qwen3.6-35b
+  # Ollama models are not in litellm's price registry, and a missing price is not a reason to stop.
+  cost_tracking: ignore_errors
+
+# The served model is a variant of the MoE with a context window big enough for the harness: mini's
+# instructions and tools are ~17k tokens before any work, and Ollama silently drops the start of
+# anything longer than num_ctx. `rfa up` creates it if it is not there.
+ollama:
+  name: rfa-qwen3.6-35b
+  from: qwen3.6:35b-a3b-q8_0
+  num_ctx: 131072
+
+coder:
+  environment:
+    image: node:22-bookworm

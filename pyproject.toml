@@ -91,6 +91,8 @@ mini = "minisweagent.run.mini:app"
 mini-swe-agent = "minisweagent.run.mini:app"
 mini-extra = "minisweagent.run.utilities.mini_extra:main"
 mini-e= "minisweagent.run.utilities.mini_extra:main"
+rfa = "rfa.cli:app"
+rfa-plan = "rfa.run.plan:app"
 
 [tool.setuptools]
 include-package-data = true
@@ -100,10 +102,11 @@ version = {attr = "minisweagent.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["minisweagent*"]
+include = ["minisweagent*", "rfa*"]
 
 [tool.setuptools.package-data]
 minisweagent = ["config/**/*"]
+rfa = ["config/**/*", "board.html"]
 
 [tool.ruff]
 # Exclude a variety of commonly ignored directories.

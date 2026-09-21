@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RFA</title>
+<style>
+:root {
+  --bg: #f5f5f7;
+  --surface: #ffffff;
+  --surface-2: #fbfbfd;
+  --text: #1d1d1f;
+  --text-2: #6e6e73;
+  --text-3: #8e8e93;
+  --line: rgba(0, 0, 0, 0.08);
+  --accent: #0071e3;
+  --green: #1d9d4e;
+  --amber: #b26a00;
+  --red: #d70015;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.06);
+  --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.06), 0 12px 32px rgba(0, 0, 0, 0.10);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #000000;
+    --surface: #1c1c1e;
+    --surface-2: #2c2c2e;
+    --text: #f5f5f7;
+    --text-2: #98989d;
+    --text-3: #6e6e73;
+    --line: rgba(255, 255, 255, 0.10);
+    --accent: #0a84ff;
+    --green: #30d158;
+    --amber: #ff9f0a;
+    --red: #ff453a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.30), 0 6px 20px rgba(0, 0, 0, 0.40);
+    --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.40), 0 12px 32px rgba(0, 0, 0, 0.55);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #000000; --surface: #1c1c1e; --surface-2: #2c2c2e;
+  --text: #f5f5f7; --text-2: #98989d; --text-3: #6e6e73;
+  --line: rgba(255, 255, 255, 0.10);
+  --accent: #0a84ff; --green: #30d158; --amber: #ff9f0a; --red: #ff453a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.30), 0 6px 20px rgba(0, 0, 0, 0.40);
+  --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.40), 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 22px 32px 18px;
+  flex: none;
+}
+header h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+header .count { color: var(--text-3); font-size: 13px; }
+header .spacer { flex: 1; }
+header .hint { color: var(--text-3); font-size: 12px; }
+
+#board {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(268px, 1fr);
+  gap: 16px;
+  padding: 0 32px 28px;
+  overflow-x: auto;
+}
+
+.column { display: flex; flex-direction: column; min-height: 0; }
+.column h2 {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin: 0 0 12px 4px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+}
+.column h2 .n {
+  font-variant-numeric: tabular-nums;
+  background: var(--line);
+  color: var(--text-2);
+  border-radius: 20px;
+  padding: 1px 7px;
+  letter-spacing: 0;
+}
+.cards { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding: 2px 2px 8px; }
+
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px 15px;
+  cursor: pointer;
+  text-align: left;
+  border: none;
+  color: inherit;
+  font: inherit;
+  display: block;
+  width: 100%;
+  transition: transform .18s cubic-bezier(.2,.7,.3,1), box-shadow .18s ease;
+}
+.card:hover { transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.card:active { transform: translateY(0); }
+.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card.failed { box-shadow: var(--shadow), inset 3px 0 0 var(--red); }
+.card .title {
+  font-weight: 550;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  margin-bottom: 9px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.status { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-2); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); flex: none; }
+.dot.green { background: var(--green); }
+.dot.amber { background: var(--amber); }
+.dot.red { background: var(--red); }
+.dot.blue { background: var(--accent); }
+.dot.pulse { animation: pulse 1.8s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+.retry {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 14%, transparent);
+  border-radius: 20px;
+  padding: 1px 7px;
+}
+.repo { font-size: 11px; color: var(--text-3); }
+.cx { display: inline-flex; gap: 3px; margin-left: auto; }
+.cx i { width: 4px; height: 4px; border-radius: 50%; background: var(--line); }
+.cx i.on { background: var(--text-3); }
+
+.empty {
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  padding: 18px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+#scrim {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(3px);
+  opacity: 0; pointer-events: none;
+  transition: opacity .22s ease;
+}
+#scrim.open { opacity: 1; pointer-events: auto; }
+
+#detail {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: min(560px, 100vw);
+  background: var(--surface);
+  box-shadow: var(--shadow-lift);
+  transform: translateX(100%);
+  transition: transform .28s cubic-bezier(.32,.72,0,1);
+  display: flex; flex-direction: column;
+}
+#detail.open { transform: none; }
+#detail header { padding: 20px 26px 14px; border-bottom: 1px solid var(--line); display: block; }
+#detail h3 { margin: 0 0 8px; font-size: 19px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.3; }
+#detail .sub { color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+#detail .body { padding: 20px 26px 26px; overflow-y: auto; flex: 1; }
+#detail footer {
+  padding: 14px 26px 20px;
+  border-top: 1px solid var(--line);
+  display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+}
+#close {
+  position: absolute; top: 16px; right: 18px;
+  width: 28px; height: 28px; border-radius: 50%;
+  border: none; background: var(--surface-2); color: var(--text-2);
+  font-size: 15px; line-height: 1; cursor: pointer;
+}
+#close:hover { color: var(--text); }
+
+button.action {
+  font: inherit; font-size: 14px; font-weight: 500;
+  border: none; border-radius: 980px; padding: 8px 18px;
+  background: var(--surface-2); color: var(--text); cursor: pointer;
+  transition: opacity .15s ease;
+}
+button.action:hover { opacity: .8; }
+button.action.primary { background: var(--accent); color: #fff; }
+button.action.quiet { background: transparent; color: var(--text-2); padding-left: 6px; }
+
+.note {
+  background: var(--surface-2);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--text-2);
+  margin-bottom: 18px;
+}
+.note.bad { color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }
+
+#idea {
+  width: 100%; min-height: 150px; resize: vertical;
+  font: inherit; color: var(--text); background: var(--surface-2);
+  border: none; border-radius: 12px; padding: 14px 16px; margin-bottom: 18px;
+}
+#idea:focus { outline: 2px solid var(--accent); }
+.pick { display: flex; flex-wrap: wrap; gap: 7px; }
+.pick button {
+  font: inherit; font-size: 12px; cursor: pointer;
+  border: 1px solid var(--line); background: transparent; color: var(--text-2);
+  border-radius: 980px; padding: 4px 11px;
+}
+.pick button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.note code { font-size: 12px; }
+
+.md h1 { font-size: 17px; font-weight: 600; margin: 0 0 14px; letter-spacing: -0.01em; }
+.md h2 {
+  font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--text-3); margin: 22px 0 8px;
+}
+.md p { margin: 0 0 10px; }
+.md ul, .md ol { margin: 0 0 10px; padding-left: 20px; }
+.md li { margin-bottom: 4px; }
+.md li ul { margin-top: 4px; }
+.md pre {
+  background: var(--surface-2); border-radius: 10px; padding: 12px 14px;
+  overflow-x: auto; margin: 0 0 12px;
+}
+.md code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; }
+.md .hint { color: var(--text-3); font-size: 13px; font-style: italic; }
+
+.timeline { list-style: none; padding: 0; margin: 8px 0 0; }
+.timeline li {
+  display: flex; gap: 10px; align-items: baseline;
+  font-size: 12px; color: var(--text-2); padding: 5px 0;
+}
+.timeline time { color: var(--text-3); font-variant-numeric: tabular-nums; flex: none; }
+
+@media (max-width: 700px) {
+  header { padding: 18px 20px 14px; }
+  #board { padding: 0 20px 20px; grid-auto-columns: minmax(252px, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>RFA</h1>
+  <span class="count" id="count"></span>
+  <span class="spacer"></span>
+  <button class="action primary" id="capture">New idea</button>
+  <span class="hint"><kbd>N</kbd> new · <kbd>R</kbd> refresh · <kbd>Esc</kbd> close</span>
+</header>
+
+<div id="board"></div>
+
+<div id="scrim"></div>
+<aside id="detail" aria-hidden="true">
+  <header>
+    <button id="close" title="Close">✕</button>
+    <h3 id="d-title"></h3>
+    <div class="sub" id="d-sub"></div>
+  </header>
+  <div class="body" id="d-body"></div>
+  <footer id="d-actions"></footer>
+</aside>
+
+<script>
+const LABEL = { "under-work": "Under work", "draft": "Draft", "planning": "Planning", "todo": "To do", "done": "Done" };
+const TONE = { ready: "green", done: "green", shipped: "green", failed: "red", planning: "amber", queued: "", coding: "blue", starting: "blue", todo: "blue" };
+const LIVE = new Set(["planning", "coding", "checking", "starting"]);
+
+let state = { tasks: [], events: [], stages: [] };
+let openId = null;
+
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/** Just enough markdown for a packet: headings, bullets, numbers, fenced code, inline code. */
+function md(src) {
+  const lines = String(src || "").split("\n");
+  let html = "", list = null, code = false;
+  const closeList = () => { if (list) { html += `</${list}>`; list = null; } };
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (line.trim().startsWith("```")) {
+      closeList();
+      html += code ? "</code></pre>" : "<pre><code>";
+      code = !code;
+      continue;
+    }
+    if (code) { html += esc(raw) + "\n"; continue; }
+    let m;
+    if ((m = line.match(/^#\s+(.*)/))) { closeList(); html += `<h1>${inline(m[1])}</h1>`; }
+    else if ((m = line.match(/^##\s+(.*)/))) { closeList(); html += `<h2>${inline(m[1])}</h2>`; }
+    else if ((m = line.match(/^(\s*)[-*]\s+(.*)/))) {
+      const nested = m[1].length >= 2;
+      if (list !== "ul") { closeList(); html += "<ul>"; list = "ul"; }
+      html += nested ? `<li style="list-style:circle">${inline(m[2])}</li>` : `<li>${inline(m[2])}</li>`;
+    }
+    else if ((m = line.match(/^\d+\.\s+(.*)/))) {
+      if (list !== "ol") { closeList(); html += "<ol>"; list = "ol"; }
+      html += `<li>${inline(m[1])}</li>`;
+    }
+    else if (!line.trim()) { closeList(); }
+    else if (/^These are hints\./.test(line.trim())) { closeList(); html += `<p class="hint">${inline(line)}</p>`; }
+    else { closeList(); html += `<p>${inline(line)}</p>`; }
+  }
+  closeList();
+  if (code) html += "</code></pre>";
+  return html;
+}
+const inline = s => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+
+function when(iso) {
+  if (!iso) return "";
+  const then = new Date(iso), mins = Math.round((Date.now() - then) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  if (mins < 60 * 24) return `${Math.round(mins / 60)}h ago`;
+  return then.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function card(t) {
+  const tone = TONE[t.status] || "";
+  const live = LIVE.has(t.status) ? " pulse" : "";
+  const dots = t.complexity
+    ? `<span class="cx" title="complexity ${t.complexity}/5">${[1,2,3,4,5].map(n => `<i class="${n <= t.complexity ? "on" : ""}"></i>`).join("")}</span>`
+    : "";
+  return `<button class="card ${t.status === "failed" ? "failed" : ""}" data-id="${esc(t.id)}">
+    <div class="title">${esc(t.title)}</div>
+    <div class="meta">
+      <span class="status"><span class="dot ${tone}${live}"></span>${esc(t.status)}</span>
+      ${t.attempts ? `<span class="retry" title="${t.attempts} retries">↻ ${t.attempts}</span>` : ""}
+      ${t.repos.length ? `<span class="repo">${esc(t.repos.map(r => r.split("/").pop()).join(", "))}</span>` : ""}
+      ${dots}
+    </div>
+  </button>`;
+}
+
+function render() {
+  document.getElementById("count").textContent =
+    state.tasks.length ? `${state.tasks.length} task${state.tasks.length > 1 ? "s" : ""}` : "";
+  document.getElementById("board").innerHTML = state.stages.map(stage => {
+    const inStage = state.tasks.filter(t => t.stage === stage);
+    return `<section class="column">
+      <h2>${esc(LABEL[stage] || stage)}<span class="n">${inStage.length}</span></h2>
+      <div class="cards">${inStage.map(card).join("") || `<div class="empty">Nothing here</div>`}</div>
+    </section>`;
+  }).join("");
+  if (openId) showDetail(openId);
+}
+
+function actionsFor(t) {
+  const move = (to, label, cls = "") =>
+    `<button class="action ${cls}" data-to="${to}">${label}</button>`;
+  if (t.stage === "draft") return move("planning", "Plan it", "primary");
+  if (t.stage === "planning" && t.status === "queued") return move("draft", "Back to draft", "quiet");
+  if (t.stage === "planning" && t.status === "ready") return move("todo", "Approve", "primary") + move("draft", "Send back", "quiet");
+  if (t.stage === "planning" && t.status === "failed") return move("draft", "Back to draft", "");
+  if (t.stage === "todo") return move("planning", "Re-plan", "quiet");
+  if (t.stage === "done") return move("todo", "Run again", "") + move("planning", "Re-plan", "quiet");
+  if (t.stage === "under-work") return move("todo", "Requeue", "quiet");
+  return "";
+}
+
+let picked = new Set();
+
+function showCapture() {
+  openId = null;
+  picked = new Set();
+  document.getElementById("d-title").textContent = "New idea";
+  document.getElementById("d-sub").textContent = "It lands in Draft. You decide when it gets planned.";
+  document.getElementById("d-body").innerHTML =
+    `<textarea id="idea" placeholder="What do you want to happen?"></textarea>
+     <h2 style="font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--text-3);margin:0 0 8px">Repositories</h2>
+     <div class="pick">${(state.repos || []).map(r =>
+       `<button data-repo="${esc(r)}" aria-pressed="false">${esc(r.split("/").pop())}</button>`).join("")}</div>`;
+  document.getElementById("d-actions").innerHTML =
+    `<button class="action primary" id="save">Save draft</button><span class="hint" style="color:var(--text-3);font-size:12px">⌘↵</span>`;
+  openPanel();
+  document.getElementById("idea").focus();
+}
+
+async function saveIdea() {
+  const idea = document.getElementById("idea").value.trim();
+  if (!idea) return;
+  const res = await fetch("/api/new", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idea, repos: [...picked] }),
+  });
+  if (!res.ok) { alert((await res.json()).error); return; }
+  closeDetail();
+  refresh();
+}
+
+function openPanel() {
+  document.getElementById("detail").classList.add("open");
+  document.getElementById("detail").setAttribute("aria-hidden", "false");
+  document.getElementById("scrim").classList.add("open");
+}
+
+function showDetail(id) {
+  const t = state.tasks.find(x => x.id === id);
+  if (!t) return closeDetail();
+  openId = id;
+  document.getElementById("d-title").textContent = t.title;
+  document.getElementById("d-sub").textContent =
+    `${LABEL[t.stage] || t.stage} · ${t.status}${t.attempts ? ` · ${t.attempts} retries` : ""} · ${when(t.created)}`;
+
+  let head = "";
+  if (t.error) head += `<div class="note bad">${esc(t.error)}</div>`;
+  const landed = Object.entries(t.branches || {});
+  if (landed.length)
+    head += `<div class="note">Landed on ${landed.map(([r, b]) => `<code>${esc(b)}</code> in ${esc(r)}`).join(", ")} — local, nothing pushed.</div>`;
+  if (t.stage === "draft") head += `<div class="note">A draft. <strong>Plan it</strong> hands it to the planner.</div>`;
+  if (t.status === "queued") head += `<div class="note">Waiting for the planner — <code>rfa plan</code></div>`;
+  if (t.open_questions?.length)
+    head += `<div class="note"><strong>Open questions</strong><ul>${t.open_questions.map(q => `<li>${esc(q)}</li>`).join("")}</ul></div>`;
+
+  const mine = state.events.filter(e => e.id === t.id);
+  const history = mine.length
+    ? `<h2>History</h2><ul class="timeline">${mine.map(e =>
+        `<li><time>${when(e.ts)}</time><span>${esc(e.type)}${e.to ? ` → ${esc(e.to)}` : ""}</span></li>`).join("")}</ul>`
+    : "";
+
+  // The packet opens with "# Task" and its title; the panel header already says that.
+  const body = String(t.body || "").replace(/^\s*#\s+Task\s*\n+[^\n]*\n/, "");
+  document.getElementById("d-body").innerHTML = head + `<div class="md">${md(body)}${history}</div>`;
+  document.getElementById("d-actions").innerHTML = actionsFor(t);
+  openPanel();
+}
+
+function closeDetail() {
+  openId = null;
+  document.getElementById("detail").classList.remove("open");
+  document.getElementById("detail").setAttribute("aria-hidden", "true");
+  document.getElementById("scrim").classList.remove("open");
+}
+
+async function refresh() {
+  const res = await fetch("/api/tasks");
+  state = await res.json();
+  render();
+}
+
+async function move(id, to) {
+  const res = await fetch("/api/move", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, to }),
+  });
+  if (!res.ok) { alert((await res.json()).error); return; }
+  closeDetail();
+  refresh();
+}
+
+document.getElementById("board").addEventListener("click", e => {
+  const el = e.target.closest(".card");
+  if (el) showDetail(el.dataset.id);
+});
+document.getElementById("d-actions").addEventListener("click", e => {
+  if (e.target.closest("#save")) return saveIdea();
+  const el = e.target.closest("button[data-to]");
+  if (el && openId) move(openId, el.dataset.to);
+});
+document.getElementById("capture").addEventListener("click", showCapture);
+document.getElementById("d-body").addEventListener("click", e => {
+  const chip = e.target.closest("button[data-repo]");
+  if (!chip) return;
+  const on = chip.getAttribute("aria-pressed") === "true";
+  chip.setAttribute("aria-pressed", String(!on));
+  on ? picked.delete(chip.dataset.repo) : picked.add(chip.dataset.repo);
+});
+document.getElementById("close").addEventListener("click", closeDetail);
+document.getElementById("scrim").addEventListener("click", closeDetail);
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") return closeDetail();
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && document.getElementById("idea")) return saveIdea();
+  if (e.target.matches("textarea, input")) return;  // typing an idea, not pressing a shortcut
+  if (e.key.toLowerCase() === "n") { e.preventDefault(); showCapture(); }
+  if (e.key.toLowerCase() === "r" && !e.metaKey && !e.ctrlKey) refresh();
+});
+
+refresh();
+setInterval(refresh, 4000);
+</script>
+</body>
+</html>

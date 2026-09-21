@@ -1,0 +1,10 @@
+#!/bin/sh
+# `rfa <command>` from anywhere, against THIS checkout, with the workspace at its root.
+# Put it on PATH once:  ln -sf "$PWD/bin/rfa" /opt/homebrew/bin/rfa
+HERE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+export RFA_HOME="${RFA_HOME:-$HERE}"
+export MSWEA_SILENT_STARTUP="${MSWEA_SILENT_STARTUP:-1}"
+export PYTHONPATH="$HERE/src${PYTHONPATH:+:$PYTHONPATH}"
+PY="$HERE/.venv/bin/python"
+[ -x "$PY" ] || PY="${RFA_PYTHON:-python3}"
+cd "$HERE" && exec "$PY" -m rfa "$@"

@@ -121,6 +121,9 @@ let cursor = 0;
 let loading = false;
 let setup = { models: [], model: "", reasoning: [] };
 
+// The four reasoning levels are fixed — they never change.
+const REASONING_LEVELS = ["none", "low", "medium", "high"];
+
 // --- what has been picked ---------------------------------------------------------------------
 
 // The first branch picked for a repository is where its work starts; the rest are reference code.
@@ -134,10 +137,9 @@ function drawRun() {
     const option = (value, label, chosen) =>
       `<option value="${esc(value)}"${value === chosen ? " selected" : ""}>${esc(label)}</option>`;
     document.getElementById("model").innerHTML =
-      option("", setup.model ? `${setup.model} (default)` : "default", "")
-      + setup.models.map(m => option(m, m, "")).join("");
+      setup.models.map(m => option(m, m, setup.model || "")).join("");
     document.getElementById("reasoning").innerHTML =
-      option("", "reasoning: default", "") + setup.reasoning.map(r => option(r, `reasoning: ${r}`, "")).join("");
+      REASONING_LEVELS.map(r => option(r, r, "none")).join("");
 }
 
 function drawRepos() {
@@ -281,7 +283,7 @@ window.rfa = {
     drawPicks();
     drawResults(false);
     const reply = await call("setup");
-    setup = { models: reply?.models || [], model: reply?.model || "", reasoning: reply?.reasoning || [] };
+    setup = { models: reply?.models || [], model: reply?.model || "", reasoning: [] };
     drawRun();
     repos = reply?.repos || [];
     chosen = new Set([...chosen].filter(r => repos.includes(r)));

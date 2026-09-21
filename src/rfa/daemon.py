@@ -122,7 +122,7 @@ def report() -> dict:
         # is empty, where `settings.pick` is right to refuse.
         "model": settings.chosen() or workspace.get("default_model") or "",
         "models": sorted(settings.presets(workspace)),
-        "reasoning": list(settings.REASONING),
+        "reasoning": settings.chosen_reasoning() or "",
         "repos": sorted(workspace.get("repos") or {}),
         "board_url": service.url(),
         # 0 rather than null: not running is a state, not missing information.

@@ -115,6 +115,17 @@ def choose(name: str) -> None:
     path.write_text(name)
 
 
+def chosen_reasoning() -> str:
+    """The reasoning level the menu bar picked, if anyone has picked one."""
+    path = tasks.home() / "var" / "reasoning"
+    return path.read_text().strip() if path.exists() else ""
+
+
+def choose_reasoning(name: str) -> None:
+    (path := tasks.home() / "var" / "reasoning").parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(name)
+
+
 def pick(config: dict, name: str = "") -> str:
     """Which preset a run uses, in falling order: what the command said, what `rfa model` picked,
     then the stage's own `default_model`.

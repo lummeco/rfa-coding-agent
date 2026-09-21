@@ -36,7 +36,7 @@ struct Status: Decodable {
     let home: String
     let model: String
     let models: [String]
-    let reasoning: [String]
+    let reasoning: String
     let repos: [String]
     let boardUrl: String
     let services: [String: Int]  // 0 when that one is not running
@@ -370,6 +370,7 @@ final class Controller: NSObject, NSMenuDelegate {
         menu.addItem(action(hotKeyProblem == nil ? "New Idea    ⌥Space" : "New Idea", #selector(capture)))
         if let hotKeyProblem { menu.addItem(note("   \(hotKeyProblem) — use this item instead")) }
         menu.addItem(models())
+        menu.addItem(reasoning())
         menu.addItem(.separator())
         menu.addItem(action("Open Board", #selector(openBoard), enabled: status?.boardUp ?? false))
         menu.addItem(action("Open Tasks Folder", #selector(openTasks)))
@@ -397,6 +398,23 @@ final class Controller: NSObject, NSMenuDelegate {
             submenu.addItem(choice)
         }
         if submenu.items.isEmpty { submenu.addItem(note("none in rfa.yaml")) }
+        item.submenu = submenu
+        item.isEnabled = true
+        return item
+    }
+
+    /// Picking one writes it down for the next run; it never interrupts one already going.
+    func reasoning() -> NSMenuItem {
+        let item = NSMenuItem(title: "Reasoning", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        for level in ["none", "low", "medium", "high"] {
+            let choice = NSMenuItem(title: level, action: #selector(chooseReasoning(_:)), keyEquivalent: "")
+            choice.target = self
+            choice.isEnabled = busy == nil
+            choice.state = level == status?.reasoning ? .on : .off
+            submenu.addItem(choice)
+        }
         item.submenu = submenu
         item.isEnabled = true
         return item
@@ -443,6 +461,8 @@ final class Controller: NSObject, NSMenuDelegate {
     @objc func capture() { overlay?.show() }
 
     @objc func chooseModel(_ sender: NSMenuItem) { command("Switching to \(sender.title)", ["model", sender.title]) }
+
+    @objc func chooseReasoning(_ sender: NSMenuItem) { command("Switching reasoning to \(sender.title)", ["reasoning", sender.title]) }
 
     @objc func openBoard() { NSWorkspace.shared.open(URL(string: status?.boardUrl ?? "http://127.0.0.1:4380/")!) }
     @objc func openTasks() { NSWorkspace.shared.open(home.appendingPathComponent("tasks")) }

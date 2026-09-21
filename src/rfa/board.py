@@ -28,6 +28,7 @@ def snapshot() -> dict:
                 "attempts": task.attempts,
                 "repos": task.meta.get("repos") or [],
                 "complexity": task.meta.get("complexity"),
+                "model": task.meta.get("model"),
                 "created": task.meta.get("created"),
                 "error": task.meta.get("error"),
                 "branches": task.meta.get("branches") or {},
@@ -38,6 +39,7 @@ def snapshot() -> dict:
         ],
         "events": tasks.events()[-500:],
         "repos": sorted(settings.load().get("repos") or {}),
+        "models": sorted(settings.presets(settings.load())),
     }
 
 

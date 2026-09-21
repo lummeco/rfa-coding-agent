@@ -430,7 +430,8 @@ function showDetail(id) {
   openId = id;
   document.getElementById("d-title").textContent = t.title;
   document.getElementById("d-sub").textContent =
-    `${LABEL[t.stage] || t.stage} · ${t.status}${t.attempts ? ` · ${t.attempts} retries` : ""} · ${when(t.created)}`;
+    `${LABEL[t.stage] || t.stage} · ${t.status}${t.attempts ? ` · ${t.attempts} retries` : ""}`
+    + `${t.model ? ` · ${t.model}` : ""} · ${when(t.created)}`;
 
   let head = "";
   if (t.error) head += `<div class="note bad">${esc(t.error)}</div>`;

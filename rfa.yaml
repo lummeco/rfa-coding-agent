@@ -17,19 +17,54 @@ repos:
   lummeco/infra-ops: ~/dev/infra-ops@main
   lummeco/rfa-coding-agent: ~/dev/rfa-coding-agent@main
 
-model:
-  model_name: ollama_chat/rfa-qwen3.6-35b
-  # Ollama models are not in litellm's price registry, and a missing price is not a reason to stop.
-  cost_tracking: ignore_errors
+# The models a run may use, by the name you type: `rfa work -m qwen3.8`, `rfa model qwen3.6`.
+#
+# Each one is served as its own Ollama variant, because Ollama gives a model a small default
+# context and silently drops the start of anything longer -- and the harness alone is ~17k tokens
+# before any work starts. `rfa up` creates whichever variants are missing.
+#
+# `reasoning` is litellm's reasoning_effort, which becomes Ollama's `think`. Only models with
+# graded thinking read the level itself; for a Qwen, `none` turns thinking off and low/medium/high
+# all turn it on. Thinking costs context and time, so the planner wants it and a long coding run
+# often does not.
+models:
+  qwen3.6:
+    model_name: ollama_chat/rfa-qwen3.6-35b
+    ollama: {name: rfa-qwen3.6-35b, from: qwen3.6:35b-a3b-q8_0, num_ctx: 131072}
+    reasoning: high
+  qwen3.8:
+    model_name: ollama_chat/rfa-qwen3.8
+    # TODO: check this tag against `ollama list` -- it is a guess, and `rfa up` will say so.
+    ollama: {name: rfa-qwen3.8, from: qwen3.8:latest, num_ctx: 131072}
+    reasoning: medium
 
-# The served model is a variant of the MoE with a context window big enough for the harness: mini's
-# instructions and tools are ~17k tokens before any work, and Ollama silently drops the start of
-# anything longer than num_ctx. `rfa up` creates it if it is not there.
-ollama:
-  name: rfa-qwen3.6-35b
-  from: qwen3.6:35b-a3b-q8_0
-  num_ctx: 131072
+# What a run uses when nothing else said. A `planner:`/`coder:` block may set its own; `rfa model
+# <name>` and `-m` on a command override both, and a card's own `model:` overrides the default.
+default_model: qwen3.6
+
+# Applies to every model above: Ollama models are not in litellm's price registry, and a missing
+# price is not a reason to stop.
+model:
+  cost_tracking: ignore_errors
 
 coder:
   environment:
     image: node:22-bookworm
+
+# The daemon `rfa up` leaves running: it plans cards waiting in `planning` and codes cards you
+# approved into `todo`, one at a time, and only while this Mac can take it. It never moves a packet
+# from planning to todo -- that gate is yours. See src/rfa/daemon.py.
+daemon:
+  interval: 15
+  # On battery: nothing starts below this, or at all with `require_power: true`. Low Power Mode
+  # closes the gate whatever the charge, and wall power opens it whatever the charge.
+  battery_min: 50
+  require_power: false
+  # Free memory a run needs. Memory pressure above normal closes the gate whatever this says.
+  memory_min_pct: 30
+  keep_awake: true
+  # Stop planning once this many cards of work are waiting for you or for the coder: past that the
+  # coder is the bottleneck and another packet would only queue behind it.
+  plan_ahead: 2
+  max_attempts: 3
+  error_backoff: 300

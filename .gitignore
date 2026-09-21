@@ -187,3 +187,6 @@ poetry.toml
 pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
+
+# The menu bar app, built by ui/build.sh
+build/

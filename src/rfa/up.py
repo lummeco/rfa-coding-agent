@@ -71,26 +71,35 @@ def docker(images: list[str]) -> Step:
 
 
 def ollama(config: dict) -> Step:
-    """The served model must exist and must be the variant with the big context window."""
-    wanted = config.get("ollama") or {}
-    name = wanted.get("name")
-    if not name:
-        return Step("ollama", True, "no variant configured; using the model name as given")
+    """Every model under `models:` must be served, and served as the variant with the big context.
+
+    Ollama gives a model a small default context unless told otherwise and silently drops the start
+    of anything longer -- and mini's instructions and tools are ~17k tokens before any work. So each
+    preset names a pulled base and the context to re-serve it with, and `up` creates what is missing.
+    """
+    wanted = {name: preset["ollama"] for name, preset in (config.get("models") or {}).items() if preset.get("ollama")}
+    if not wanted:
+        return Step("ollama", True, "no variants configured; using the model names as given")
     if not shutil.which("ollama"):
         return Step("ollama", False, "not installed", "https://ollama.com/download")
     if (listed := sh("ollama", "list")).returncode != 0:
         return Step("ollama", False, "not running", "start Ollama and run `rfa up` again")
     have = {line.split()[0].split(":")[0] for line in listed.stdout.splitlines()[1:] if line.split()}
-    if name.split(":")[0] in have:
-        return Step("ollama", True, f"{name} ready")
-    base = wanted.get("from", "")
-    if base.split(":")[0] not in have:
-        return Step("ollama", False, f"{base} not pulled", f"ollama pull {base}")
-    modelfile = tasks.home() / "var" / f"Modelfile.{name}"
-    modelfile.write_text(f"FROM {base}\nPARAMETER num_ctx {wanted.get('num_ctx', 131072)}\n")
-    if (made := sh("ollama", "create", name, "-f", str(modelfile), timeout=600)).returncode != 0:
-        return Step("ollama", False, f"could not create {name}", made.stderr.strip()[:200])
-    return Step("ollama", True, f"{name} created from {base}")
+    made = []
+    for preset, variant in wanted.items():
+        name, base = variant["name"], variant.get("from", "")
+        if name.split(":")[0] in have:
+            continue
+        if base.split(":")[0] not in have:
+            return Step("ollama", False, f"{base} not pulled (for {preset})", f"ollama pull {base}")
+        modelfile = tasks.home() / "var" / f"Modelfile.{name}"
+        modelfile.parent.mkdir(parents=True, exist_ok=True)
+        modelfile.write_text(f"FROM {base}\nPARAMETER num_ctx {variant.get('num_ctx', 131072)}\n")
+        if (result := sh("ollama", "create", name, "-f", str(modelfile), timeout=600)).returncode != 0:
+            return Step("ollama", False, f"could not create {name}", result.stderr.strip()[:200])
+        made.append(f"{name} from {base}")
+    ready = ", ".join(v["name"] for v in wanted.values())
+    return Step("ollama", True, f"{ready} ready" + (f" (created {', '.join(made)})" if made else ""))
 
 
 def check() -> Report:

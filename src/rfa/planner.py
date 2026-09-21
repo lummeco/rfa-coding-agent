@@ -169,7 +169,7 @@ def write_packet(agent: PlannerAgent, path: Path) -> None:
     path.with_suffix(".json").write_text(json.dumps(agent.packet.model_dump(), indent=2))
 
 
-def plan_task(task: Task, config: dict) -> Task:
+def plan_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> Task:
     """Plan one card in place: the packet becomes its body and it waits in `planning` for a human.
 
     Both ends of this stage are yours. You move a draft into `planning` when you want it planned,
@@ -182,13 +182,15 @@ def plan_task(task: Task, config: dict) -> Task:
     if task.stage != "planning":
         raise ValueError(f"{task.id} is in `{task.stage}`; move it to `planning` first (rfa mv {task.id} planning)")
     repos = settings.repo_paths(config, task.meta.get("repos") or [])
-    tasks.save(task, status="planning")
+    # The card's own `model:` is what the board and `rfa new -m` set; the command still wins.
+    chosen = settings.pick(config, model or str(task.meta.get("model") or ""))
+    tasks.save(task, status="planning", model=chosen)
     env = get_environment(config.get("environment", {}), default_type="docker")
     try:
         agent = plan(
             task.body,
             repos,
-            get_model(config=config.get("model", {})),
+            get_model(config=settings.model_config(config, chosen, reasoning)),
             env,
             **config.get("agent", {}),
         )
@@ -201,7 +203,7 @@ def plan_task(task: Task, config: dict) -> Task:
         note = agent.messages[-1].get("content", "the planner gave up")
         tasks.log(type="plan_failed", id=task.id, error=note)
         return tasks.save(task, status="failed", error=note)
-    tasks.log(type="planned", id=task.id, complexity=agent.packet.complexity, steps=agent.n_actions)
+    tasks.log(type="planned", id=task.id, complexity=agent.packet.complexity, steps=agent.n_actions, model=chosen)
     task.body = "\n" + agent.packet.render()
     return tasks.save(
         task,

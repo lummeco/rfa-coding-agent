@@ -164,7 +164,7 @@ def land(repo: Path, ref: str, branch: str, patch: Path, message: str) -> str:
     return branch
 
 
-def run_task(task: Task, config: dict) -> Task:
+def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> Task:
     """Claim a todo, code it, check it, and put it in done saying how it went."""
     if task.stage != "todo":
         raise ValueError(f"{task.id} is in `{task.stage}`, not `todo`")
@@ -175,8 +175,12 @@ def run_task(task: Task, config: dict) -> Task:
     output = run_dir(task.id)
     output.mkdir(parents=True, exist_ok=True)
 
-    task = tasks.move(task, "under-work", actor="worker", status="coding", attempts=task.attempts + 1)
-    tasks.log(type="run_started", id=task.id, attempt=task.attempts)
+    # The card's own `model:` is what the board and `rfa new -m` set; the command still wins.
+    chosen = settings.pick(config, model or str(task.meta.get("model") or ""))
+    task = tasks.move(
+        task, "under-work", actor="worker", status="coding", attempts=task.attempts + 1, model=chosen
+    )
+    tasks.log(type="run_started", id=task.id, attempt=task.attempts, model=chosen)
     env = None
     try:
         env = get_environment(config.get("environment", {}), default_type="docker")
@@ -188,7 +192,7 @@ def run_task(task: Task, config: dict) -> Task:
         baseline = {r["command"]: r["ok"] for r in run_checks(env, checks, cwd)}
         tasks.log(type="baseline", id=task.id, failing=[c for c, ok in baseline.items() if not ok])
         agent = CoderAgent(
-            get_model(config=config.get("model", {})),
+            get_model(config=settings.model_config(config, chosen, reasoning)),
             env,
             checks=checks,
             cwd=cwd,

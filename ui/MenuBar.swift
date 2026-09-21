@@ -112,8 +112,19 @@ enum Rfa {
 // MARK: - The capture overlay
 
 final class OverlayPanel: NSPanel {
+    var onCancel: (() -> Void)?
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+
+    /// Esc in a borderless panel reaches the end of the responder chain unhandled, and an unhandled
+    /// key is a system beep. WebKit lets it out as either the command or the raw key, so both are
+    /// answered here; the page closes the box too, and closing twice is closing once.
+    override func cancelOperation(_ sender: Any?) { onCancel?() }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == UInt16(kVK_Escape) { onCancel?() } else { super.keyDown(with: event) }
+    }
 }
 
 /// ⌥Space anywhere: a box to type an idea into, with the repositories and their branches.
@@ -160,6 +171,8 @@ final class Overlay: NSObject, WKScriptMessageHandlerWithReply {
         }
         panel.contentView = container
 
+        panel.onCancel = { [weak self] in self?.hide() }
+
         let ui = home.appendingPathComponent("ui")
         webView.loadFileURL(ui.appendingPathComponent("capture.html"), allowingReadAccessTo: ui)
     }
@@ -178,6 +191,7 @@ final class Overlay: NSObject, WKScriptMessageHandlerWithReply {
     }
 
     func hide() {
+        guard panel.isVisible else { return }
         NSAnimationContext.runAnimationGroup({ $0.duration = 0.12; panel.animator().alphaValue = 0 }) {
             self.panel.orderOut(nil)
             NSApp.hide(nil)

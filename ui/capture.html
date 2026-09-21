@@ -72,10 +72,18 @@
   }
   .save:disabled { opacity: .4; cursor: default }
   .with { display: flex; align-items: center; gap: 8px; padding: 10px 18px 0; color: var(--muted); font-size: 12px }
+  /* `appearance: none` and a drawn chevron: the native control keeps its own square, opaque look
+     and would be the one thing in the card that does not match the chips beside it. */
   select {
-    border: 0; background: var(--chip); color: var(--text); font: inherit; font-size: 12px;
-    padding: 5px 9px; border-radius: 999px; cursor: pointer;
+    appearance: none; -webkit-appearance: none;
+    border: 0; background-color: var(--chip); color: var(--text); font: inherit; font-size: 12px;
+    padding: 5px 24px 5px 11px; border-radius: 999px; cursor: pointer;
+    max-width: 220px; text-overflow: ellipsis;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6' fill='none' stroke='%238e8e93' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 9px center; background-size: 9px 6px;
   }
+  select:hover { box-shadow: 0 0 0 1px var(--line) inset; }
+  select:focus-visible { box-shadow: 0 0 0 1.5px var(--accent) inset; outline: 0; }
 </style>
 </head>
 <body>

@@ -200,7 +200,13 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
     output.mkdir(parents=True, exist_ok=True)
 
     # The card's own `model:` is what the board and `rfa new -m` set; the command still wins.
-    chosen, level = settings.for_task(config, task.meta, model, reasoning)
+    try:
+        chosen, level = settings.for_task(config, task.meta, model, reasoning)
+    except Exception as e:
+        tasks.log(type="run_error", id=task.id, error=str(e))
+        # Task is still in todo; just update it in place rather than moving.
+        tasks.save(task, status="todo", error=str(e), attempts=task.attempts + 1)
+        raise
     task = tasks.move(
         task,
         "under-work",

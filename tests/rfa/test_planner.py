@@ -60,7 +60,7 @@ def run_planner(outputs: list[dict], tmp_path, **config) -> PlannerAgent:
         packet_path=str(tmp_path / "packet.json"),
         **(DEFAULTS | config),
     )
-    agent.run("duplicate a line", repo_map="invoicing/src/LineRow.tsx")
+    agent.run("duplicate a line", repo_map="invoicing/src/LineRow.tsx", reference=[])
     return agent
 
 

@@ -119,13 +119,16 @@ def services(port: int = DEFAULT_PORT) -> list[Service]:
     return [Service("daemon", ["daemon"]), Service("board", ["board", "--no-open", "--port", str(port)])]
 
 
-def remember(port: int) -> str:
-    """`rfa up` writes the board's address down, so `rfa status` and the menu bar need not guess it."""
-    (path := tasks.home() / "var" / "board.url").parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(address := f"http://127.0.0.1:{port}/")
-    return address
-
-
 def url() -> str:
+    """Where the board is, with this start's token. The board itself writes it; nobody can guess it.
+
+    Empty when the board is not up, which is the truth: without a live token there is no address
+    that would get you in.
+    """
     path = tasks.home() / "var" / "board.url"
-    return path.read_text().strip() if path.exists() else f"http://127.0.0.1:{DEFAULT_PORT}/"
+    return path.read_text().strip() if path.exists() else ""
+
+
+def forget() -> None:
+    """Drop the address. The token in it dies with the board that minted it."""
+    (tasks.home() / "var" / "board.url").unlink(missing_ok=True)

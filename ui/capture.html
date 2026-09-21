@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Capture</title>
+<style>
+  :root {
+    --card: #fff; --text: #1d1d1f; --muted: #86868b; --line: rgba(0,0,0,.08);
+    --accent: #0071e3; --chip: #f0f0f2; --err: #ff3b30; color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --card: #1c1c1e; --text: #f5f5f7; --muted: #8e8e93;
+            --line: rgba(255,255,255,.1); --accent: #0a84ff; --chip: #2c2c2e; }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    background: transparent; color: var(--text); min-height: 100vh;
+    display: grid; place-items: center; padding: 16px; -webkit-font-smoothing: antialiased;
+  }
+  .card {
+    width: 100%; max-width: 660px; background: var(--card); border-radius: 18px; overflow: visible;
+    box-shadow: 0 0 0 .5px var(--line), 0 24px 80px rgba(0,0,0,.35); animation: pop .18s ease-out;
+  }
+  @keyframes pop { from { transform: scale(.97); opacity: 0 } }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 14px 18px 0; }
+  .chip {
+    border: 0; background: var(--chip); color: var(--text); font: inherit; font-size: 13px;
+    padding: 5px 11px; border-radius: 999px; cursor: pointer;
+  }
+  .chip[aria-pressed="true"] { background: var(--accent); color: #fff; }
+  .tok {
+    display: inline-flex; align-items: center; gap: 6px; background: var(--chip); color: var(--text);
+    font: 12px ui-monospace, Menlo, monospace; padding: 4px 6px 4px 10px; border-radius: 999px;
+  }
+  .tok.start { box-shadow: 0 0 0 1.5px var(--accent) inset; }
+  .tok.ref { border: 1px dashed var(--muted); }
+  .tok .role { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+  .tok .x { border: 0; background: none; color: var(--muted); cursor: pointer; font: inherit; padding: 0 3px; }
+  .tok .x:hover { color: var(--err); }
+  .find { position: relative; padding: 10px 18px 0; }
+  .find input {
+    border: 0; outline: 0; background: var(--chip); color: var(--text); width: 240px;
+    font: 13px ui-monospace, Menlo, monospace; padding: 6px 12px; border-radius: 999px;
+  }
+  .find input:focus { box-shadow: 0 0 0 1.5px var(--accent) inset; }
+  .find input::placeholder { color: var(--muted); }
+  .results {
+    position: absolute; left: 18px; right: 18px; top: 100%; z-index: 5; margin-top: 6px; padding: 4px;
+    list-style: none; background: var(--card); border-radius: 12px; max-height: 240px; overflow-y: auto;
+    box-shadow: 0 0 0 .5px var(--line), 0 12px 40px rgba(0,0,0,.25); font: 13px ui-monospace, Menlo, monospace;
+  }
+  .results[hidden] { display: none }
+  .results li { padding: 6px 10px; border-radius: 8px; cursor: pointer; display: flex; gap: 8px; }
+  .results li.on { background: var(--accent); color: #fff }
+  .results li .repo { color: var(--muted) }
+  .results li.on .repo { color: rgba(255,255,255,.75) }
+  .results li.note { cursor: default; font-family: inherit; font-size: 12px; color: var(--muted) }
+  textarea {
+    width: 100%; border: 0; outline: 0; background: none; color: var(--text); resize: none;
+    font: inherit; padding: 14px 18px; min-height: 108px;
+  }
+  .foot {
+    display: flex; align-items: center; gap: 10px; padding: 10px 18px 14px;
+    border-top: .5px solid var(--line);
+  }
+  .foot .hint { color: var(--muted); font-size: 12px; flex: 1 }
+  .foot .hint.bad { color: var(--err) }
+  .save {
+    border: 0; background: var(--accent); color: #fff; font: inherit; font-size: 13px;
+    padding: 6px 14px; border-radius: 999px; cursor: pointer;
+  }
+  .save:disabled { opacity: .4; cursor: default }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="row" id="repos"></div>
+  <div class="row" id="picks"></div>
+  <div class="find">
+    <input id="branch" placeholder="branch…" autocomplete="off" spellcheck="false">
+    <ul class="results" id="results" hidden></ul>
+  </div>
+  <textarea id="idea" placeholder="What should happen?"></textarea>
+  <div class="foot">
+    <span class="hint" id="hint"></span>
+    <button class="save" id="save">Save draft</button>
+  </div>
+</div>
+
+<script>
+// The overlay talks to `rfa` through the app; it never touches the task folder itself, so the
+// front matter it produces is whatever `rfa new` writes and the two can never drift apart.
+const call = (type, body = {}) => window.webkit.messageHandlers.rfa.postMessage({ type, ...body });
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const MAX_REF = 3;
+
+let repos = [];        // every repository in rfa.yaml
+let chosen = new Set();  // the ones this idea touches
+let branches = [];     // [{repo, branch, default}] for the chosen repos
+let picks = [];        // [{repo, branch}] in the order picked: first per repo starts the work
+let cursor = 0;
+let loading = false;
+
+// --- what has been picked ---------------------------------------------------------------------
+
+// The first branch picked for a repository is where its work starts; the rest are reference code.
+// One rule, so there is no mode to be in and nothing to explain.
+const role = (pick, i) => (picks.findIndex(p => p.repo === pick.repo) === i ? "start" : "reference");
+const refs = () => picks.filter((p, i) => role(p, i) === "reference");
+
+function drawRepos() {
+  document.getElementById("repos").innerHTML = repos.map(r =>
+    `<button class="chip" data-repo="${esc(r)}" aria-pressed="${chosen.has(r)}">${esc(r.split("/").pop())}</button>`
+  ).join("") || `<span class="hint">No repositories in rfa.yaml</span>`;
+}
+
+function drawPicks() {
+  document.getElementById("picks").innerHTML = picks.map((p, i) => {
+    const kind = role(p, i);
+    return `<span class="tok ${kind === "start" ? "start" : "ref"}">
+      <span class="role">${kind === "start" ? "from" : "ref"}</span>${esc(p.repo.split("/").pop())}@${esc(p.branch)}
+      <button class="x" data-drop="${i}" title="Remove">✕</button></span>`;
+  }).join("");
+  drawHint();
+}
+
+function drawHint(message = "", bad = false) {
+  const hint = document.getElementById("hint");
+  hint.className = "hint" + (bad ? " bad" : "");
+  hint.textContent = message || (loading ? "reading branches…"
+    : `${refs().length}/${MAX_REF} reference branches · ⌘↵ to save · esc to close`);
+  document.getElementById("save").disabled = !chosen.size || !document.getElementById("idea").value.trim();
+}
+
+// --- the branch search -------------------------------------------------------------------------
+
+function matches() {
+  const typed = document.getElementById("branch").value.trim().toLowerCase();
+  const taken = new Set(picks.map(p => `${p.repo}@${p.branch}`));
+  return branches
+    .filter(b => !taken.has(`${b.repo}@${b.branch}`) && (!typed || b.branch.toLowerCase().includes(typed)))
+    .slice(0, 40);
+}
+
+function drawResults(open) {
+  const list = document.getElementById("results");
+  const found = matches();
+  cursor = Math.min(cursor, Math.max(found.length - 1, 0));
+  list.hidden = !open || (!found.length && !loading);
+  list.innerHTML = found.length
+    ? found.map((b, i) =>
+        `<li class="${i === cursor ? "on" : ""}" data-pick="${i}">${esc(b.branch)}${b.default ? " ·" : ""}
+         <span class="repo">${esc(b.repo.split("/").pop())}</span></li>`).join("")
+    : `<li class="note">${loading ? "reading branches…" : "no branch matches"}</li>`;
+}
+
+async function loadBranches() {
+  branches = [];
+  if (!chosen.size) return drawResults(false);
+  loading = true;
+  drawHint();
+  drawResults(document.activeElement === document.getElementById("branch"));
+  const reply = await call("branches", { repos: [...chosen] });
+  loading = false;
+  branches = (reply?.branches || []).filter(b => chosen.has(b.repo));
+  drawHint(reply?.errors?.length ? reply.errors[0] : "", Boolean(reply?.errors?.length));
+  drawResults(document.activeElement === document.getElementById("branch"));
+}
+
+function pick(i) {
+  const found = matches()[i];
+  if (!found) return;
+  const wouldBeReference = picks.some(p => p.repo === found.repo);
+  if (wouldBeReference && refs().length >= MAX_REF) return drawHint(`${MAX_REF} reference branches is the limit`, true);
+  picks.push({ repo: found.repo, branch: found.branch });
+  document.getElementById("branch").value = "";
+  cursor = 0;
+  drawPicks();
+  drawResults(true);
+}
+
+// --- saving -------------------------------------------------------------------------------------
+
+async function save() {
+  const idea = document.getElementById("idea").value.trim();
+  if (!idea || !chosen.size) return drawHint(idea ? "pick a repository" : "say what should happen", true);
+  drawHint("saving…");
+  const reply = await call("save", {
+    idea,
+    repos: [...chosen],
+    branches: picks.filter((p, i) => role(p, i) === "start").map(p => `${p.repo}@${p.branch}`),
+    context_branches: refs().map(p => `${p.repo}@${p.branch}`),
+  }).catch(e => ({ error: String(e) }));
+  if (reply?.error) return drawHint(reply.error, true);
+  call("close");
+}
+
+// --- wiring ---------------------------------------------------------------------------------------
+
+document.getElementById("repos").addEventListener("click", e => {
+  const chip = e.target.closest("button[data-repo]");
+  if (!chip) return;
+  const name = chip.dataset.repo;
+  chosen.has(name) ? chosen.delete(name) : chosen.add(name);
+  picks = picks.filter(p => chosen.has(p.repo));
+  drawRepos();
+  drawPicks();
+  loadBranches();
+});
+document.getElementById("picks").addEventListener("click", e => {
+  const drop = e.target.closest("button[data-drop]");
+  if (!drop) return;
+  picks.splice(Number(drop.dataset.drop), 1);
+  drawPicks();
+  drawResults(false);
+});
+document.getElementById("results").addEventListener("mousedown", e => {
+  const item = e.target.closest("li[data-pick]");
+  if (item) { e.preventDefault(); pick(Number(item.dataset.pick)); }
+});
+const box = document.getElementById("branch");
+box.addEventListener("input", () => { cursor = 0; drawResults(true); });
+box.addEventListener("focus", () => drawResults(true));
+box.addEventListener("blur", () => setTimeout(() => drawResults(false), 120));
+box.addEventListener("keydown", e => {
+  const found = matches();
+  if (e.key === "ArrowDown") { cursor = Math.min(cursor + 1, found.length - 1); drawResults(true); e.preventDefault(); }
+  else if (e.key === "ArrowUp") { cursor = Math.max(cursor - 1, 0); drawResults(true); e.preventDefault(); }
+  else if (e.key === "Enter") { pick(cursor); e.preventDefault(); }
+});
+document.getElementById("idea").addEventListener("input", () => drawHint());
+document.getElementById("save").addEventListener("click", save);
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") return call("close");
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") return save();
+});
+
+// Called by the app each time the panel is shown: a capture box that still holds the last idea is
+// a capture box you have to clear before you can use it.
+window.rfa = {
+  async onShow() {
+    picks = [];
+    branches = [];
+    cursor = 0;
+    document.getElementById("idea").value = "";
+    document.getElementById("branch").value = "";
+    drawPicks();
+    drawResults(false);
+    const reply = await call("repos");
+    repos = reply?.repos || [];
+    chosen = new Set([...chosen].filter(r => repos.includes(r)));
+    drawRepos();
+    drawHint();
+    document.getElementById("idea").focus();
+    if (chosen.size) loadBranches();
+  },
+};
+window.rfa.onShow();
+</script>
+</body>
+</html>

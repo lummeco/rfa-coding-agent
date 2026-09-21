@@ -102,6 +102,20 @@ def ollama(config: dict) -> Step:
     return Step("ollama", True, f"{ready} ready" + (f" (created {', '.join(made)})" if made else ""))
 
 
+def menubar() -> Step:
+    """Open the menu bar app, if it has been built.
+
+    Not part of `check()`: that only looks, and this starts something. `open -a` on an app that is
+    already running just brings it forward, so `rfa up` twice leaves one of it.
+    """
+    bundle = tasks.home() / "build" / "RFA.app"
+    if not bundle.is_dir():
+        return Step("menubar", True, "not built — run `./ui/build.sh` for the ⌥Space capture box")
+    if (opened := sh("open", "-a", str(bundle))).returncode != 0:
+        return Step("menubar", False, "would not open", opened.stderr.strip()[:200] or "see Console.app")
+    return Step("menubar", True, "running — ⌥Space for a new idea")
+
+
 def check() -> Report:
     """Everything `rfa up` verifies, without starting anything."""
     planner, coder = settings.load("planner"), settings.load("coder")

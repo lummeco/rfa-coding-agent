@@ -260,6 +260,37 @@ button.action.quiet { background: transparent; color: var(--text-2); padding-lef
 }
 .timeline time { color: var(--text-3); font-variant-numeric: tabular-nums; flex: none; }
 
+/* The status strip: what the daemon is doing and why it might not be. */
+#strip {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+  padding: 0 28px 14px; font-size: 12px; color: var(--text-2);
+}
+#strip .pill { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+#strip .pill b { font-weight: 500; color: var(--text); }
+#strip .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+#strip .dot.on { background: var(--green); }
+#strip .dot.off { background: var(--text-3); }
+#strip .dot.hold { background: var(--amber); }
+#strip .shut { color: var(--amber); }
+
+/* The run log: a link until you want it, then the commands as they happen. */
+.watch {
+  background: none; border: 0; padding: 0; font: inherit; font-size: 13px;
+  color: var(--blue); cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
+}
+.run { margin-top: 10px; display: grid; gap: 8px; }
+.run .step {
+  border-left: 2px solid var(--line); padding-left: 10px;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.run .step.bad { border-left-color: var(--red); }
+.run .step.now { border-left-color: var(--blue); }
+.run .cmd { color: var(--text); white-space: pre-wrap; word-break: break-word; }
+.run .out {
+  color: var(--text-2); white-space: pre-wrap; word-break: break-word;
+  max-height: 150px; overflow: auto; margin-top: 3px;
+}
+
 @media (max-width: 700px) {
   header { padding: 18px 20px 14px; }
   #board { padding: 0 20px 20px; grid-auto-columns: minmax(252px, 1fr); }
@@ -275,6 +306,8 @@ button.action.quiet { background: transparent; color: var(--text-2); padding-lef
   <button class="action primary" id="capture">New idea</button>
   <span class="hint"><kbd>N</kbd> new · <kbd>R</kbd> refresh · <kbd>Esc</kbd> close</span>
 </header>
+
+<div id="strip"></div>
 
 <div id="board"></div>
 
@@ -294,8 +327,14 @@ const LABEL = { "under-work": "Under work", "draft": "Draft", "planning": "Plann
 const TONE = { ready: "green", done: "green", shipped: "green", failed: "red", planning: "amber", queued: "", coding: "blue", starting: "blue", todo: "blue" };
 const LIVE = new Set(["planning", "coding", "checking", "starting"]);
 
-let state = { tasks: [], events: [], stages: [] };
+let state = { tasks: [], events: [], stages: [], system: null };
 let openId = null;
+
+// `rfa up` prints the board's URL with this start's token in the fragment. The fragment never
+// leaves the browser, and sending it as a header is what a cross-site request cannot do.
+const TOKEN = new URLSearchParams(location.hash.slice(1)).get("token") || "";
+const api = (path, options = {}) =>
+  fetch(path, { ...options, headers: { ...(options.headers || {}), "X-RFA-Token": TOKEN } });
 
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -408,7 +447,7 @@ function showCapture() {
 async function saveIdea() {
   const idea = document.getElementById("idea").value.trim();
   if (!idea) return;
-  const res = await fetch("/api/new", {
+  const res = await api("/api/new", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ idea, repos: [...picked] }),
@@ -424,6 +463,47 @@ function openPanel() {
   document.getElementById("scrim").classList.add("open");
 }
 
+// The daemon is a separate process; without this the board shows a card sitting in `todo` and
+// gives you no way to tell "nothing is running it" from "it is holding until you plug the Mac in".
+function strip() {
+  const sys = state.system;
+  if (!sys) return;
+  const bit = (cls, label, value) =>
+    `<span class="pill"><i class="dot ${cls}"></i>${label}${value ? ` <b>${esc(value)}</b>` : ""}</span>`;
+  const shut = sys.gates.filter(g => !g.ok);
+  const parts = [
+    bit(sys.services.daemon ? (shut.length ? "hold" : "on") : "off", "daemon",
+        sys.services.daemon ? (shut.length ? "holding" : "watching") : "stopped"),
+  ];
+  for (const gate of shut) parts.push(`<span class="pill shut">✗ ${esc(gate.detail)}</span>`);
+  if (sys.running.length) parts.push(bit("on", "running", sys.running[0].title));
+  else if (sys.next) parts.push(`<span class="pill">next <b>${esc(sys.next.job)}</b> ${esc(sys.next.title)}</span>`);
+  if (sys.model) parts.push(`<span class="pill">model <b>${esc(sys.model)}</b></span>`);
+  document.getElementById("strip").innerHTML = parts.join("");
+}
+
+// --- the run log -----------------------------------------------------------------------------
+
+let watching = null;   // the card id whose steps are open; null = nobody asked
+
+async function drawRun(id) {
+  const box = document.getElementById("run");
+  if (!box || watching !== id) return;
+  const res = await api(`/api/run?id=${encodeURIComponent(id)}`);
+  if (!res.ok) return;
+  const { steps, now } = await res.json();
+  if (watching !== id) return;   // the panel moved on while we were waiting
+  const step = (s, cls) => `<div class="step ${cls}">
+      <div class="cmd">${s.commands.map(c => `$ ${esc(c)}`).join("\n") || "done"}</div>
+      ${s.output ? `<div class="out">${esc(s.output)}</div>` : ""}
+    </div>`;
+  const live = now.length ? step({ commands: now, output: "" }, "now") : "";
+  box.innerHTML = steps.length || live
+    ? steps.map(s => step(s, s.returncode ? "bad" : "")).join("") + live
+    : `<div class="hint">Nothing yet — the first step lands when the model answers.</div>`;
+  box.scrollIntoView({ block: "nearest" });
+}
+
 function showDetail(id) {
   const t = state.tasks.find(x => x.id === id);
   if (!t) return closeDetail();
@@ -432,10 +512,15 @@ function showDetail(id) {
   document.getElementById("d-sub").textContent =
     `${LABEL[t.stage] || t.stage} · ${t.status}${t.attempts ? ` · ${t.attempts} retries` : ""}`
     + `${t.model ? ` · ${t.model}` : ""} · ${when(t.created)}`;
+  const from = (t.branches || []).map(b => b.split("@")[1]).join(", ");
+  const refs = (t.context_branches || []).map(b => b.split("/").pop()).join(", ");
 
   let head = "";
   if (t.error) head += `<div class="note bad">${esc(t.error)}</div>`;
-  const landed = Object.entries(t.branches || {});
+  if (from || refs)
+    head += `<div class="note">${from ? `Starts from <code>${esc(from)}</code>` : ""}`
+      + `${refs ? `${from ? " · " : ""}reading <code>${esc(refs)}</code>` : ""}</div>`;
+  const landed = Object.entries(t.landed || {});
   if (landed.length)
     head += `<div class="note">Landed on ${landed.map(([r, b]) => `<code>${esc(b)}</code> in ${esc(r)}`).join(", ")} — local, nothing pushed.</div>`;
   if (t.stage === "draft") head += `<div class="note">A draft. <strong>Plan it</strong> hands it to the planner.</div>`;
@@ -451,12 +536,20 @@ function showDetail(id) {
 
   // The packet opens with "# Task" and its title; the panel header already says that.
   const body = String(t.body || "").replace(/^\s*#\s+Task\s*\n+[^\n]*\n/, "");
-  document.getElementById("d-body").innerHTML = head + `<div class="md">${md(body)}${history}</div>`;
+  // Only where there is a run to look at: a card that never reached the coder has no trajectory.
+  const ran = t.stage === "under-work" || t.stage === "done";
+  const watch = ran
+    ? `<p><button class="watch" id="watch">${watching === id ? "Hide" : "Watch"} what it did →</button></p>`
+      + `<div class="run" id="run"></div>`
+    : "";
+  document.getElementById("d-body").innerHTML = head + `<div class="md">${md(body)}${history}</div>` + watch;
+  if (watching === id) drawRun(id);
   document.getElementById("d-actions").innerHTML = actionsFor(t);
   openPanel();
 }
 
 function closeDetail() {
+  watching = null;
   openId = null;
   document.getElementById("detail").classList.remove("open");
   document.getElementById("detail").setAttribute("aria-hidden", "true");
@@ -464,13 +557,19 @@ function closeDetail() {
 }
 
 async function refresh() {
-  const res = await fetch("/api/tasks");
+  const res = await api("/api/tasks");
+  if (!res.ok) {
+    document.getElementById("strip").innerHTML =
+      `<span class="shut">${esc((await res.json()).error)}</span>`;
+    return;
+  }
   state = await res.json();
   render();
+  strip();
 }
 
 async function move(id, to) {
-  const res = await fetch("/api/move", {
+  const res = await api("/api/move", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id, to }),
@@ -491,6 +590,10 @@ document.getElementById("d-actions").addEventListener("click", e => {
 });
 document.getElementById("capture").addEventListener("click", showCapture);
 document.getElementById("d-body").addEventListener("click", e => {
+  if (e.target.closest("#watch")) {
+    watching = watching === openId ? null : openId;
+    return showDetail(openId);
+  }
   const chip = e.target.closest("button[data-repo]");
   if (!chip) return;
   const on = chip.getAttribute("aria-pressed") === "true";
@@ -509,6 +612,8 @@ document.addEventListener("keydown", e => {
 
 refresh();
 setInterval(refresh, 4000);
+// Faster than the board, because this is the one thing you sit and watch.
+setInterval(() => watching && drawRun(watching), 1500);
 </script>
 </body>
 </html>

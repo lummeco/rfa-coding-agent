@@ -24,6 +24,7 @@ from rfa.packet import Packet, problems
 from rfa.tasks import Task
 
 REPOS_DIR = "/work/repos"
+REFERENCE_DIR = "/work/reference"
 RETRY_NOTE = (
     "The host rejected the packet you wrote:\n\n{problems}\n\n"
     "Read whatever you need to settle these, write the corrected packet to {path}, and submit again."
@@ -114,23 +115,82 @@ def tracked_files(repo: Path, ref: str) -> set[str]:
     return set(git(repo, "ls-tree", "-r", "--name-only", ref).splitlines())
 
 
-def seed(env: Environment, repos: dict[str, tuple[Path, str]]) -> dict[str, set[str]]:
-    """Unpack each repository's tree at its ref into the container, and return its tracked files.
+def pin(repos: dict[str, tuple[Path, str]]) -> dict[str, tuple[Path, str]]:
+    """Turn each ref into the commit it means right now, fetching it from origin first.
 
-    `git archive` into `docker cp` gives the container the files alone -- no history, no other refs,
-    no remote, nothing the coder could later push from. Docker environments only.
+    Two reasons. The branch list you picked from is the remote's, so a branch this checkout has
+    never seen is the ordinary case rather than an error. And a run lasts half an hour: a branch
+    name, or `FETCH_HEAD`, would not mean the same commit when the diff lands as it did when the
+    files went in, while a sha means one thing forever.
     """
-    env.execute({"command": f"mkdir -p {REPOS_DIR}"})
+    return {name: (path, commit(path, ref)) for name, (path, ref) in repos.items()}
+
+
+def commit(repo: Path, ref: str) -> str:
+    """The sha `ref` names: from origin when the fetch works, from this checkout when it does not."""
+    fetched = subprocess.run(
+        ["git", "-C", str(repo), "fetch", "--quiet", "origin", ref], capture_output=True, timeout=180
+    )
+    # FETCH_HEAD only means this ref if the fetch that would have written it actually ran: a stale
+    # one from some earlier fetch points at something else entirely.
+    for candidate in ["FETCH_HEAD"] if fetched.returncode == 0 else [f"refs/remotes/origin/{ref}", ref]:
+        found = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--verify", "-q", f"{candidate}^{{commit}}"],
+            capture_output=True,
+            text=True,
+        )
+        if found.returncode == 0:
+            return found.stdout.strip()
+    raise KeyError(f"{repo.name}: no branch `{ref}`, here or on origin")
+
+
+def branches(repo: Path, default: str = "") -> list[str]:
+    """The branch names upstream, live, through this checkout's own git credentials.
+
+    `git ls-remote`, not the GitHub API: nothing to authenticate separately, no rate limit, and it
+    works for any remote rather than only for GitHub. Offline, the last fetch beats an empty list --
+    you can still pick a branch you already have, and `pin` will still find it.
+    """
+    listed = subprocess.run(
+        ["git", "-C", str(repo), "ls-remote", "--heads", "origin"], capture_output=True, text=True, timeout=60
+    )
+    if listed.returncode == 0:
+        names = [line.partition("refs/heads/")[2] for line in listed.stdout.splitlines() if "refs/heads/" in line]
+    else:
+        seen = git(repo, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/").splitlines()
+        names = [r.removeprefix("refs/remotes/origin/") for r in seen if not r.endswith("/HEAD")]
+    return sorted(set(names), key=lambda n: (n != default, n.lower()))
+
+
+def unpack(env: Environment, into: str, path: Path, ref: str) -> None:
+    """One repository's tree at one commit, into the container.
+
+    `git archive` through `docker cp` gives it the files alone -- no history, no other refs, no
+    remote, nothing an agent could later push from. Docker environments only.
+    """
+    env.execute({"command": f"mkdir -p {into}"})
+    subprocess.run(
+        [env.config.executable, "cp", "-", f"{env.container_id}:{into}"],
+        input=git(path, "archive", "--format=tar", ref, text=False),
+        check=True,
+        capture_output=True,
+    )
+
+
+def seed(
+    env: Environment, repos: dict[str, tuple[Path, str]], reference: dict[str, tuple[Path, str]] | None = None
+) -> dict[str, set[str]]:
+    """The work repositories, plus any reference branches beside them. Returns the work's files.
+
+    Only the work is returned, because that is what a packet's paths are checked against: reference
+    code is there to be read, and a packet that aimed at it would be aiming at nothing.
+    """
     files = {}
     for name, (path, ref) in repos.items():
-        env.execute({"command": f"mkdir -p {REPOS_DIR}/{name}"})
-        subprocess.run(
-            [env.config.executable, "cp", "-", f"{env.container_id}:{REPOS_DIR}/{name}"],
-            input=git(path, "archive", "--format=tar", ref, text=False),
-            check=True,
-            capture_output=True,
-        )
+        unpack(env, f"{REPOS_DIR}/{name}", path, ref)
         files[name] = tracked_files(path, ref)
+    for label, (path, ref) in (reference or {}).items():
+        unpack(env, f"{REFERENCE_DIR}/{label}", path, ref)
     return files
 
 
@@ -153,11 +213,18 @@ def render_map(repo_files: dict[str, set[str]], max_files: int = 300) -> str:
     return "\n\n".join(blocks)
 
 
-def plan(idea: str, repos: dict[str, tuple[Path, str]], model: Model, env: Environment, **kwargs) -> PlannerAgent:
+def plan(
+    idea: str,
+    repos: dict[str, tuple[Path, str]],
+    model: Model,
+    env: Environment,
+    reference: dict[str, tuple[Path, str]] | None = None,
+    **kwargs,
+) -> PlannerAgent:
     """Run the planner over `idea`. The packet, when there is one, is on the returned agent."""
-    repo_files = seed(env, repos)
+    repo_files = seed(env, repos, reference)
     agent = PlannerAgent(model, env, repo_files=repo_files, **kwargs)
-    agent.run(idea, repo_map=render_map(repo_files))
+    agent.run(idea, repo_map=render_map(repo_files), reference=sorted(reference or {}))
     return agent
 
 
@@ -181,7 +248,8 @@ def plan_task(task: Task, config: dict, model: str = "", reasoning: str = "") ->
     """
     if task.stage != "planning":
         raise ValueError(f"{task.id} is in `{task.stage}`; move it to `planning` first (rfa mv {task.id} planning)")
-    repos = settings.repo_paths(config, task.meta.get("repos") or [])
+    repos = pin(settings.repo_paths(config, task.meta.get("repos") or [], settings.start_branches(task.meta)))
+    reference = pin(settings.reference_paths(config, task.meta))
     # The card's own `model:` is what the board and `rfa new -m` set; the command still wins.
     chosen = settings.pick(config, model or str(task.meta.get("model") or ""))
     tasks.save(task, status="planning", model=chosen)
@@ -192,6 +260,7 @@ def plan_task(task: Task, config: dict, model: str = "", reasoning: str = "") ->
             repos,
             get_model(config=settings.model_config(config, chosen, reasoning)),
             env,
+            reference,
             **config.get("agent", {}),
         )
     except Exception as e:

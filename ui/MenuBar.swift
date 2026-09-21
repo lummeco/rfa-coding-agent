@@ -8,7 +8,14 @@
 // Build: ui/build.sh
 
 import AppKit
+import Carbon.HIToolbox
 import ServiceManagement
+import UserNotifications
+import WebKit
+
+// The capture hotkey. Change it here.
+let hotKeyCode = UInt32(kVK_Space)
+let hotKeyModifiers = UInt32(optionKey)
 
 let home: URL = {
     guard let path = Bundle.main.object(forInfoDictionaryKey: "RFAHome") as? String else {
@@ -29,12 +36,14 @@ struct Status: Decodable {
     let home: String
     let model: String
     let models: [String]
+    let repos: [String]
     let boardUrl: String
     let services: [String: Int]  // 0 when that one is not running
     let gates: [Gate]
     let stages: [String: Int]
     let running: [Card]
     let next: Job?
+    let last: Card?
 
     var daemonUp: Bool { (services["daemon"] ?? 0) > 0 }
     var boardUp: Bool { (services["board"] ?? 0) > 0 }
@@ -69,6 +78,27 @@ enum Rfa {
         return (process.terminationStatus == 0, String(data: data, encoding: .utf8) ?? "")
     }
 
+    /// A command that prints JSON. Anything else is a failure, whatever its exit code.
+    static func json(_ arguments: [String]) -> [String: Any]? {
+        let result = run(arguments)
+        guard result.ok, let data = result.output.data(using: .utf8) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    /// The page can only ask about things that look like what rfa.yaml holds. `rfa` checks them
+    /// again and refuses what it does not know -- this just keeps the obvious nonsense out of argv.
+    static func isRepoId(_ text: String) -> Bool {
+        text.range(of: "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$", options: .regularExpression) != nil
+    }
+
+    static func isRepoBranch(_ text: String) -> Bool {
+        let parts = text.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2, isRepoId(String(parts[0])) else { return false }
+        let branch = String(parts[1])
+        return branch.range(of: "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$", options: .regularExpression) != nil
+            && !branch.contains("..") && !branch.hasSuffix(".lock")
+    }
+
     static func status() -> Status? {
         let result = run(["status", "--json"])
         guard let data = result.output.data(using: .utf8) else { return nil }
@@ -78,15 +108,162 @@ enum Rfa {
     }
 }
 
+// MARK: - The capture overlay
+
+final class OverlayPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
+/// ⌥Space anywhere: a box to type an idea into, with the repositories and their branches.
+///
+/// It holds no rules of its own. Every question it asks and every draft it writes goes through
+/// `rfa`, so what the overlay captures and what `rfa new` writes cannot drift apart.
+final class Overlay: NSObject, WKScriptMessageHandlerWithReply {
+    let panel: OverlayPanel
+    let webView: WKWebView
+
+    override init() {
+        panel = OverlayPanel(
+            contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.level = .modalPanel
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        panel.hidesOnDeactivate = false
+
+        let config = WKWebViewConfiguration()
+        webView = WKWebView(frame: .zero, configuration: config)
+        webView.setValue(false, forKey: "drawsBackground")
+        super.init()
+        config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "rfa")
+
+        let blur = NSVisualEffectView()
+        blur.material = .hudWindow
+        blur.blendingMode = .behindWindow
+        blur.state = .active
+        blur.alphaValue = 0.55
+
+        let container = NSView()
+        container.addSubview(blur)
+        container.addSubview(webView)
+        for view in [blur, webView] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                view.topAnchor.constraint(equalTo: container.topAnchor),
+                view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            ])
+        }
+        panel.contentView = container
+
+        let ui = home.appendingPathComponent("ui")
+        webView.loadFileURL(ui.appendingPathComponent("capture.html"), allowingReadAccessTo: ui)
+    }
+
+    var isVisible: Bool { panel.isVisible }
+
+    func show() {
+        let screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? NSScreen.main!
+        panel.setFrame(screen.frame, display: true)
+        panel.alphaValue = 0
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
+        panel.makeFirstResponder(webView)
+        NSAnimationContext.runAnimationGroup { $0.duration = 0.15; panel.animator().alphaValue = 1 }
+        webView.evaluateJavaScript("window.rfa && window.rfa.onShow()")
+    }
+
+    func hide() {
+        NSAnimationContext.runAnimationGroup({ $0.duration = 0.12; panel.animator().alphaValue = 0 }) {
+            self.panel.orderOut(nil)
+            NSApp.hide(nil)
+        }
+    }
+
+    func toggle() { isVisible ? hide() : show() }
+
+    /// The page asks; `rfa` answers. Everything here runs off the main thread, because `rfa
+    /// branches` goes to each repository's remote and a spinning capture box is a useless one.
+    func userContentController(
+        _ controller: WKUserContentController, didReceive message: WKScriptMessage,
+        replyHandler: @escaping (Any?, String?) -> Void
+    ) {
+        guard let body = message.body as? [String: Any], let type = body["type"] as? String else {
+            return replyHandler(nil, "bad message")
+        }
+        switch type {
+        case "close":
+            hide()
+            replyHandler(nil, nil)
+        case "repos":
+            background({ Rfa.status()?.repos ?? [] }, { replyHandler(["repos": $0], nil) })
+        case "branches":
+            let repos = (body["repos"] as? [String] ?? []).filter(Rfa.isRepoId)
+            guard !repos.isEmpty else { return replyHandler(["branches": [], "errors": []], nil) }
+            background({ Rfa.json(["branches"] + repos + ["--json"]) }) { found in
+                replyHandler(found ?? ["branches": [], "errors": ["rfa branches failed"]], nil)
+            }
+        case "save":
+            let idea = (body["idea"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let repos = (body["repos"] as? [String] ?? []).filter(Rfa.isRepoId)
+            guard !idea.isEmpty else { return replyHandler(["error": "say what should happen"], nil) }
+            guard !repos.isEmpty else { return replyHandler(["error": "pick a repository"], nil) }
+            var args = ["new", idea]
+            for repo in repos { args += ["-r", repo] }
+            for pick in (body["branches"] as? [String] ?? []).filter(Rfa.isRepoBranch) { args += ["-b", pick] }
+            for pick in (body["context_branches"] as? [String] ?? []).filter(Rfa.isRepoBranch) { args += ["-c", pick] }
+            background({ Rfa.run(args) }) { result in
+                replyHandler(result.ok ? ["ok": true] : ["error": String(result.output.suffix(300))], nil)
+            }
+        default:
+            replyHandler(nil, "unknown message \(type)")
+        }
+    }
+
+    private func background<T>(_ work: @escaping () -> T, _ done: @escaping (T) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let value = work()
+            DispatchQueue.main.async { done(value) }
+        }
+    }
+}
+
+// MARK: - Edit menu
+
+/// ⌘Z/⌘X/⌘C/⌘V/⌘A reach a WKWebView only as key equivalents of menu items. This app is an
+/// accessory, so the menu bar never shows it; the menu exists for its shortcuts alone.
+enum EditMenu {
+    static func install() {
+        let edit = NSMenu(title: "Edit")
+        edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        edit.addItem(.separator())
+        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let item = NSMenuItem()
+        item.submenu = edit
+        let menu = NSMenu()
+        menu.addItem(item)
+        NSApp.mainMenu = menu
+    }
+}
+
 // MARK: - The menu
 
 final class Controller: NSObject, NSMenuDelegate {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     let menu = NSMenu()
     var status: Status?
+    var overlay: Overlay?
     var busy: String?
     var timer: Timer?
     var isOpen = false
+    var announced: String?
 
     func start() {
         menu.delegate = self
@@ -108,10 +285,20 @@ final class Controller: NSObject, NSMenuDelegate {
         DispatchQueue.global(qos: .utility).async {
             let status = Rfa.status()
             DispatchQueue.main.async {
+                self.announce(status?.last)
                 self.status = status
                 self.draw()
             }
         }
+    }
+
+    /// The first poll after launch only learns which run was last; it is not news.
+    func announce(_ last: Status.Card?) {
+        guard let last, announced != last.id else { return }
+        let first = announced == nil && status == nil
+        announced = last.id
+        guard !first else { return }
+        Notify.post(last.status == "shipped" ? "Shipped" : "Run failed", last.title)
     }
 
     // MARK: drawing
@@ -153,6 +340,7 @@ final class Controller: NSObject, NSMenuDelegate {
         menu.addItem(action("Restart", #selector(restart), enabled: up))
         menu.addItem(action("Down", #selector(bringDown), enabled: up))
         menu.addItem(.separator())
+        menu.addItem(action("New Idea    ⌥Space", #selector(capture)))
         menu.addItem(models())
         menu.addItem(.separator())
         menu.addItem(action("Open Board", #selector(openBoard), enabled: status?.boardUp ?? false))
@@ -224,6 +412,8 @@ final class Controller: NSObject, NSMenuDelegate {
     @objc func restart() { command("Restarting", ["restart"]) }
     @objc func bringDown() { command("Stopping", ["down"]) }
 
+    @objc func capture() { overlay?.show() }
+
     @objc func chooseModel(_ sender: NSMenuItem) { command("Switching to \(sender.title)", ["model", sender.title]) }
 
     @objc func openBoard() { NSWorkspace.shared.open(URL(string: status?.boardUrl ?? "http://127.0.0.1:4380/")!) }
@@ -252,11 +442,51 @@ final class Controller: NSObject, NSMenuDelegate {
     }
 }
 
+// MARK: - Notifications
+
+/// A run takes long enough that you go and do something else, which is exactly when you stop
+/// looking at the menu bar. `report()["last"]` names the run that finished most recently, so a
+/// change in it is a run that ended since the last look.
+enum Notify {
+    static func ask() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    static func post(_ title: String, _ body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
+}
+
 // MARK: - App
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let controller = Controller()
-    func applicationDidFinishLaunching(_ note: Notification) { controller.start() }
+    var overlay: Overlay!
+    var hotKey: EventHotKeyRef?
+
+    func applicationDidFinishLaunching(_ note: Notification) {
+        EditMenu.install()
+        overlay = Overlay()
+        controller.overlay = overlay
+        controller.start()
+        Notify.ask()
+        registerHotKey()
+    }
+
+    func registerHotKey() {
+        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        InstallEventHandler(GetApplicationEventTarget(), { _, _, context in
+            let delegate = Unmanaged<AppDelegate>.fromOpaque(context!).takeUnretainedValue()
+            DispatchQueue.main.async { delegate.overlay.toggle() }
+            return noErr
+        }, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), nil)
+        let id = EventHotKeyID(signature: OSType(0x5246_4141), id: 1)  // 'RFAA'
+        RegisterEventHotKey(hotKeyCode, hotKeyModifiers, id, GetApplicationEventTarget(), 0, &hotKey)
+    }
 }
 
 let app = NSApplication.shared

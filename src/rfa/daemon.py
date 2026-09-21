@@ -19,10 +19,8 @@ import signal
 import time
 from dataclasses import dataclass, field
 
-from rfa import gates, settings, tasks
-from rfa.planner import plan_task
+from rfa import gates, service, settings, tasks
 from rfa.tasks import Task
-from rfa.worker import run_task
 
 
 @dataclass
@@ -92,12 +90,50 @@ def next_job(config: DaemonConfig) -> tuple[str, Task] | None:
 
 
 def run(job: tuple[str, Task], config: DaemonConfig) -> None:
+    # Imported here, not at the top: these pull in the whole agent harness, and the board and
+    # `rfa status` import this module only to ask what it would do next.
+    from rfa.planner import plan_task
+    from rfa.worker import run_task
+
     kind, task = job
     with gates.KeepAwake(config.keep_awake):
         if kind == "plan":
             plan_task(task, settings.load("planner"))
         else:
             run_task(task, settings.load("coder"))
+
+
+def finished() -> Task | None:
+    """The run that ended most recently -- what the menu bar announces when it changes."""
+    done = [t for t in tasks.tasks("done") if t.meta.get("finished_at")]
+    return max(done, key=lambda t: str(t.meta["finished_at"]), default=None)
+
+
+def report() -> dict:
+    """One answer to "what is going on", for `rfa status`, the board and the menu bar alike.
+
+    One function, so the three of them can never tell you different things about the same machine.
+    """
+    config, workspace = DaemonConfig.load(), settings.load()
+    job, last = next_job(config), finished()
+    return {
+        "home": str(tasks.home()),
+        # What is configured, not what a run would insist on: this must answer even when `models:`
+        # is empty, where `settings.pick` is right to refuse.
+        "model": settings.chosen() or workspace.get("default_model") or "",
+        "models": sorted(settings.presets(workspace)),
+        "repos": sorted(workspace.get("repos") or {}),
+        "board_url": service.url(),
+        # 0 rather than null: not running is a state, not missing information.
+        "services": {s.name: s.pid() or 0 for s in service.services()},
+        "gates": [vars(gate) for gate in gates.check(config, running())],
+        "stages": {stage: len(tasks.tasks(stage)) for stage in tasks.STAGES},
+        "running": [{"id": t.id, "title": t.title, "status": t.status} for t in running()],
+        "next": {"job": job[0], "id": job[1].id, "title": job[1].title} if job else None,
+        "last": None
+        if last is None
+        else {"id": last.id, "title": last.title, "status": last.status, "at": last.meta["finished_at"]},
+    }
 
 
 def terminate(*_) -> None:

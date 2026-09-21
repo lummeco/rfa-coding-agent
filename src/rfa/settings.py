@@ -44,20 +44,59 @@ def load(stage: str = "planner") -> dict:
     return recursive_merge(packaged, mine, for_stage)
 
 
-def repo_paths(config: dict, names: list[str]) -> dict[str, tuple[Path, str]]:
-    """A task's `repos:` front matter, resolved to local checkouts.
+MAX_CONTEXT = 3
+"""Reference branches a card may carry. Each one is a whole repository in the agent's context; past
+a few they stop being a hint and start being noise the model has to read past."""
+
+
+def repo_paths(config: dict, names: list[str], branches: dict[str, str] | None = None) -> dict[str, tuple[Path, str]]:
+    """A task's `repos:` front matter, resolved to local checkouts and the ref each starts from.
 
     The key the packet must use is the last segment, so `lummeco/lummepro-web` is `lummepro-web/...`
     -- what the coder will see under /work/repos, and what it would type locally.
+
+    The ref is the card's own `branches:` when it named one, and otherwise whatever `repos:` in
+    rfa.yaml is pinned to. Picking a branch per card is the point: most work starts from `main`, and
+    the work that does not would otherwise have to start from the wrong place.
     """
     configured = config.get("repos") or {}
     resolved = {}
     for name in names:
         if name not in configured:
             raise KeyError(f"`{name}` is not listed under `repos:` in {path()}")
-        location, _, ref = str(configured[name]).partition("@")
-        resolved[name.rpartition("/")[2]] = (Path(location).expanduser().resolve(), ref or "HEAD")
+        location, _, pinned = str(configured[name]).partition("@")
+        ref = (branches or {}).get(name) or pinned or "HEAD"
+        resolved[name.rpartition("/")[2]] = (Path(location).expanduser().resolve(), ref)
     return resolved
+
+
+def pairs(meta: dict, key: str) -> list[tuple[str, str]]:
+    """`branches: [owner/name@branch]` front matter, in the order it was written."""
+    items = meta.get(key) or []
+    listed = [items] if isinstance(items, str) else items
+    found = [tuple(str(item).split("@", 1)) for item in listed if "@" in str(item)]
+    return list(dict.fromkeys(found))  # type: ignore[arg-type]
+
+
+def start_branches(meta: dict) -> dict[str, str]:
+    """Where each repository's work begins. One branch per repository: a diff has one base."""
+    return dict(pairs(meta, "branches"))
+
+
+def reference_paths(config: dict, meta: dict) -> dict[str, tuple[Path, str]]:
+    """The read-only branches seeded beside the work, keyed by the folder the agent will see.
+
+    Code to look at, not code to change: an implementation on another branch, the repository a
+    convention came from. They are never diffed, so nothing an agent does to them can land.
+    """
+    configured = config.get("repos") or {}
+    chosen = {}
+    for name, branch in pairs(meta, "context_branches")[:MAX_CONTEXT]:
+        if name not in configured:
+            raise KeyError(f"`{name}` is not listed under `repos:` in {path()}")
+        location = str(configured[name]).partition("@")[0]
+        chosen[f"{name.rpartition('/')[2]}@{branch}"] = (Path(location).expanduser().resolve(), branch)
+    return chosen
 
 
 def presets(config: dict) -> dict[str, dict]:

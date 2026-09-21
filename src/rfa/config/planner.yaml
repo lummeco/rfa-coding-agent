@@ -31,6 +31,18 @@ agent:
     edits here reach nothing.
 
     {{repo_map}}
+    {% if reference %}
+
+    ## Reference code
+
+    Beside the work, at `/work/reference/`, someone put branches for you to read:
+
+    {% for name in reference %}- `/work/reference/{{name}}`
+    {% endfor %}
+    They show how something like this was done, or what a convention looks like -- use them to
+    ground the packet. Never name a path inside them: the packet's paths are the work's paths, and
+    the coder cannot change reference code any more than you can.
+    {% endif %}
 
     ## 1. Read the code first
 

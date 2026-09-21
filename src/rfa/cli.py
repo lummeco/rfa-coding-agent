@@ -13,6 +13,7 @@ rfa show <id>               one task, in full
 rfa plan [id ...]           write packets for cards waiting in planning
 rfa approve <id>            you read the packet; it becomes work
 rfa work [id]               code the next approved task (default: the oldest)
+rfa branches [repo ...]     the branches you can start work from
 rfa models                  the models you can run with
 rfa model [name]            which one new runs use
 rfa mv <id> <stage>         move a task by hand
@@ -21,7 +22,9 @@ rfa daemon                  the loop `rfa up` runs in the background, in the for
 """
 
 import json
+import subprocess
 import webbrowser
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -51,8 +54,8 @@ def up(
     open_browser: bool = typer.Option(True, "--open/--no-open", help="Open the board once it is up"),
 ):
     """Check everything the pipeline needs, then start the daemon and the board."""
-    from rfa.service import remember, services
-    from rfa.up import check
+    from rfa.service import forget, services, url
+    from rfa.up import check, menubar
 
     console.print("[bold]Bringing rfa up[/]\n")
     report = check()
@@ -64,27 +67,36 @@ def up(
     if not report.ok:
         console.print("\n[bold red]Not ready.[/] Fix the above and run [bold]rfa up[/] again.")
         raise typer.Exit(1)
+    forget()  # the board mints a fresh token at startup and writes the address back
     for service in services(port):
         detail = "started" if service.start() else "already running"
         if not (pid := service.pid()):
             console.print(f"  [red]✗[/] [bold]{service.name:<10}[/] would not stay up — see {service.log}")
             raise typer.Exit(1)
         console.print(f"  [green]✓[/] [bold]{service.name:<10}[/] {detail} (pid {pid}) — {service.log}")
-    url = remember(port)
-    console.print(f"\n[bold green]Up.[/] Board on [bold]{url}[/] — the daemon plans and codes from here on.")
-    console.print('[dim]Capture an idea, move it into planning, approve the packet. `rfa down` stops everything.[/]')
+    app = menubar()
+    console.print(f"  {'[green]✓[/]' if app.ok else '[red]✗[/]'} [bold]{app.name:<10}[/] {app.detail}")
+    if not (address := url()):
+        console.print(f"\n[bold red]The board did not say where it is.[/] See {services(port)[1].log}")
+        raise typer.Exit(1)
+    console.print(f"\n[bold green]Up.[/] Board on [bold]{address}[/] — the daemon plans and codes from here on.")
+    console.print("[dim]The token in that link is this board's; `rfa status --json` prints it again.[/]")
     if open_browser:
-        webbrowser.open(url)
+        webbrowser.open(address)
 
 
 @app.command()
 def down():
     """Stop the daemon and the board. Nothing in `tasks/` changes."""
-    from rfa.service import services
+    from rfa.service import forget, services
 
+    forget()
     for service in reversed(services()):
         state = "[bold green]stopped[/]" if service.stop() else "[dim]not running[/]"
         console.print(f"  [bold]{service.name:<10}[/] {state}")
+    # The menu bar app is left alone on purpose: it is how you bring this back up, and it costs
+    # nothing while nothing is running. Quit it from its own menu.
+    console.print("  [bold]menubar   [/] [dim]left running — quit it from its own menu[/]")
 
 
 @app.command()
@@ -100,26 +112,9 @@ def restart(
 @app.command()
 def status(as_json: bool = typer.Option(False, "--json", help="The same thing, for the menu bar")):
     """What is running, what the gates say, and what is on the board."""
-    from rfa import gates
-    from rfa.daemon import DaemonConfig, next_job, running
-    from rfa.service import services, url
+    from rfa.daemon import report
 
-    config, workspace = DaemonConfig.load(), settings.load()
-    job = next_job(config)
-    payload = {
-        "home": str(tasks.home()),
-        # What is configured, not what a run would insist on: `status` must answer even when
-        # `models:` is empty, where `settings.pick` is right to refuse.
-        "model": settings.chosen() or workspace.get("default_model") or "",
-        "models": sorted(settings.presets(workspace)),
-        "board_url": url(),
-        # 0 rather than null: not running is a state, not missing information.
-        "services": {service.name: service.pid() or 0 for service in services()},
-        "gates": [vars(gate) for gate in gates.check(config, running())],
-        "stages": {stage: len(tasks.tasks(stage)) for stage in tasks.STAGES},
-        "running": [{"id": t.id, "title": t.title, "status": t.status} for t in running()],
-        "next": {"job": job[0], "id": job[1].id, "title": job[1].title} if job else None,
-    }
+    payload = report()
     if as_json:
         print(json.dumps(payload))
         return
@@ -155,10 +150,19 @@ def init():
 def new(
     idea: str = typer.Argument(..., help="The idea, in plain words"),
     repo: list[str] = typer.Option([], "-r", "--repo", help="Repository this touches, as in rfa.yaml"),
+    branch: list[str] = typer.Option([], "-b", "--branch", help="owner/name@branch the work starts from"),
+    context: list[str] = typer.Option([], "-c", "--context", help="owner/name@branch to read beside it"),
     model: str = typer.Option("", "-m", "--model", help="Run this card with a particular model"),
 ):
     """Capture an idea as a draft."""
-    console.print(f"[bold green]Draft[/] {tasks.create(idea, list(repo), model=model or None).id}")
+    task = tasks.create(
+        idea,
+        list(repo),
+        branches=list(branch) or None,
+        context_branches=list(context)[: settings.MAX_CONTEXT] or None,
+        model=model or None,
+    )
+    console.print(f"[bold green]Draft[/] {task.id}")
 
 
 @app.command("ls")
@@ -247,6 +251,40 @@ def move(id: str, stage: str):
     if stage not in tasks.STAGES:
         raise typer.BadParameter(f"stage must be one of {', '.join(tasks.STAGES)}")
     console.print(f"[bold green]{tasks.move(tasks.find(id), stage, actor='human').id}[/] -> {stage}")
+
+
+@app.command("branches")
+def list_branches(
+    repos: list[str] = typer.Argument(None, help="Repository ids as in rfa.yaml; omit for all of them"),
+    as_json: bool = typer.Option(False, "--json", help="For the capture overlay"),
+):
+    """The branches you can start work from, live from each repository's own remote."""
+    from rfa.planner import branches
+
+    config = settings.load()
+    configured = config.get("repos") or {}
+    wanted = list(repos) if repos else list(configured)
+    found, errors = [], []
+    for name in wanted:
+        if name not in configured:
+            errors.append(f"{name} is not listed under `repos:` in {settings.path()}")
+            continue
+        path, _, default = str(configured[name]).partition("@")
+        try:
+            names = branches(Path(path).expanduser().resolve(), default)
+        except (OSError, subprocess.SubprocessError) as e:
+            errors.append(f"{name}: {str(e).splitlines()[0]}")
+            continue
+        found += [{"repo": name, "branch": b, "default": b == default} for b in names]
+    if as_json:
+        print(json.dumps({"branches": found, "errors": errors}))
+        return
+    for name in wanted:
+        mine = [b for b in found if b["repo"] == name]
+        listed = "  ".join(f"[bold]{b['branch']}[/]" if b["default"] else b["branch"] for b in mine)
+        console.print(f"  [dim]{name}[/]  {listed or '[dim](none)[/]'}")
+    for problem in errors:
+        console.print(f"  [red]✗[/] {problem}")
 
 
 @app.command("models")

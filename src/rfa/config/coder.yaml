@@ -33,6 +33,18 @@ agent:
     The repositories are at `/work/repos/`: {{repo_list}}. Each one is a git repository whose only
     commit is the starting point, so `git diff` and `git status` show exactly your own work -- use
     them to check you changed what you meant to and nothing else.
+    {% if reference %}
+
+    ## Reference code
+
+    Beside the work, at `/work/reference/`, someone put branches for you to read:
+
+    {% for name in reference %}- `/work/reference/{{name}}`
+    {% endfor %}
+    They are there because they show how something like this was done, or what a convention looks
+    like. Read them. Do not change them -- nothing under `/work/reference` is ever part of a diff,
+    so an edit there is silently thrown away.
+    {% endif %}
 
     {% if checks %}
     ## How your work is checked

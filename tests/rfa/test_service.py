@@ -5,7 +5,7 @@ import time
 import pytest
 
 from rfa import tasks
-from rfa.service import DEFAULT_PORT, Service, remember, services, url
+from rfa.service import Service, forget, services, url
 
 
 @pytest.fixture(autouse=True)
@@ -47,10 +47,14 @@ def test_a_pid_file_is_a_claim_not_proof(contents):
     assert daemon.stop() is False and not daemon.pid_file.exists()
 
 
-def test_the_board_address_survives_the_command_that_chose_it():
-    """`rfa up -p` picks the port; `rfa status` and the menu bar read it back rather than guessing."""
-    assert url() == f"http://127.0.0.1:{DEFAULT_PORT}/"
-    assert remember(9001) == "http://127.0.0.1:9001/" == url()
+def test_there_is_no_address_without_a_live_board(workspace):
+    """The board writes down where it is, token and all, because nobody else can guess the token.
+    No file means no board -- and guessing a tokenless URL would only 403."""
+    assert url() == ""
+    (workspace / "var" / "board.url").write_text("http://127.0.0.1:4380/#token=abc\n")
+    assert url() == "http://127.0.0.1:4380/#token=abc"
+    forget()
+    assert url() == ""
 
 
 def test_a_child_that_dies_at_once_is_not_a_running_service():

@@ -17,7 +17,8 @@ from minisweagent.environments import get_environment
 from minisweagent.exceptions import Submitted
 from minisweagent.models import get_model
 from rfa import settings, tasks
-from rfa.planner import REPOS_DIR, git, seed
+from rfa.packet import FORBIDDEN_PATHS
+from rfa.planner import REPOS_DIR, git, pin, seed
 from rfa.tasks import Task
 
 CHECKS_FAILED = (
@@ -123,14 +124,37 @@ def make_git_repos(env: Environment, names: list[str]) -> None:
         )
 
 
-def diffs(env: Environment, names: list[str]) -> dict[str, str]:
-    """What the coder changed, per repository. The only thing that leaves the container."""
-    changed = {}
+def blocked(paths: list[str]) -> list[str]:
+    """Paths the export gate will not carry out of the container.
+
+    CI configuration is the one thing a diff can contain that runs somewhere by itself: a workflow
+    the coder wrote executes the moment you push the branch, without anyone reading it. The packet
+    already refuses to aim at these (packet.FORBIDDEN_PATHS); this is the same rule at the far end,
+    where it is the coder's own output rather than the planner's intent.
+    """
+    return [p for p in paths if any(rx.search(p) for rx in FORBIDDEN_PATHS)]
+
+
+def diffs(env: Environment, names: list[str]) -> tuple[dict[str, str], dict[str, list[str]]]:
+    """What the coder changed, per repository, and what the gate dropped on the way out.
+
+    The diff is the only thing that leaves the container, so it is the only place worth gating.
+    """
+    changed, dropped = {}, {}
     for name in names:
-        output = env.execute({"command": f"cd {REPOS_DIR}/{name} && git add -A && git diff --cached --binary"})
+        where = f"cd {REPOS_DIR}/{name} && git add -A"
+        listed = env.execute({"command": f"{where} && git diff --cached --name-only"})
+        if listed["returncode"] != 0:
+            continue
+        if refused := blocked(listed["output"].split()):
+            dropped[name] = refused
+        # By exact path rather than by pattern: the gate drops what it actually found, and a file
+        # whose name merely looks like CI keeps its diff.
+        exclude = " ".join(f"':(exclude){path}'" for path in refused)
+        output = env.execute({"command": f"{where} && git diff --cached --binary -- . {exclude}"})
         if output["returncode"] == 0 and output["output"].strip():
             changed[name] = output["output"]
-    return changed
+    return changed, dropped
 
 
 def run_dir(id: str) -> Path:
@@ -168,7 +192,7 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
     """Claim a todo, code it, check it, and put it in done saying how it went."""
     if task.stage != "todo":
         raise ValueError(f"{task.id} is in `{task.stage}`, not `todo`")
-    repos = settings.repo_paths(config, task.meta.get("repos") or [])
+    repos = settings.repo_paths(config, task.meta.get("repos") or [], settings.start_branches(task.meta))
     if not repos:
         raise ValueError(f"{task.id} names no repositories; add `repos:` to the card")
     names = list(repos)
@@ -184,7 +208,11 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
     env = None
     try:
         env = get_environment(config.get("environment", {}), default_type="docker")
-        seed(env, repos)
+        # Pinned here rather than before the move: a fetch needs the network, and a card that fails
+        # on it belongs back in the queue with the rest of the infrastructure failures.
+        repos = pin(repos)
+        reference = pin(settings.reference_paths(config, task.meta))
+        seed(env, repos, reference)
         make_git_repos(env, names)
         checks, cwd = task.meta.get("checks") or [], f"{REPOS_DIR}/{names[0]}"
         # Measure the repository before the coder touches it, so a test that was already red is not
@@ -206,8 +234,9 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
             primary_repo=cwd,
             checks=checks,
             broken_checks=[c for c, ok in baseline.items() if not ok],
+            reference=sorted(reference),
         )
-        patches = diffs(env, names)
+        patches, dropped = diffs(env, names)
     except Exception as e:
         # Docker down, the model unreachable, the image missing: nothing to do with the task itself.
         # Put it back in the queue rather than leaving a card in under-work with no worker on it.
@@ -223,13 +252,18 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
     (output / "checks.json").write_text(json.dumps(agent.results, indent=2))
 
     shipped = bool(patches) and not agent.regressions()
-    branches = {}
+    # `landed`, not `branches`: the card's own `branches:` is where its work started from, and
+    # these are where it ended up. One name for both would quietly overwrite the first with the second.
+    landed = {}
     if shipped:
         for name, (repo, ref) in repos.items():
             if name in patches:
-                branches[name] = land(repo, ref, f"rfa/{task.id}", output / f"{name}.patch", task.title)
-    tasks.log(type="run_finished", id=task.id, shipped=shipped, rounds=agent.round, branches=branches)
-    task.body += changed_note(branches, repos, output) if shipped else failure_note(agent, patches)
+                landed[name] = land(repo, ref, f"rfa/{task.id}", output / f"{name}.patch", task.title)
+    tasks.log(
+        type="run_finished", id=task.id, shipped=shipped, rounds=agent.round, landed=landed, dropped=dropped
+    )
+    task.body += changed_note(landed, repos, output) if shipped else failure_note(agent, patches)
+    task.body += dropped_note(dropped)
     return tasks.move(
         task,
         "done",
@@ -237,7 +271,7 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         status="shipped" if shipped else "failed",
         finished_at=tasks.now(),
         run=str(output),
-        branches=branches or None,
+        landed=landed or None,
         error=None if shipped else summarize(agent, patches),
     )
 
@@ -250,14 +284,24 @@ def summarize(agent: CoderAgent, patches: dict[str, str]) -> str:
     return "The run did not finish."
 
 
-def changed_note(branches: dict[str, str], repos: dict[str, tuple[Path, str]], output: Path) -> str:
+def changed_note(landed: dict[str, str], repos: dict[str, tuple[Path, str]], output: Path) -> str:
     """Where the work went. A local branch in your own checkout -- nothing was pushed."""
     lines = ["\n## Result\n"]
-    for name, branch in branches.items():
+    for name, branch in landed.items():
         repo, ref = repos[name]
         lines.append(f"- `{name}` on `{branch}` — `git -C {repo} diff {ref}..{branch}`")
     lines.append(f"\nPatches and the trajectory: `{output}`\n")
     return "\n".join(lines)
+
+
+def dropped_note(dropped: dict[str, list[str]]) -> str:
+    """Say what the gate refused, on the card, where you will read it -- a silent drop is a lie."""
+    if not dropped:
+        return ""
+    lines = ["\n## Not exported\n", "The coder changed CI configuration. It is never carried out of the"]
+    lines.append("container, so these are **not** in the branch:\n")
+    lines += [f"- `{name}`: {', '.join(f'`{p}`' for p in paths)}" for name, paths in dropped.items()]
+    return "\n".join(lines) + "\n"
 
 
 def failure_note(agent: CoderAgent, patches: dict[str, str]) -> str:

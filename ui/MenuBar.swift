@@ -37,6 +37,7 @@ struct Status: Decodable {
     let model: String
     let models: [String]
     let reasoning: [String]
+    let defaultReasoning: String
     let repos: [String]
     let boardUrl: String
     let services: [String: Int]  // 0 when that one is not running
@@ -221,6 +222,7 @@ final class Overlay: NSObject, WKScriptMessageHandlerWithReply {
                     "models": status?.models ?? [],
                     "model": status?.model ?? "",
                     "reasoning": status?.reasoning ?? [],
+                    "defaultReasoning": status?.defaultReasoning ?? "",
                 ], nil)
             }
         case "branches":
@@ -370,6 +372,7 @@ final class Controller: NSObject, NSMenuDelegate {
         menu.addItem(action(hotKeyProblem == nil ? "New Idea    ⌥Space" : "New Idea", #selector(capture)))
         if let hotKeyProblem { menu.addItem(note("   \(hotKeyProblem) — use this item instead")) }
         menu.addItem(models())
+        menu.addItem(reasoning())
         menu.addItem(.separator())
         menu.addItem(action("Open Board", #selector(openBoard), enabled: status?.boardUp ?? false))
         menu.addItem(action("Open Tasks Folder", #selector(openTasks)))
@@ -394,6 +397,24 @@ final class Controller: NSObject, NSMenuDelegate {
             choice.target = self
             choice.isEnabled = busy == nil
             choice.state = name == status?.model ? .on : .off
+            submenu.addItem(choice)
+        }
+        if submenu.items.isEmpty { submenu.addItem(note("none in rfa.yaml")) }
+        item.submenu = submenu
+        item.isEnabled = true
+        return item
+    }
+
+    /// The same, for the reasoning level: `rfa reasoning` is the command behind it.
+    func reasoning() -> NSMenuItem {
+        let item = NSMenuItem(title: "Reasoning", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        for level in status?.reasoning ?? [] {
+            let choice = NSMenuItem(title: level, action: #selector(chooseReasoning(_:)), keyEquivalent: "")
+            choice.target = self
+            choice.isEnabled = busy == nil
+            choice.state = level == status?.defaultReasoning ? .on : .off
             submenu.addItem(choice)
         }
         if submenu.items.isEmpty { submenu.addItem(note("none in rfa.yaml")) }
@@ -443,6 +464,7 @@ final class Controller: NSObject, NSMenuDelegate {
     @objc func capture() { overlay?.show() }
 
     @objc func chooseModel(_ sender: NSMenuItem) { command("Switching to \(sender.title)", ["model", sender.title]) }
+    @objc func chooseReasoning(_ sender: NSMenuItem) { command("Switching to \(sender.title)", ["reasoning", sender.title]) }
 
     @objc func openBoard() { NSWorkspace.shared.open(URL(string: status?.boardUrl ?? "http://127.0.0.1:4380/")!) }
     @objc func openTasks() { NSWorkspace.shared.open(home.appendingPathComponent("tasks")) }

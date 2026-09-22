@@ -115,6 +115,17 @@ def choose(name: str) -> None:
     path.write_text(name)
 
 
+def chosen_reasoning() -> str:
+    """The reasoning level `rfa reasoning <level>` (and the menu bar) picked, if anyone has picked one."""
+    path = tasks.home() / "var" / "reasoning"
+    return path.read_text().strip() if path.exists() else ""
+
+
+def choose_reasoning(level: str) -> None:
+    (path := tasks.home() / "var" / "reasoning").parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(level)
+
+
 def pick(config: dict, name: str = "") -> str:
     """Which preset a run uses, in falling order: what the command said, what `rfa model` picked,
     then the stage's own `default_model`.
@@ -159,11 +170,11 @@ def model_config(config: dict, name: str = "", reasoning: str = "") -> dict:
     `reasoning` becomes litellm's `reasoning_effort`, which it turns into Ollama's `think`. Only
     the graded models read the level itself; for a Qwen, `none` is thinking off and the other three
     are all thinking on -- so the level is a dial on the models that have one, and a switch on the
-    rest. What the command passes wins over what the preset says.
+    rest. What the command passes wins, then what `rfa reasoning` picked, then what the preset says.
     """
     preset = dict(presets(config)[pick(config, name)])
     preset.pop("ollama", None)  # `rfa up`'s business: how to serve it, not how to call it
-    level = reasoning or preset.pop("reasoning", "")
+    level = reasoning or chosen_reasoning() or preset.pop("reasoning", "")
     preset.pop("reasoning", None)  # the line above keeps it when the command passed its own
     if level and level not in REASONING:
         raise ValueError(f"reasoning must be one of {', '.join(REASONING)}, not `{level}`")

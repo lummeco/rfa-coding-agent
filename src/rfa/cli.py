@@ -16,6 +16,7 @@ rfa work [id]               code the next approved task (default: the oldest)
 rfa branches [repo ...]     the branches you can start work from
 rfa models                  the models you can run with
 rfa model [name]            which one new runs use
+rfa reasoning [level]     which level new runs use
 rfa mv <id> <stage>         move a task by hand
 rfa board                   the board, in a browser
 rfa daemon                  the loop `rfa up` runs in the background, in the foreground
@@ -295,6 +296,18 @@ def set_model(name: str = typer.Argument("", help="A name from `models:`; omit t
         return
     settings.choose(settings.pick(config, name))
     console.print(f"[bold green]{name}[/] — planning and coding use it from the next run on.")
+
+
+@app.command("reasoning")
+def set_reasoning(level: str = typer.Argument("", help="none | low | medium | high; omit to see the current one")):
+    """Which reasoning level new runs use. Overrides each model's own level until you change it again."""
+    if not level:
+        console.print(f"[bold]{settings.chosen_reasoning() or 'none'}[/]")
+        return
+    if level not in settings.REASONING:
+        raise typer.BadParameter(f"level must be one of {', '.join(settings.REASONING)}")
+    settings.choose_reasoning(level)
+    console.print(f"[bold green]{level}[/] — planning and coding use it from the next run on.")
 
 
 @app.command()

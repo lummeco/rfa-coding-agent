@@ -74,6 +74,19 @@ def test_a_reasoning_level_nobody_understands_is_refused():
         settings.model_config(settings.load("planner"), "qwen3.6", "extreme")
 
 
+def test_the_workspace_default_level_is_used_when_nothing_else_says():
+    """`rfa reasoning` picks a level for every run that does not carry one of its own, and it beats
+    the preset's own level, which is the model's guess rather than a choice."""
+    settings.choose_reasoning("low")
+    assert settings.chosen_reasoning() == "low"
+    assert settings.model_config(settings.load("planner"), "qwen3.6", "")["model_kwargs"]["reasoning_effort"] == "low"
+
+
+def test_a_level_someone_asked_for_beats_the_workspace_default():
+    settings.choose_reasoning("low")
+    assert settings.model_config(settings.load("planner"), "qwen3.6", "high")["model_kwargs"]["reasoning_effort"] == "high"
+
+
 @pytest.mark.parametrize(
     ("meta", "model", "reasoning", "expected"),
     [

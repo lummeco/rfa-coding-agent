@@ -119,7 +119,7 @@ let branches = [];     // [{repo, branch, default}] for the chosen repos
 let picks = [];        // [{repo, branch}] in the order picked: first per repo starts the work
 let cursor = 0;
 let loading = false;
-let setup = { models: [], model: "", reasoning: [] };
+let setup = { models: [], model: "", reasoning: [], defaultReasoning: "" };
 
 // --- what has been picked ---------------------------------------------------------------------
 
@@ -128,16 +128,15 @@ let setup = { models: [], model: "", reasoning: [] };
 const role = (pick, i) => (picks.findIndex(p => p.repo === pick.repo) === i ? "start" : "reference");
 const refs = () => picks.filter((p, i) => role(p, i) === "reference");
 
-// Blank means "whatever the workspace is set to": a card should only pin a model or a level when
-// you actually chose one, or every card would freeze today's default into itself forever.
+// The workspace defaults are pre-selected, so a card always carries the model and the level it
+// will run with: what you see is what the run gets, and changing either is a deliberate choice.
 function drawRun() {
     const option = (value, label, chosen) =>
       `<option value="${esc(value)}"${value === chosen ? " selected" : ""}>${esc(label)}</option>`;
     document.getElementById("model").innerHTML =
-      option("", setup.model ? `${setup.model} (default)` : "default", "")
-      + setup.models.map(m => option(m, m, "")).join("");
+      setup.models.map(m => option(m, m, setup.model)).join("");
     document.getElementById("reasoning").innerHTML =
-      option("", "reasoning: default", "") + setup.reasoning.map(r => option(r, `reasoning: ${r}`, "")).join("");
+      setup.reasoning.map(r => option(r, `reasoning: ${r}`, setup.defaultReasoning)).join("");
 }
 
 function drawRepos() {
@@ -281,7 +280,7 @@ window.rfa = {
     drawPicks();
     drawResults(false);
     const reply = await call("setup");
-    setup = { models: reply?.models || [], model: reply?.model || "", reasoning: reply?.reasoning || [] };
+    setup = { models: reply?.models || [], model: reply?.model || "", reasoning: reply?.reasoning || [], defaultReasoning: reply?.defaultReasoning || "" };
     drawRun();
     repos = reply?.repos || [];
     chosen = new Set([...chosen].filter(r => repos.includes(r)));

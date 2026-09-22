@@ -128,7 +128,10 @@ def check(config, running: list) -> list[Gate]:
 
 
 class KeepAwake:
-    """`caffeinate -i -w <pid>`: the Mac does not idle-sleep out from under a run.
+    """`caffeinate -i -s -w <pid>`: the Mac does not sleep out from under a run.
+
+    `-s` holds off system sleep as well as idle sleep, and only counts on wall power -- on battery
+    macOS ignores it and `-i` is what is left.
 
     Held for the run, not for the daemon: a daemon that never lets the machine sleep is worse than
     one that occasionally starts late.
@@ -142,7 +145,7 @@ class KeepAwake:
         if self.enabled:
             try:
                 self.process = subprocess.Popen(
-                    ["caffeinate", "-i", "-w", str(os.getpid())],
+                    ["caffeinate", "-i", "-s", "-w", str(os.getpid())],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )

@@ -38,7 +38,7 @@ class DaemonConfig:
     memory_min_pct: int = 30
     """Free memory a run needs. Memory pressure above normal closes the gate whatever this says."""
     keep_awake: bool = True
-    """Hold `caffeinate` for a run, so the Mac does not idle-sleep in the middle of one."""
+    """Hold `caffeinate -is` for a run, so the Mac does not sleep in the middle of one."""
     plan_ahead: int = 2
     """Stop planning once this many cards of work are waiting for you or for the coder."""
     max_attempts: int = 3

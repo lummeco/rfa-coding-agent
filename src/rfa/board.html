@@ -450,6 +450,7 @@ function actionsFor(t) {
   if (t.stage === "planning" && t.status === "ready") return move("todo", "Approve", "primary") + move("draft", "Send back", "quiet");
   if (t.stage === "planning" && t.status === "failed") return move("draft", "Back to draft", "");
   if (t.stage === "todo") return move("planning", "Re-plan", "quiet");
+  if (t.stage === "done" && Object.keys(t.landed || {}).length) return move("todo", "Run again", "") + move("planning", "Re-plan", "quiet") + `<button class="action" data-pr="${esc(t.id)}">Create PR</button>`;
   if (t.stage === "done") return move("todo", "Run again", "") + move("planning", "Re-plan", "quiet");
   if (t.stage === "under-work") return move("todo", "Requeue", "quiet");
   return "";
@@ -652,6 +653,31 @@ function showDetail(id) {
   openPanel();
 }
 
+async function createPR(id) {
+  const btn = document.querySelector(`button[data-pr="${esc(id)}"]`);
+  if (btn) btn.disabled = true;
+  const res = await api("/api/pr", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+  if (!res.ok) {
+    const err = (await res.json()).error;
+    document.getElementById("d-body").insertAdjacentHTML(
+      "afterbegin",
+      `<div class="note bad">${esc(err)}</div>`
+    );
+  } else {
+    const data = await res.json();
+    document.getElementById("d-body").insertAdjacentHTML(
+      "afterbegin",
+      `<div class="note">${esc(data.message)}</div>`
+    );
+  }
+  closeDetail();
+  refresh();
+}
+
 function closeDetail() {
   watching = null;
   openId = null;
@@ -689,6 +715,8 @@ document.getElementById("board").addEventListener("click", e => {
 });
 document.getElementById("d-actions").addEventListener("click", e => {
   if (e.target.closest("#save")) return saveIdea();
+  const prBtn = e.target.closest("button[data-pr]");
+  if (prBtn) return createPR(prBtn.dataset.pr);
   const el = e.target.closest("button[data-to]");
   if (el && openId) move(openId, el.dataset.to);
 });

@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import subprocess
 from rfa import daemon, settings, tasks
 
 PAGE = Path(__file__).parent / "board.html"
@@ -142,7 +143,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed():
             self._json(403, {"error": "open the board from the link `rfa up` printed"})
             return
-        if self.path not in ("/api/move", "/api/new"):
+        if self.path not in ("/api/move", "/api/new", "/api/pr"):
             self._json(404, {"error": "not found"})
             return
         payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
@@ -166,6 +167,18 @@ class Handler(BaseHTTPRequestHandler):
             )
             self._json(200, {"id": task.id, "stage": task.stage, "status": task.status})
             return
+        if self.path == "/api/pr":
+            try:
+                task = tasks.find(payload["id"])
+            except (FileNotFoundError, KeyError) as e:
+                self._json(400, {"error": f"{type(e).__name__}: {e}"})
+                return
+            result = create_pr(task)
+            if result.get("ok"):
+                self._json(200, {"ok": True, "message": result["message"]})
+            else:
+                self._json(400, {"error": result["message"]})
+            return
         try:
             task = tasks.move(tasks.find(payload["id"]), payload["to"], actor="human", **payload.get("meta", {}))
         except (FileNotFoundError, KeyError, tasks.TransitionError, FileExistsError) as e:
@@ -175,6 +188,69 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, *args) -> None:
         """The board is a local page, not a service: its access log is noise."""
+
+
+def create_pr(task: tasks.Task) -> dict:
+    """Push landed branches to origin and create PRs via `gh pr create`.
+
+    The `landed` field is ``{repo_short_name: branch_name}`` where repo_short_name is the last
+    path segment of the configured repo (e.g. "web" from "lummeco/web").  We resolve each short
+    name back to the full config key so we can find the local checkout, then push and create a PR.
+    """
+    config = settings.load()
+    repos_config = config.get("repos") or {}
+
+    # Build reverse lookup: short_name -> full_key
+    short_to_full: dict[str, str] = {}
+    for full_key in repos_config:
+        short = full_key.rpartition("/")[2]
+        short_to_full[short] = full_key
+
+    landed = task.meta.get("landed") or {}
+    if not landed:
+        return {"ok": False, "message": "no landed branches to push"}
+
+    results: list[str] = []
+    for short_name, branch in landed.items():
+        full_key = short_to_full.get(short_name)
+        if full_key is None:
+            results.append(f"repo {short_name!r} not found in config")
+            continue
+        location = str(repos_config[full_key]).partition("@")[0]
+        repo_path = Path(location).expanduser().resolve()
+
+        # Push the branch to origin
+        try:
+            subprocess.run(
+                ["git", "-C", str(repo_path), "push", "origin", branch],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            results.append(f"push {short_name}/{branch}: {e.stderr.strip() or e.stdout.strip()}")
+            continue
+
+        # Create a PR with gh
+        try:
+            result = subprocess.run(
+                ["gh", "pr", "create", "--head", branch, "--title", task.title],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=str(repo_path),
+            )
+            results.append(f"PR created for {short_name}: {result.stdout.strip()}")
+        except FileNotFoundError:
+            return {"ok": False, "message": "gh is not installed or not on PATH; install it from https://cli.github.com"}
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.strip() if e.stderr else ""
+            stdout = e.stdout.strip() if e.stdout else ""
+            msg = stderr or stdout or f"exit code {e.returncode}"
+            results.append(f"gh pr create for {short_name}: {msg}")
+
+    message = "; ".join(results) if results else "done"
+    return {"ok": True, "message": message}
 
 
 def serve(host: str = "127.0.0.1", port: int = 4380, open_browser: bool = True) -> None:

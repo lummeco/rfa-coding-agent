@@ -123,6 +123,23 @@ header .hint { color: var(--text-3); font-size: 12px; }
 .card:active { transform: translateY(0); }
 .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .card.failed { box-shadow: var(--shadow), inset 3px 0 0 var(--red); }
+/* The card is a <button>, so the archive control sits beside it, not inside it. */
+.card-wrap { position: relative; }
+.card-wrap .card { width: 100%; }
+.card-wrap .card .title { padding-right: 30px; }
+.archive {
+  position: absolute; top: 9px; right: 9px;
+  width: 24px; height: 24px; border-radius: 50%;
+  border: none; background: var(--surface-2); color: var(--text-3);
+  cursor: pointer; font-size: 12px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  transition: color .15s ease, background .15s ease;
+}
+.archive:hover { color: var(--text); }
+.archive[aria-pressed="true"] { background: var(--accent); color: #fff; }
+/* Archived: still in its stage, but dimmed and struck through so it reads as tucked away. */
+.card-wrap.archived .card { opacity: .55; }
+.card-wrap.archived .card .title { text-decoration: line-through; }
 .card .title {
   font-weight: 550;
   letter-spacing: -0.01em;
@@ -351,6 +368,7 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   <h1>RFA</h1>
   <span class="count" id="count"></span>
   <span class="spacer"></span>
+  <button class="action" id="show-archived" aria-pressed="false">Show archived</button>
   <button class="action primary" id="capture">New idea</button>
   <span class="hint"><kbd>N</kbd> new · <kbd>R</kbd> refresh · <kbd>Esc</kbd> close</span>
 </header>
@@ -377,6 +395,7 @@ const LIVE = new Set(["planning", "coding", "checking", "starting"]);
 
 let state = { tasks: [], events: [], stages: [], system: null };
 let openId = null;
+let showArchived = false;   // off by default: archived cards are tucked away until you ask
 let prNote = null;   // {id, text, bad} — survives the re-render refresh() triggers
 let editing = false;
 
@@ -440,22 +459,30 @@ function card(t) {
   const dots = t.complexity
     ? `<span class="cx" title="complexity ${t.complexity}/5">${[1,2,3,4,5].map(n => `<i class="${n <= t.complexity ? "on" : ""}"></i>`).join("")}</span>`
     : "";
-  return `<button class="card ${t.status === "failed" ? "failed" : ""}" data-id="${esc(t.id)}">
-    <div class="title">${esc(t.title)}</div>
-    <div class="meta">
-      <span class="status"><span class="dot ${tone}${live}"></span>${esc(t.status)}</span>
-      ${t.attempts ? `<span class="retry" title="${t.attempts} retries">↻ ${t.attempts}</span>` : ""}
-      ${t.repos.length ? `<span class="repo">${esc(t.repos.map(r => r.split("/").pop()).join(", "))}</span>` : ""}
-      ${dots}
-    </div>
-  </button>`;
+  // The card is a <button>, so the archive control is a sibling, not a child: nesting an
+  // interactive control inside a button is invalid HTML.
+  const archive = `<button class="archive" data-archive="${esc(t.id)}" aria-pressed="${t.archived}" title="${t.archived ? "Unarchive" : "Archive"}">🗄</button>`;
+  return `<div class="card-wrap${t.archived ? " archived" : ""}">
+    <button class="card ${t.status === "failed" ? "failed" : ""}" data-id="${esc(t.id)}">
+      <div class="title">${esc(t.title)}</div>
+      <div class="meta">
+        <span class="status"><span class="dot ${tone}${live}"></span>${esc(t.status)}</span>
+        ${t.attempts ? `<span class="retry" title="${t.attempts} retries">↻ ${t.attempts}</span>` : ""}
+        ${t.repos.length ? `<span class="repo">${esc(t.repos.map(r => r.split("/").pop()).join(", "))}</span>` : ""}
+        ${dots}
+      </div>
+    </button>
+    ${archive}
+  </div>`;
 }
 
 function render() {
+  // Archived cards are hidden by default; the header toggle brings them back into their stage.
+  const visible = state.tasks.filter(t => showArchived || !t.archived);
   document.getElementById("count").textContent =
-    state.tasks.length ? `${state.tasks.length} task${state.tasks.length > 1 ? "s" : ""}` : "";
+    visible.length ? `${visible.length} task${visible.length > 1 ? "s" : ""}` : "";
   document.getElementById("board").innerHTML = state.stages.map(stage => {
-    const inStage = state.tasks.filter(t => t.stage === stage);
+    const inStage = visible.filter(t => t.stage === stage);
     return `<section class="column">
       <h2>${esc(LABEL[stage] || stage)}<span class="n">${inStage.length}</span></h2>
       <div class="cards">${inStage.map(card).join("") || `<div class="empty">Nothing here</div>`}</div>
@@ -761,9 +788,28 @@ async function move(id, to) {
   refresh();
 }
 
+async function toggleArchive(id) {
+  const t = state.tasks.find(x => x.id === id);
+  if (!t) return;
+  const res = await api("/api/archive", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, archived: !t.archived }),
+  });
+  if (!res.ok) { alert((await res.json()).error); return; }
+  refresh();
+}
+
 document.getElementById("board").addEventListener("click", e => {
+  const arch = e.target.closest("button[data-archive]");
+  if (arch) { toggleArchive(arch.dataset.archive); return; }
   const el = e.target.closest(".card");
   if (el) showDetail(el.dataset.id);
+});
+document.getElementById("show-archived").addEventListener("click", () => {
+  showArchived = !showArchived;
+  document.getElementById("show-archived").setAttribute("aria-pressed", String(showArchived));
+  render();
 });
 document.getElementById("d-actions").addEventListener("click", e => {
   if (e.target.closest("#save")) return saveIdea();

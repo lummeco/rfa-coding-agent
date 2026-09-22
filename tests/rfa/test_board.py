@@ -137,3 +137,16 @@ def test_a_command_is_offered_for_every_landed_repo_that_is_still_configured(tmp
     assert list(found) == ["web"]
     assert found["web"].startswith(f"(cd {tmp_path}/web && ")
     assert "git show --binary rfa/a-task | git apply -3" in found["web"]
+
+
+def test_the_snapshot_reports_a_task_as_archived_in_its_stage(tmp_path, monkeypatch):
+    """Archiving is a flag the page can draw, not a move: the card is still in its stage."""
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    tasks.init()
+    task = tasks.create("an idea")
+    was = task.path
+    tasks.save(task, archived=True)
+    card = board.snapshot()["tasks"][0]
+    assert card["archived"] is True
+    assert card["stage"] == "draft"
+    assert task.path == was  # the file never left its stage folder

@@ -151,3 +151,32 @@ def test_an_ambiguous_prefix_says_so_instead_of_picking_one(workspace):
     shared = a.id[:13]  # same date, same minute
     with pytest.raises(ValueError, match="matches 2"):
         assert tasks.find(shared) and b
+
+
+def test_archiving_hides_a_task_without_moving_it(workspace):
+    """A flag on the task, not a move: the file stays in its stage folder, stage and status intact."""
+    task = tasks.create("an idea")
+    was = task.path
+    before = (task.stage, task.status)
+    tasks.save(task, archived=True)
+    after = tasks.find(task.id)
+    assert after.archived is True
+    assert after.path == was and after.path.parent.name == "draft"
+    assert (after.stage, after.status) == before
+
+
+def test_unarchiving_brings_a_task_back_into_its_stage(workspace):
+    task = tasks.create("an idea")
+    tasks.save(task, archived=True)
+    assert tasks.find(task.id).archived is True
+    tasks.save(tasks.find(task.id), archived=False)
+    after = tasks.find(task.id)
+    assert after.archived is False and after.stage == "draft"
+
+
+def test_the_archived_flag_survives_a_reload(workspace):
+    """What the board reads is the file: a second read still reports the task as archived."""
+    task = tasks.create("an idea")
+    tasks.save(task, archived=True)
+    assert tasks.read(task.path).archived is True
+    assert tasks.find(task.id).archived is True

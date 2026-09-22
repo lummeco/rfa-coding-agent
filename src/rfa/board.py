@@ -73,6 +73,7 @@ def snapshot() -> dict:
                 "status": task.status,
                 "title": task.title,
                 "attempts": task.attempts,
+                "archived": task.archived,
                 "repos": task.meta.get("repos") or [],
                 "complexity": task.meta.get("complexity"),
                 "branches": task.meta.get("branches") or [],
@@ -182,7 +183,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed():
             self._json(403, {"error": "open the board from the link `rfa up` printed"})
             return
-        if self.path not in ("/api/move", "/api/new", "/api/pr", "/api/edit"):
+        if self.path not in ("/api/move", "/api/new", "/api/pr", "/api/edit", "/api/archive"):
             self._json(404, {"error": "not found"})
             return
         payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
@@ -227,6 +228,16 @@ class Handler(BaseHTTPRequestHandler):
             task.body = str(payload.get("body", ""))
             tasks.save(task)
             self._json(200, {"id": task.id, "stage": task.stage, "status": task.status})
+            return
+        if self.path == "/api/archive":
+            try:
+                task = tasks.find(payload["id"])
+            except (FileNotFoundError, KeyError) as e:
+                self._json(400, {"error": f"{type(e).__name__}: {e}"})
+                return
+            # A flag on the task, not a move: the file stays in its stage folder.
+            tasks.save(task, archived=bool(payload.get("archived")))
+            self._json(200, {"id": task.id, "stage": task.stage, "status": task.status, "archived": task.archived})
             return
         try:
             task = tasks.move(tasks.find(payload["id"]), payload["to"], actor="human", **payload.get("meta", {}))

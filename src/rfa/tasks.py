@@ -90,6 +90,11 @@ class Task:
     def attempts(self) -> int:
         return int(self.meta.get("attempts") or 0)
 
+    @property
+    def archived(self) -> bool:
+        """Hidden from the stage columns, but still in its stage: a flag, not a move."""
+        return bool(self.meta.get("archived"))
+
     def text(self) -> str:
         meta = {k: v for k, v in self.meta.items() if v is not None}
         return "---\n" + yaml.safe_dump(meta, sort_keys=False, allow_unicode=True) + "---\n" + self.body

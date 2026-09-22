@@ -142,7 +142,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed():
             self._json(403, {"error": "open the board from the link `rfa up` printed"})
             return
-        if self.path not in ("/api/move", "/api/new"):
+        if self.path not in ("/api/move", "/api/new", "/api/edit"):
             self._json(404, {"error": "not found"})
             return
         payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
@@ -164,6 +164,13 @@ class Handler(BaseHTTPRequestHandler):
                 model=model or None,
                 reasoning=reasoning or None,
             )
+            self._json(200, {"id": task.id, "stage": task.stage, "status": task.status})
+            return
+        if self.path == "/api/edit":
+            task = tasks.find(payload["id"])
+            body = str(payload.get("body", ""))
+            task.body = body
+            tasks.save(task)
             self._json(200, {"id": task.id, "stage": task.stage, "status": task.status})
             return
         try:

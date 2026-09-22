@@ -105,4 +105,8 @@ environment:
 
 model:
   model_kwargs:
-    temperature: 0.0
+    # See planner.yaml: greedy decoding loops a thinking Qwen, and max_tokens bounds it when it does.
+    temperature: 0.6
+    top_p: 0.95
+    top_k: 20
+    max_tokens: 8192

@@ -156,4 +156,11 @@ environment:
 
 model:
   model_kwargs:
-    temperature: 0.0
+    # Not 0.0: a thinking Qwen decoded greedily falls into repetition loops it never leaves, and a
+    # call that never stops generating only ever surfaces as the client's timeout. Qwen's own numbers.
+    temperature: 0.6
+    top_p: 0.95
+    top_k: 20
+    # And when one slips past those anyway, it ends as a truncated reply the agent can act on in
+    # seconds instead of ten minutes of generation nobody reads.
+    max_tokens: 8192

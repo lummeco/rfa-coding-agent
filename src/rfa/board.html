@@ -228,6 +228,17 @@ button.action.quiet { background: transparent; color: var(--text-2); padding-lef
   border: none; border-radius: 12px; padding: 14px 16px; margin-bottom: 18px;
 }
 #idea:focus { outline: 2px solid var(--accent); }
+
+/* Editing fills the panel: the textarea takes whatever the notes above it leave. */
+#detail .body.editing { display: flex; flex-direction: column; overflow: hidden; }
+#detail .body.editing > .note { flex: none; }
+#edit-body {
+  flex: 1; width: 100%; min-height: 200px; resize: none;
+  font: inherit; font-size: 14px; line-height: 1.55;
+  color: var(--text); background: var(--surface-2);
+  border: none; border-radius: 12px; padding: 14px 16px;
+}
+#edit-body:focus { outline: 2px solid var(--accent); }
 .pick { display: flex; flex-wrap: wrap; gap: 7px; }
 .pick button {
   font: inherit; font-size: 12px; cursor: pointer;
@@ -367,6 +378,7 @@ const LIVE = new Set(["planning", "coding", "checking", "starting"]);
 let state = { tasks: [], events: [], stages: [], system: null };
 let openId = null;
 let prNote = null;   // {id, text, bad} — survives the re-render refresh() triggers
+let editing = false;
 
 // `rfa up` prints the board's URL with this start's token in the fragment. The fragment never
 // leaves the browser, and sending it as a header is what a cross-site request cannot do.
@@ -449,7 +461,7 @@ function render() {
       <div class="cards">${inStage.map(card).join("") || `<div class="empty">Nothing here</div>`}</div>
     </section>`;
   }).join("");
-  if (openId) showDetail(openId);
+  if (openId && !editing) showDetail(openId);
 }
 
 function actionsFor(t) {
@@ -457,7 +469,7 @@ function actionsFor(t) {
     `<button class="action ${cls}" data-to="${to}">${label}</button>`;
   if (t.stage === "draft") return move("planning", "Plan it", "primary");
   if (t.stage === "planning" && t.status === "queued") return move("draft", "Back to draft", "quiet");
-  if (t.stage === "planning" && t.status === "ready") return move("todo", "Approve", "primary") + move("draft", "Send back", "quiet");
+  if (t.stage === "planning" && t.status === "ready") return `<button class="action" id="edit">Edit</button>` + move("todo", "Approve", "primary") + move("draft", "Send back", "quiet");
   if (t.stage === "planning" && t.status === "failed") return move("draft", "Back to draft", "");
   if (t.stage === "todo") return move("planning", "Re-plan", "quiet");
   if (t.stage === "done" && Object.keys(t.landed || {}).length) return move("todo", "Run again", "") + move("planning", "Re-plan", "quiet") + `<button class="action" data-pr="${esc(t.id)}">Create PR</button>`;
@@ -572,6 +584,21 @@ async function saveIdea() {
   refresh();
 }
 
+async function saveEdit() {
+  const textarea = document.getElementById("edit-body");
+  if (!textarea) return;
+  const body = textarea.value;
+  const res = await api("/api/edit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: openId, body }),
+  });
+  if (!res.ok) { alert((await res.json()).error); return; }
+  editing = false;
+  closeDetail();
+  refresh();
+}
+
 function openPanel() {
   document.getElementById("detail").classList.add("open");
   document.getElementById("detail").setAttribute("aria-hidden", "false");
@@ -665,16 +692,26 @@ function showDetail(id) {
     : "";
 
   // The packet opens with "# Task" and its title; the panel header already says that.
-  const body = String(t.body || "").replace(/^\s*#\s+Task\s*\n+[^\n]*\n/, "");
+  const fullBody = String(t.body || "");
+  const body = fullBody.replace(/^\s*#\s+Task\s*\n+[^\n]*\n/, "");
   // Only where there is a run to look at: a card that never reached the coder has no trajectory.
   const ran = t.stage === "under-work" || t.stage === "done";
   const watch = ran
     ? `<p><button class="watch" id="watch">${watching === id ? "Hide" : "Watch"} what it did →</button></p>`
       + `<div class="run" id="run"></div>`
     : "";
-  document.getElementById("d-body").innerHTML = head + `<div class="md">${md(body)}${history}</div>` + watch;
+  document.getElementById("d-body").classList.toggle("editing", editing);
+  if (editing) {
+    document.getElementById("d-body").innerHTML = head + `<textarea id="edit-body">${esc(fullBody)}</textarea>`;
+  } else {
+    document.getElementById("d-body").innerHTML = head + `<div class="md">${md(body)}${history}</div>` + watch;
+  }
   if (watching === id) drawRun(id);
-  document.getElementById("d-actions").innerHTML = actionsFor(t);
+  if (editing) {
+    document.getElementById("d-actions").innerHTML = `<button class="action primary" id="save-edit">Save</button><button class="action quiet" id="cancel-edit">Cancel</button>`;
+  } else {
+    document.getElementById("d-actions").innerHTML = actionsFor(t);
+  }
   openPanel();
 }
 
@@ -693,6 +730,7 @@ async function createPR(id) {
 
 function closeDetail() {
   watching = null;
+  editing = false;
   openId = null;
   prNote = null;
   document.getElementById("detail").classList.remove("open");
@@ -731,6 +769,9 @@ document.getElementById("d-actions").addEventListener("click", e => {
   if (e.target.closest("#save")) return saveIdea();
   const prBtn = e.target.closest("button[data-pr]");
   if (prBtn) return createPR(prBtn.dataset.pr);
+  if (e.target.closest("#edit")) { editing = true; return showDetail(openId); }
+  if (e.target.closest("#save-edit")) return saveEdit();
+  if (e.target.closest("#cancel-edit")) { editing = false; return showDetail(openId); }
   const el = e.target.closest("button[data-to]");
   if (el && openId) move(openId, el.dataset.to);
 });

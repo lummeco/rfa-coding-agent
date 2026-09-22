@@ -42,18 +42,26 @@ models:
     reasoning: high
   qwen3.8:
     model_name: ollama_chat/rfa-qwen3.8
-    # TODO: check this tag against `ollama list` -- it is a guess, and `rfa up` will say so.
     ollama: {name: rfa-qwen3.8, from: qwen3.8:latest, num_ctx: 131072}
     reasoning: medium
 
 # What a run uses when nothing else said. A `planner:`/`coder:` block may set its own; `rfa model
 # <name>` and `-m` on a command override both, and a card's own `model:` overrides the default.
-default_model: qwen3.6
+default_model: qwen3.8
 
 # Applies to every model above: Ollama models are not in litellm's price registry, and a missing
 # price is not a reason to stop.
+#
+# `keep_alive` is how long Ollama holds the model in memory after a call. Its default is 5 minutes,
+# which is shorter than a single coder step may run (`timeout: 600`), so the model is evicted mid-run
+# and every reload pays the load cost again -- on a big model at 131072 context that is what a run
+# sees as a timeout. Holding it past the longest step means one load per run instead of one per step.
+# The cost is memory held while nothing is running, which `daemon.memory_min_pct` then counts against
+# starting the next card.
 model:
   cost_tracking: ignore_errors
+  model_kwargs:
+    keep_alive: 20m
 
 coder:
   environment:

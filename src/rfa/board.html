@@ -358,6 +358,7 @@ const LIVE = new Set(["planning", "coding", "checking", "starting"]);
 
 let state = { tasks: [], events: [], stages: [], system: null };
 let openId = null;
+let prNote = null;   // {id, text, bad} — survives the re-render refresh() triggers
 
 // `rfa up` prints the board's URL with this start's token in the fragment. The fragment never
 // leaves the browser, and sending it as a header is what a cross-site request cannot do.
@@ -366,6 +367,7 @@ const api = (path, options = {}) =>
   fetch(path, { ...options, headers: { ...(options.headers || {}), "X-RFA-Token": TOKEN } });
 
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const link = u => `<a href="${esc(u)}" target="_blank" rel="noreferrer">${esc(String(u).replace("https://github.com/", ""))}</a>`;
 
 /** Just enough markdown for a packet: headings, bullets, numbers, fenced code, inline code. */
 function md(src) {
@@ -622,12 +624,18 @@ function showDetail(id) {
 
   let head = "";
   if (t.error) head += `<div class="note bad">${esc(t.error)}</div>`;
+  if (prNote?.id === id)
+    head += `<div class="note${prNote.bad ? " bad" : ""}">${esc(prNote.text)}</div>`;
   if (from || reading)
     head += `<div class="note">${from ? `Starts from <code>${esc(from)}</code>` : ""}`
       + `${reading ? `${from ? " · " : ""}reading <code>${esc(reading)}</code>` : ""}</div>`;
-  const landed = Object.entries(t.landed || {});
+  const prs = Object.entries(t.prs || {});
+  const landed = Object.entries(t.landed || {}).filter(([r]) => !(t.prs || {})[r]);
   if (landed.length)
     head += `<div class="note">Landed on ${landed.map(([r, b]) => `<code>${esc(b)}</code> in ${esc(r)}`).join(", ")} — local, nothing pushed.</div>`;
+  if (prs.length)
+    head += `<div class="note">Pull request${prs.length > 1 ? "s" : ""} open: `
+      + prs.map(([r, u]) => `${link(u)} in ${esc(r)}`).join(", ") + `</div>`;
   if (t.stage === "draft") head += `<div class="note">A draft. <strong>Plan it</strong> hands it to the planner.</div>`;
   if (t.status === "queued") head += `<div class="note">Waiting for the planner — <code>rfa plan</code></div>`;
   if (t.open_questions?.length)
@@ -636,7 +644,8 @@ function showDetail(id) {
   const mine = state.events.filter(e => e.id === t.id);
   const history = mine.length
     ? `<h2>History</h2><ul class="timeline">${mine.map(e =>
-        `<li><time>${when(e.ts)}</time><span>${esc(e.type)}${e.to ? ` → ${esc(e.to)}` : ""}</span></li>`).join("")}</ul>`
+        `<li><time>${when(e.ts)}</time><span>${esc(e.type)}${e.to ? ` → ${esc(e.to)}` : ""}`
+        + `${e.url ? ` ${link(e.url)}` : ""}</span></li>`).join("")}</ul>`
     : "";
 
   // The packet opens with "# Task" and its title; the panel header already says that.
@@ -661,26 +670,15 @@ async function createPR(id) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id }),
   });
-  if (!res.ok) {
-    const err = (await res.json()).error;
-    document.getElementById("d-body").insertAdjacentHTML(
-      "afterbegin",
-      `<div class="note bad">${esc(err)}</div>`
-    );
-  } else {
-    const data = await res.json();
-    document.getElementById("d-body").insertAdjacentHTML(
-      "afterbegin",
-      `<div class="note">${esc(data.message)}</div>`
-    );
-  }
-  closeDetail();
+  // A PR that opened is on the card and in the history now; only a failure needs the transient note.
+  prNote = res.ok ? null : { id, text: (await res.json()).error, bad: true };
   refresh();
 }
 
 function closeDetail() {
   watching = null;
   openId = null;
+  prNote = null;
   document.getElementById("detail").classList.remove("open");
   document.getElementById("detail").setAttribute("aria-hidden", "true");
   document.getElementById("scrim").classList.remove("open");

@@ -17,6 +17,14 @@ repos:
   lummeco/infra-ops: ~/dev/infra-ops@main
   lummeco/rfa-coding-agent: ~/dev/rfa-coding-agent@main
 
+# Pull requests. The board's Create PR button pushes the landed branch and opens the PR through the
+# GitHub API with a fine-grained PAT -- repository access: only the repos above; permissions:
+# Contents and Pull requests, read and write; nothing else -- kept in the login Keychain:
+#   security add-generic-password -s rfa-github-pat -a rfa -w
+# `gh` is not used and does not need to be logged in.
+github:
+  keychain_service: rfa-github-pat
+
 # The models a run may use, by the name you type: `rfa work -m qwen3.8`, `rfa model qwen3.6`.
 #
 # Each one is served as its own Ollama variant, because Ollama gives a model a small default

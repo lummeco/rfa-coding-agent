@@ -19,8 +19,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-import subprocess
-from rfa import daemon, settings, tasks
+from rfa import daemon, github, settings, tasks
 
 PAGE = Path(__file__).parent / "board.html"
 
@@ -45,6 +44,7 @@ def snapshot() -> dict:
                 "created": task.meta.get("created"),
                 "error": task.meta.get("error"),
                 "landed": task.meta.get("landed") or {},
+                "prs": task.meta.get("prs") or {},
                 "open_questions": task.meta.get("open_questions") or [],
                 "body": task.body,
             }
@@ -173,7 +173,11 @@ class Handler(BaseHTTPRequestHandler):
             except (FileNotFoundError, KeyError) as e:
                 self._json(400, {"error": f"{type(e).__name__}: {e}"})
                 return
-            result = create_pr(task)
+            try:
+                result = create_pr(task)
+            except github.PublishError as e:
+                self._json(400, {"error": str(e)})
+                return
             if result.get("ok"):
                 self._json(200, {"ok": True, "message": result["message"]})
             else:
@@ -191,66 +195,45 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def create_pr(task: tasks.Task) -> dict:
-    """Push landed branches to origin and create PRs via `gh pr create`.
+    """Push each landed branch to origin and open its pull request.
 
-    The `landed` field is ``{repo_short_name: branch_name}`` where repo_short_name is the last
-    path segment of the configured repo (e.g. "web" from "lummeco/web").  We resolve each short
-    name back to the full config key so we can find the local checkout, then push and create a PR.
+    `landed` is ``{short_name: branch}``, where the short name is the last segment of the key in
+    `repos:` -- "rfa-coding-agent" from "lummeco/rfa-coding-agent". That key is also the path the
+    GitHub API wants, so resolving back to it is what makes the pull request addressable.
+
+    One repository failing is reported and the rest still go: a multi-repo task should not lose
+    three pull requests because the fourth remote moved.
     """
     config = settings.load()
-    repos_config = config.get("repos") or {}
-
-    # Build reverse lookup: short_name -> full_key
-    short_to_full: dict[str, str] = {}
-    for full_key in repos_config:
-        short = full_key.rpartition("/")[2]
-        short_to_full[short] = full_key
-
-    landed = task.meta.get("landed") or {}
-    if not landed:
+    configured = config.get("repos") or {}
+    if not (landed := task.meta.get("landed") or {}):
         return {"ok": False, "message": "no landed branches to push"}
 
-    results: list[str] = []
+    secret = github.token(config)
+    starts = settings.start_branches(task.meta)
+    results, failed = [], False
+    opened = dict(task.meta.get("prs") or {})
+    full = {key.rpartition("/")[2]: key for key in configured}
     for short_name, branch in landed.items():
-        full_key = short_to_full.get(short_name)
-        if full_key is None:
-            results.append(f"repo {short_name!r} not found in config")
+        key = full.get(short_name)
+        if key is None:
+            results.append(f"{short_name}: not listed under `repos:` in {settings.path()}")
+            failed = True
             continue
-        location = str(repos_config[full_key]).partition("@")[0]
-        repo_path = Path(location).expanduser().resolve()
-
-        # Push the branch to origin
+        location, _, pinned = str(configured[key]).partition("@")
         try:
-            subprocess.run(
-                ["git", "-C", str(repo_path), "push", "origin", branch],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        except subprocess.CalledProcessError as e:
-            results.append(f"push {short_name}/{branch}: {e.stderr.strip() or e.stdout.strip()}")
+            github.push(Path(location).expanduser().resolve(), branch, secret)
+            url = github.open_pr(secret, key, branch, starts.get(key) or pinned or "main", task.title)
+        except github.PublishError as e:
+            results.append(f"{short_name}: {e}")
+            failed = True
             continue
-
-        # Create a PR with gh
-        try:
-            result = subprocess.run(
-                ["gh", "pr", "create", "--head", branch, "--title", task.title],
-                check=True,
-                capture_output=True,
-                text=True,
-                cwd=str(repo_path),
-            )
-            results.append(f"PR created for {short_name}: {result.stdout.strip()}")
-        except FileNotFoundError:
-            return {"ok": False, "message": "gh is not installed or not on PATH; install it from https://cli.github.com"}
-        except subprocess.CalledProcessError as e:
-            stderr = e.stderr.strip() if e.stderr else ""
-            stdout = e.stdout.strip() if e.stdout else ""
-            msg = stderr or stdout or f"exit code {e.returncode}"
-            results.append(f"gh pr create for {short_name}: {msg}")
-
-    message = "; ".join(results) if results else "done"
-    return {"ok": True, "message": message}
+        opened[short_name] = url
+        tasks.log(type="pr_opened", id=task.id, repo=short_name, url=url)
+        results.append(f"{short_name}: {url}")
+    if opened != (task.meta.get("prs") or {}):
+        tasks.save(task, prs=opened)
+    return {"ok": not failed, "message": "; ".join(results)}
 
 
 def serve(host: str = "127.0.0.1", port: int = 4380, open_browser: bool = True) -> None:

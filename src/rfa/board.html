@@ -236,6 +236,14 @@ button.action.quiet { background: transparent; color: var(--text-2); padding-lef
 }
 .pick button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 .note code { font-size: 12px; }
+.copy { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+.copy code {
+  flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  padding: 7px 10px; color: var(--text);
+}
+.copy button.action { flex: none; font-size: 12px; padding: 6px 14px; background: var(--bg); border: 1px solid var(--line); }
 
 .md h1 { font-size: 17px; font-weight: 600; margin: 0 0 14px; letter-spacing: -0.01em; }
 .md h2 {
@@ -633,6 +641,13 @@ function showDetail(id) {
   const landed = Object.entries(t.landed || {}).filter(([r]) => !(t.prs || {})[r]);
   if (landed.length)
     head += `<div class="note">Landed on ${landed.map(([r, b]) => `<code>${esc(b)}</code> in ${esc(r)}`).join(", ")} — local, nothing pushed.</div>`;
+  // The branch is already in your checkout; this is the line that brings it over to what you have
+  // open, as changes you read and stage yourself rather than a commit that arrives behind you.
+  const copies = Object.entries(t.copy || {});
+  if (copies.length)
+    head += `<div class="note">Take it into your current branch, unstaged:`
+      + copies.map(([r, cmd]) => `<div class="copy"><code>${esc(cmd)}</code>`
+        + `<button class="action" data-copy="${esc(r)}">Copy</button></div>`).join("") + `</div>`;
   if (prs.length)
     head += `<div class="note">Pull request${prs.length > 1 ? "s" : ""} open: `
       + prs.map(([r, u]) => `${link(u)} in ${esc(r)}`).join(", ") + `</div>`;
@@ -723,6 +738,17 @@ document.getElementById("d-body").addEventListener("click", e => {
   if (e.target.closest("#watch")) {
     watching = watching === openId ? null : openId;
     return showDetail(openId);
+  }
+  // The command is read off the page rather than out of the button, so what you copy is what you see.
+  // Selected as well as written: the clipboard API is only there on a secure origin, and a board
+  // served to anything but localhost should still let you press ⌘C rather than quietly do nothing.
+  const copy = e.target.closest("button[data-copy]");
+  if (copy) {
+    getSelection().selectAllChildren(copy.previousElementSibling);
+    navigator.clipboard?.writeText(copy.previousElementSibling.textContent);
+    copy.textContent = navigator.clipboard ? "Copied" : "⌘C";
+    setTimeout(() => copy.textContent = "Copy", 1200);
+    return;
   }
   if (e.target.closest("button[data-drop]")) {
     const [repo, branch] = e.target.closest("button[data-drop]").dataset.drop.split(/@(.*)/s);

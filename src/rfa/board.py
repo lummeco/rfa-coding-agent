@@ -13,6 +13,7 @@ header that no cross-site request can set without a preflight this server refuse
 
 import json
 import secrets
+import shlex
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -24,8 +25,34 @@ from rfa import daemon, github, settings, tasks
 PAGE = Path(__file__).parent / "board.html"
 
 
+def copy_command(repo: Path, branch: str) -> str:
+    """The one line that puts a landed branch into whatever you have checked out, uncommitted.
+
+    `show` rather than a diff against the base: the branch is one commit, so the commit itself is
+    already exactly the coder's work and nothing has to remember where it started. It lands in the
+    working tree only -- unstaged, on your current branch, yours to read and stage a hunk at a time.
+    """
+    where = shlex.quote(str(repo))
+    return f"git -C {where} show --binary {shlex.quote(branch)} | git -C {where} apply"
+
+
+def copy_commands(landed: dict, configured: dict) -> dict[str, str]:
+    """One command per landed branch, keyed the way `landed` is -- by the repository's short name.
+
+    A repository that has since left `repos:` is left out rather than guessed at: without its
+    checkout there is no path to run the command in.
+    """
+    full = {key.rpartition("/")[2]: key for key in configured}
+    return {
+        name: copy_command(Path(str(configured[key]).partition("@")[0]).expanduser(), branch)
+        for name, branch in landed.items()
+        if (key := full.get(name))
+    }
+
+
 def snapshot() -> dict:
     """Everything the page draws, in one request."""
+    configured = settings.load().get("repos") or {}
     return {
         "stages": list(tasks.STAGES),
         "tasks": [
@@ -44,6 +71,7 @@ def snapshot() -> dict:
                 "created": task.meta.get("created"),
                 "error": task.meta.get("error"),
                 "landed": task.meta.get("landed") or {},
+                "copy": copy_commands(task.meta.get("landed") or {}, configured),
                 "prs": task.meta.get("prs") or {},
                 "open_questions": task.meta.get("open_questions") or [],
                 "body": task.body,
@@ -51,7 +79,7 @@ def snapshot() -> dict:
             for task in tasks.tasks()
         ],
         "events": tasks.events()[-500:],
-        "repos": sorted(settings.load().get("repos") or {}),
+        "repos": sorted(configured),
         "system": daemon.report(),
     }
 

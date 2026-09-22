@@ -6,6 +6,7 @@ can any page you have open, because a cross-site form post to 127.0.0.1 needs no
 a machine writing code, so these are the tests that gate depends on.
 """
 
+import subprocess
 from email.message import Message
 
 import pytest
@@ -85,3 +86,40 @@ def test_a_run_id_that_is_not_a_run_id_reads_nothing(id, tmp_path, monkeypatch):
     monkeypatch.setenv("RFA_HOME", str(tmp_path))
     assert board.progress(id) == {"steps": []}
     assert tasks.ID_RE.fullmatch(id) is None
+
+
+def test_the_copy_line_carries_a_landed_branch_into_what_you_have_checked_out(tmp_path):
+    """One commit on a branch, one line, and the work is in your working tree -- unstaged."""
+    repo = tmp_path / "my repo"  # a space, because a path is whatever the person's disk says
+    repo.mkdir()
+    run = lambda *args: subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    run("init", "-qb", "main")
+    (repo / "a.txt").write_text("one\n")
+    run("add", "-A")
+    run("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base")
+    run("worktree", "add", "-q", "-b", "rfa/a-task", str(tmp_path / "tree"), "main")
+    (tmp_path / "tree" / "a.txt").write_text("one\ntwo\n")
+    subprocess.run(["git", "-C", str(tmp_path / "tree"), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path / "tree"), "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-qm", "work"], check=True)
+    run("worktree", "remove", "--force", str(tmp_path / "tree"))
+    run("checkout", "-qb", "mine")
+
+    command = board.copy_command(repo, "rfa/a-task")
+    assert subprocess.run(command, shell=True, capture_output=True, text=True).returncode == 0, command
+    assert (repo / "a.txt").read_text() == "one\ntwo\n"
+    # In the working tree and nowhere else: nothing staged, nothing committed, still on your branch.
+    assert subprocess.run(["git", "-C", str(repo), "diff", "--cached", "--name-only"],
+                          capture_output=True, text=True).stdout == ""
+    assert subprocess.run(["git", "-C", str(repo), "branch", "--show-current"],
+                          capture_output=True, text=True).stdout.strip() == "mine"
+
+
+def test_a_command_is_offered_for_every_landed_repo_that_is_still_configured(tmp_path):
+    """The path comes from `repos:`, so a card whose repository has left it gets no command at all."""
+    found = board.copy_commands(
+        {"web": "rfa/a-task", "gone": "rfa/a-task"},
+        {"lummeco/web": f"{tmp_path}/web@develop", "lummeco/other": f"{tmp_path}/other"},
+    )
+    assert list(found) == ["web"]
+    assert found["web"] == f"git -C {tmp_path}/web show --binary rfa/a-task | git -C {tmp_path}/web apply"

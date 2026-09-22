@@ -2,8 +2,8 @@
 
 import pytest
 
-from rfa import tasks
-from rfa.daemon import Daemon, DaemonConfig, next_job, reclaim, running
+from rfa import settings, tasks
+from rfa.daemon import Daemon, DaemonConfig, next_job, reclaim, report, running
 
 # draft -> the stage we want, through the moves a human would make.
 ROUTE = {
@@ -94,3 +94,10 @@ def test_it_only_says_something_when_something_changed():
     daemon.said = ""
     daemon.tick()
     assert daemon.said == "nothing to do"
+
+
+def test_the_report_names_the_default_reasoning_level():
+    """The menu bar and the overlay both read it from here, so it must say what `rfa reasoning` says."""
+    assert report()["default_reasoning"] == ""
+    settings.choose_reasoning("high")
+    assert report()["default_reasoning"] == "high"

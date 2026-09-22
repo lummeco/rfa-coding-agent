@@ -123,20 +123,7 @@ header .hint { color: var(--text-3); font-size: 12px; }
 .card:active { transform: translateY(0); }
 .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .card.failed { box-shadow: var(--shadow), inset 3px 0 0 var(--red); }
-/* The card is a <button>, so the archive control sits beside it, not inside it. */
 .card-wrap { position: relative; }
-.card-wrap .card { width: 100%; }
-.card-wrap .card .title { padding-right: 30px; }
-.archive {
-  position: absolute; top: 9px; right: 9px;
-  width: 24px; height: 24px; border-radius: 50%;
-  border: none; background: var(--surface-2); color: var(--text-3);
-  cursor: pointer; font-size: 12px; line-height: 1;
-  display: flex; align-items: center; justify-content: center;
-  transition: color .15s ease, background .15s ease;
-}
-.archive:hover { color: var(--text); }
-.archive[aria-pressed="true"] { background: var(--accent); color: #fff; }
 /* Archived: still in its stage, but dimmed and struck through so it reads as tucked away. */
 .card-wrap.archived .card { opacity: .55; }
 .card-wrap.archived .card .title { text-decoration: line-through; }
@@ -459,9 +446,6 @@ function card(t) {
   const dots = t.complexity
     ? `<span class="cx" title="complexity ${t.complexity}/5">${[1,2,3,4,5].map(n => `<i class="${n <= t.complexity ? "on" : ""}"></i>`).join("")}</span>`
     : "";
-  // The card is a <button>, so the archive control is a sibling, not a child: nesting an
-  // interactive control inside a button is invalid HTML.
-  const archive = `<button class="archive" data-archive="${esc(t.id)}" aria-pressed="${t.archived}" title="${t.archived ? "Unarchive" : "Archive"}">🗄</button>`;
   return `<div class="card-wrap${t.archived ? " archived" : ""}">
     <button class="card ${t.status === "failed" ? "failed" : ""}" data-id="${esc(t.id)}">
       <div class="title">${esc(t.title)}</div>
@@ -472,7 +456,6 @@ function card(t) {
         ${dots}
       </div>
     </button>
-    ${archive}
   </div>`;
 }
 
@@ -494,15 +477,17 @@ function render() {
 function actionsFor(t) {
   const move = (to, label, cls = "") =>
     `<button class="action ${cls}" data-to="${to}">${label}</button>`;
-  if (t.stage === "draft") return move("planning", "Plan it", "primary");
-  if (t.stage === "planning" && t.status === "queued") return move("draft", "Back to draft", "quiet");
-  if (t.stage === "planning" && t.status === "ready") return `<button class="action" id="edit">Edit</button>` + move("todo", "Approve", "primary") + move("draft", "Send back", "quiet");
-  if (t.stage === "planning" && t.status === "failed") return move("draft", "Back to draft", "");
-  if (t.stage === "todo") return move("planning", "Re-plan", "quiet");
-  if (t.stage === "done" && Object.keys(t.landed || {}).length) return move("todo", "Run again", "") + move("planning", "Re-plan", "quiet") + `<button class="action" data-pr="${esc(t.id)}">Create PR</button>`;
-  if (t.stage === "done") return move("todo", "Run again", "") + move("planning", "Re-plan", "quiet");
-  if (t.stage === "under-work") return move("todo", "Requeue", "quiet");
-  return "";
+  // Archive is a flag, not a move, so it rides along wherever the task is.
+  const archive = `<button class="action" data-archive="${esc(t.id)}" aria-pressed="${t.archived}" title="${t.archived ? "Unarchive" : "Archive"}">${t.archived ? "Unarchive" : "Archive"}</button>`;
+  if (t.stage === "draft") return move("planning", "Plan it", "primary") + archive;
+  if (t.stage === "planning" && t.status === "queued") return move("draft", "Back to draft", "quiet") + archive;
+  if (t.stage === "planning" && t.status === "ready") return `<button class="action" id="edit">Edit</button>` + move("todo", "Approve", "primary") + move("draft", "Send back", "quiet") + archive;
+  if (t.stage === "planning" && t.status === "failed") return move("draft", "Back to draft", "") + archive;
+  if (t.stage === "todo") return move("planning", "Re-plan", "quiet") + archive;
+  if (t.stage === "done" && Object.keys(t.landed || {}).length) return move("todo", "Run again", "") + move("planning", "Re-plan", "quiet") + `<button class="action" data-pr="${esc(t.id)}">Create PR</button>` + archive;
+  if (t.stage === "done") return move("todo", "Run again", "") + move("planning", "Re-plan", "quiet") + archive;
+  if (t.stage === "under-work") return move("todo", "Requeue", "quiet") + archive;
+  return archive;
 }
 
 let picked = new Set();
@@ -801,8 +786,6 @@ async function toggleArchive(id) {
 }
 
 document.getElementById("board").addEventListener("click", e => {
-  const arch = e.target.closest("button[data-archive]");
-  if (arch) { toggleArchive(arch.dataset.archive); return; }
   const el = e.target.closest(".card");
   if (el) showDetail(el.dataset.id);
 });
@@ -813,6 +796,8 @@ document.getElementById("show-archived").addEventListener("click", () => {
 });
 document.getElementById("d-actions").addEventListener("click", e => {
   if (e.target.closest("#save")) return saveIdea();
+  const arch = e.target.closest("button[data-archive]");
+  if (arch) return toggleArchive(arch.dataset.archive);
   const prBtn = e.target.closest("button[data-pr]");
   if (prBtn) return createPR(prBtn.dataset.pr);
   if (e.target.closest("#edit")) { editing = true; return showDetail(openId); }

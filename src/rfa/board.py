@@ -12,6 +12,7 @@ header that no cross-site request can set without a preflight this server refuse
 """
 
 import json
+import re
 import secrets
 import shlex
 import threading
@@ -83,6 +84,7 @@ def snapshot() -> dict:
                 "created": task.meta.get("created"),
                 "error": task.meta.get("error"),
                 "landed": task.meta.get("landed") or {},
+                "shots": task.meta.get("shots") or [],
                 "copy": copy_commands(task.meta.get("landed") or {}, configured),
                 "prs": task.meta.get("prs") or {},
                 "open_questions": task.meta.get("open_questions") or [],
@@ -101,16 +103,20 @@ def tail(message: dict) -> str:
     return str(message.get("content") or "")[-1500:]
 
 
-def progress(id: str) -> dict:
+def progress(id: str, of: str = "") -> dict:
     """What a run has done so far: every command it ran, and what came back.
 
     Live by accident of good design -- mini rewrites the trajectory in a `finally` after each step,
     so the file on disk is at most one model call behind. It is rewritten in place rather than
     swapped, so a read can land mid-write; a half-written file is simply not ready yet.
+
+    `of=review` is the reviewer's own session, which lives one folder deeper so that reviewing a
+    card does not write over the coding run it is judging.
     """
     if not tasks.ID_RE.fullmatch(id):
         return {"steps": []}
-    path = tasks.home() / "var" / "runs" / id / "trajectory.json"
+    run = tasks.home() / "var" / "runs" / id
+    path = (run / "review" / "trajectory.json") if of == "review" else (run / "trajectory.json")
     if not path.exists():
         return {"steps": []}
     try:
@@ -129,6 +135,22 @@ def progress(id: str) -> dict:
             steps.append({"commands": [], "returncode": 0, "output": tail(message), "exit": True})
     # The last one has no observation yet: that command is what the run is doing right now.
     return {"steps": steps, "now": ran or []}
+
+
+SHOT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\.png")
+
+
+def screenshot(id: str, name: str) -> bytes | None:
+    """One of a review's screenshots, by name.
+
+    Both halves of the path are checked against a pattern rather than cleaned up: this reads files
+    off disk for whoever holds the board's token, and a name that has to match is a much shorter
+    argument than a name that has been made safe.
+    """
+    if not tasks.ID_RE.fullmatch(id) or not SHOT_RE.fullmatch(name):
+        return None
+    path = tasks.home() / "var" / "runs" / id / "review" / name
+    return path.read_bytes() if path.is_file() else None
 
 
 def allowed(headers, token: str, origin: str) -> bool:
@@ -170,7 +192,14 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.startswith("/api/tasks"):
             self._json(200, snapshot())
         elif self.path.startswith("/api/run"):
-            self._json(200, progress(self.path.rpartition("id=")[2]))
+            query = parse_qs(urlparse(self.path).query)
+            self._json(200, progress(query.get("id", [""])[0], query.get("of", [""])[0]))
+        elif self.path.startswith("/api/shot"):
+            query = parse_qs(urlparse(self.path).query)
+            if (shot := screenshot(query.get("id", [""])[0], query.get("name", [""])[0])) is None:
+                self._json(404, {"error": "no such screenshot"})
+            else:
+                self._send(200, shot, "image/png")
         elif self.path.startswith("/api/branches"):
             from rfa.planner import options
 

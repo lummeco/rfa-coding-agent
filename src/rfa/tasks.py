@@ -18,10 +18,14 @@ from pathlib import Path
 
 import yaml
 
-STAGES = ("draft", "planning", "todo", "under-work", "done")
+STAGES = ("draft", "planning", "todo", "under-work", "review", "done")
 
 # Who may take each step. The one that matters is that no agent can approve its own packet into
 # todo: that edge is the human's, and it is the only gate between a draft and a machine writing code.
+#
+# The reviewer is allowed the edge the coder is not -- `review -> todo` -- because that is the whole
+# point of the stage: work that does not do what the packet asked goes back to be coded again,
+# without waiting for you. It is still bounded, by the same `attempts` the coder spends.
 TRANSITIONS: dict[tuple[str, str], set[str]] = {
     ("draft", "planning"): {"human"},
     ("draft", "todo"): {"human"},
@@ -29,9 +33,14 @@ TRANSITIONS: dict[tuple[str, str], set[str]] = {
     ("planning", "draft"): {"human"},
     ("todo", "planning"): {"human"},
     ("todo", "under-work"): {"human", "worker"},
+    ("under-work", "review"): {"human", "worker"},
     ("under-work", "done"): {"human", "worker"},
     ("under-work", "todo"): {"human", "worker"},
     ("under-work", "planning"): {"human", "worker"},
+    ("review", "done"): {"human", "reviewer"},
+    ("review", "todo"): {"human", "reviewer"},
+    ("review", "planning"): {"human"},
+    ("done", "review"): {"human"},
     ("done", "todo"): {"human"},
     ("done", "planning"): {"human"},
 }
@@ -39,7 +48,7 @@ TRANSITIONS: dict[tuple[str, str], set[str]] = {
 # The `status` a task takes when it arrives in a stage, unless whoever moved it says otherwise.
 # `queued` is the one that matters: a card a human drops into planning is waiting for the planner,
 # not being planned, and the board should not claim otherwise until `rfa plan` picks it up.
-ON_ARRIVAL = {"planning": "queued", "under-work": "starting"}
+ON_ARRIVAL = {"planning": "queued", "under-work": "starting", "review": "queued"}
 
 ID_RE = re.compile(r"[0-9a-z][0-9a-z-]{0,79}")
 FRONT_MATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?(.*)\Z", re.DOTALL)

@@ -116,12 +116,19 @@ def menubar() -> Step:
     return Step("menubar", True, "running — ⌥Space for a new idea")
 
 
+def images(configs: list[dict]) -> list[str]:
+    """The images a run could need. The reviewer's carries a browser and is the size of one, so it
+    is only worth pulling once something is configured for it to drive."""
+    return list(dict.fromkeys(c["environment"]["image"] for c in configs if c is not None))
+
+
 def check() -> Report:
     """Everything `rfa up` verifies, without starting anything."""
     planner, coder = settings.load("planner"), settings.load("coder")
+    reviewer = settings.load("reviewer") if coder.get("apps") else None
     report = Report()
     report.add(workspace())
     report.add(repos(coder))
-    report.add(docker([planner["environment"]["image"], coder["environment"]["image"]]))
+    report.add(docker(images([planner, coder, reviewer])))
     report.add(ollama(coder))
     return report

@@ -270,6 +270,10 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
     )
     task.body += changed_note(landed, repos, output) if shipped else failure_note(agent, patches)
     task.body += dropped_note(dropped)
+    # Work that landed in a repository somebody wrote an `apps:` block for is not done until the
+    # reviewer has driven it. Everywhere else there is no app to start, so `done` is the truth.
+    if shipped and set(landed) & set(settings.app_specs(config, task.meta.get("repos") or [])):
+        return tasks.move(task, "review", actor="worker", run=str(output), landed=landed, error=None)
     return tasks.move(
         task,
         "done",

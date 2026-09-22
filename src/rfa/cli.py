@@ -13,6 +13,7 @@ rfa show <id>               one task, in full
 rfa plan [id ...]           write packets for cards waiting in planning
 rfa approve <id>            you read the packet; it becomes work
 rfa work [id]               code the next approved task (default: the oldest)
+rfa review [id]             drive the app the coder changed and judge it
 rfa branches [repo ...]     the branches you can start work from
 rfa models                  the models you can run with
 rfa model [name]            which one new runs use
@@ -38,6 +39,7 @@ STATUS_STYLE = {
     "ready": "green",
     "shipped": "green",
     "coding": "cyan",
+    "reviewing": "cyan",
     "failed": "red",
     "planning": "yellow",
     "under-work": "cyan",
@@ -246,6 +248,30 @@ def work(
         console.print(f"[bold green]Shipped[/] — patches in [bold]{done.meta['run']}[/]")
     else:
         console.print(f"[bold red]Failed[/] — {done.meta.get('error', '')}\n[dim]{done.meta['run']}[/]")
+
+
+@app.command()
+def review(
+    id: str = typer.Argument("", help="A card in review; omit for the oldest waiting one"),
+    model: str = typer.Option("", "-m", "--model", help="A name from `models:` in rfa.yaml"),
+    reasoning: str = typer.Option("", "-R", "--reasoning", help="none | low | medium | high"),
+):
+    """Start the app the coder changed, drive it through a browser, and judge the packet."""
+    from rfa.reviewer import review_task
+
+    queue = [t for t in tasks.tasks("review") if t.status == "queued"]
+    task = tasks.find(id) if id else (queue[0] if queue else None)
+    if task is None:
+        console.print("[dim]Nothing to review. The coder puts cards here when the work lands.[/]")
+        return
+    console.print(f"[bold]Reviewing[/] {task.title}")
+    judged = review_task(task, settings.load("reviewer"), model, reasoning)
+    if judged.stage == "done":
+        console.print(f"[bold green]Passed[/] — screenshots in [bold]{judged.meta['review']}[/]")
+    elif judged.stage == "todo":
+        console.print(f"[bold yellow]Sent back[/] — {judged.meta.get('error', '')}")
+    else:
+        console.print(f"[bold red]Could not review[/] — {judged.meta.get('error', '')}")
 
 
 @app.command("mv")

@@ -276,6 +276,9 @@ button.action.quiet { background: transparent; color: var(--text-2); padding-lef
 .md code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; }
 .md .hint { color: var(--text-3); font-size: 13px; font-style: italic; }
 
+.shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin: 8px 0 0; }
+.shots a { display: block; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--bg); }
+.shots img { display: block; width: 100%; height: 120px; object-fit: cover; object-position: top left; }
 .timeline { list-style: none; padding: 0; margin: 8px 0 0; }
 .timeline li {
   display: flex; gap: 10px; align-items: baseline;
@@ -376,9 +379,9 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 </aside>
 
 <script>
-const LABEL = { "under-work": "Under work", "draft": "Draft", "planning": "Planning", "todo": "To do", "done": "Done" };
-const TONE = { ready: "green", done: "green", shipped: "green", failed: "red", planning: "amber", queued: "", coding: "blue", starting: "blue", todo: "blue" };
-const LIVE = new Set(["planning", "coding", "checking", "starting"]);
+const LABEL = { "under-work": "Under work", "draft": "Draft", "planning": "Planning", "todo": "To do", "review": "Review", "done": "Done" };
+const TONE = { ready: "green", done: "green", shipped: "green", failed: "red", planning: "amber", queued: "", coding: "blue", starting: "blue", todo: "blue", reviewing: "blue" };
+const LIVE = new Set(["planning", "coding", "checking", "starting", "reviewing"]);
 
 let state = { tasks: [], events: [], stages: [], system: null };
 let openId = null;
@@ -489,7 +492,10 @@ function actionsFor(t) {
   if (t.stage === "planning" && t.status === "ready") return `<button class="action" id="edit">Edit</button>` + move("todo", "Approve", "primary") + move("draft", "Send back", "quiet") + archive;
   if (t.stage === "planning" && t.status === "failed") return move("draft", "Back to draft", "") + archive;
   if (t.stage === "todo") return move("planning", "Re-plan", "quiet") + archive;
-  if (t.stage === "done" && Object.keys(t.landed || {}).length) return move("todo", "Run again", "") + move("planning", "Re-plan", "quiet") + `<button class="action" data-pr="${esc(t.id)}">Create PR</button>` + archive;
+  // The reviewer takes both of these edges on its own; these are for overruling it, or for a card
+  // whose review could not run at all.
+  if (t.stage === "review") return move("done", "Pass it", "primary") + move("todo", "Send back", "quiet") + move("planning", "Re-plan", "quiet") + archive;
+  if (t.stage === "done" && Object.keys(t.landed || {}).length) return move("todo", "Run again", "") + move("review", "Review again", "quiet") + move("planning", "Re-plan", "quiet") + `<button class="action" data-pr="${esc(t.id)}">Create PR</button>` + archive;
   if (t.stage === "done") return move("todo", "Run again", "") + move("planning", "Re-plan", "quiet") + archive;
   if (t.stage === "under-work") return move("todo", "Requeue", "quiet") + archive;
   return archive;
@@ -643,6 +649,33 @@ function strip() {
   document.getElementById("strip").innerHTML = parts.join("");
 }
 
+// --- what the reviewer saw ---------------------------------------------------------------------
+
+const shotUrls = new Map();   // `${id}/${attempts}/${name}` -> object URL
+
+/** Fetch what we do not have yet, then draw the card again if anything arrived.
+ *  Keyed by attempt as well as name: a second review writes the same filenames over the first. */
+async function loadShots(t) {
+  let arrived = false;
+  for (const name of t.shots || []) {
+    const key = `${t.id}/${t.attempts}/${name}`;
+    if (shotUrls.has(key)) continue;
+    shotUrls.set(key, "");   // claim it, so the next render does not fetch it again
+    const res = await api(`/api/shot?id=${encodeURIComponent(t.id)}&name=${encodeURIComponent(name)}`);
+    if (!res.ok) continue;
+    shotUrls.set(key, URL.createObjectURL(await res.blob()));
+    arrived = true;
+  }
+  if (arrived && detailId === t.id) showDetail(t.id);
+}
+
+function gallery(t) {
+  const have = (t.shots || []).map(n => [n, shotUrls.get(`${t.id}/${t.attempts}/${n}`)]).filter(([, u]) => u);
+  if (!have.length) return "";
+  return `<h2>What the reviewer saw</h2><div class="shots">` + have.map(([n, u]) =>
+    `<a href="${u}" target="_blank" rel="noreferrer"><img src="${u}" alt="${esc(n)}" title="${esc(n)}"></a>`).join("") + `</div>`;
+}
+
 // --- the run log -----------------------------------------------------------------------------
 
 let watching = null;   // the card id whose steps are open; null = nobody asked
@@ -654,7 +687,8 @@ async function drawRun(id) {
   // earlier steps, new steps must not move the view; at the bottom, they land at the bottom.
   const body = document.getElementById("d-body");
   const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight <= 40;
-  const res = await api(`/api/run?id=${encodeURIComponent(id)}`);
+  const of = (state.tasks.find(t => t.id === id) || {}).stage === "review" ? "review" : "";
+  const res = await api(`/api/run?id=${encodeURIComponent(id)}&of=${of}`);
   if (!res.ok) return;
   const { steps, now } = await res.json();
   if (watching !== id) return;   // the panel moved on while we were waiting
@@ -718,7 +752,7 @@ function showDetail(id) {
   const fullBody = String(t.body || "");
   const body = fullBody.replace(/^\s*#\s+Task\s*\n+[^\n]*\n/, "");
   // Only where there is a run to look at: a card that never reached the coder has no trajectory.
-  const ran = t.stage === "under-work" || t.stage === "done";
+  const ran = ["under-work", "review", "done"].includes(t.stage);
   const watch = ran
     ? `<p><button class="watch" id="watch">${watching === id ? "Hide" : "Watch"} what it did →</button></p>`
       + `<div class="run" id="run"></div>`
@@ -731,11 +765,12 @@ function showDetail(id) {
   if (editing) {
     panel.innerHTML = head + `<textarea id="edit-body">${esc(fullBody)}</textarea>`;
   } else {
-    panel.innerHTML = head + `<div class="md">${md(body)}${history}</div>` + watch;
+    panel.innerHTML = head + `<div class="md">${md(body)}${gallery(t)}${history}</div>` + watch;
   }
   panel.scrollTop = saved;
   detailId = id;
   if (watching === id) drawRun(id);
+  if ((t.shots || []).length) loadShots(t);
   if (editing) {
     document.getElementById("d-actions").innerHTML = `<button class="action primary" id="save-edit">Save</button><button class="action quiet" id="cancel-edit">Cancel</button>`;
   } else {

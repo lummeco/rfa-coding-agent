@@ -1,10 +1,14 @@
 """Workspace settings: `rfa.yaml` in RFA_HOME, merged over the packaged defaults.
 
-One optional file. Anything at the top level applies to both stages; a `planner:` or `coder:` block
-applies to that one only:
+One optional file. Anything at the top level applies to every stage; a `planner:`, `coder:` or
+`reviewer:` block applies to that one only:
 
     repos:
       lummeco/lummepro-web: ~/dev/lummepro-web
+    apps:
+      lummeco/lummepro-web:
+        serve: npm run dev -- --port 3000
+        port: 3000
     models:
       qwen3.6:
         model_name: ollama_chat/rfa-qwen3.6
@@ -22,7 +26,7 @@ from minisweagent.utils.serialize import recursive_merge
 from rfa import tasks
 
 CONFIG_DIR = Path(__file__).parent / "config"
-STAGES = ("planner", "coder")
+STAGES = ("planner", "coder", "reviewer")
 DEFAULTS = CONFIG_DIR / "planner.yaml"
 # What `reasoning:` may say. litellm turns this into Ollama's `think`, so for a Qwen it is really
 # on or off -- only the graded models (gpt-oss) tell the three levels apart. See `model_config`.
@@ -68,6 +72,17 @@ def repo_paths(config: dict, names: list[str], branches: dict[str, str] | None =
         ref = (branches or {}).get(name) or pinned or "HEAD"
         resolved[name.rpartition("/")[2]] = (Path(location).expanduser().resolve(), ref)
     return resolved
+
+
+def app_specs(config: dict, names: list[str]) -> dict[str, dict]:
+    """The `apps:` entries for a task's repositories, keyed the way the container sees them.
+
+    This is what makes review opt-in. A repository nobody has written an `apps:` block for has no
+    app the reviewer could start, so a task that touches only those repositories is done when the
+    coder is done -- rather than being held in a stage that could never say anything about it.
+    """
+    configured = config.get("apps") or {}
+    return {name.rpartition("/")[2]: dict(configured[name]) for name in names if name in configured}
 
 
 def pairs(meta: dict, key: str) -> list[tuple[str, str]]:

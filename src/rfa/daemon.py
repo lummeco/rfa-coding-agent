@@ -1,14 +1,16 @@
-"""`rfa daemon`: the loop that pulls cards into the planner and the coder on its own.
+"""`rfa daemon`: the loop that pulls cards into the planner, the coder and the reviewer on its own.
 
-It is the two commands you would type -- `rfa plan` and `rfa work` -- on a timer. Anything it does
-you can still do by hand, and stopping it stops nothing else. What it adds is the gates: a laptop on
-a draining battery or short of memory should not start a container, and two runs must never overlap,
-because planning and coding drive the same local model and two agent calls at once split its memory
-and thrash the GPU.
+It is the three commands you would type -- `rfa plan`, `rfa work` and `rfa review` -- on a timer.
+Anything it does you can still do by hand, and stopping it stops nothing else. What it adds is the
+gates: a laptop on a draining battery or short of memory should not start a container, and two runs
+must never overlap, because every stage drives the same local model and two agent calls at once
+split its memory and thrash the GPU.
 
-The human gate is untouched. The daemon plans cards you moved into `planning` and codes cards you
-approved into `todo`; it never moves a packet between the two. That edge is yours, and it is the
-only thing standing between an idea and a machine writing code for it.
+The human gate is untouched. The daemon plans cards you moved into `planning`, codes cards you
+approved into `todo`, and reviews what the coder landed; it never moves a packet from planning to
+todo. That edge is yours, and it is the only thing standing between an idea and a machine writing
+code for it. The reviewer's own edge -- back to `todo` when the app does not do what was asked --
+is not that gate: it can only return work to be redone, never approve it in the first place.
 
 Planning goes first, because it is short, bounded and it is what puts a packet in front of you --
 until `plan_ahead` cards of work are already waiting, at which point the coder is the bottleneck and
@@ -46,6 +48,7 @@ class DaemonConfig:
     this long before starting another. Hitting a broken machine every 15 seconds helps nobody."""
     plan: bool = True
     work: bool = True
+    review: bool = True
 
     @classmethod
     def load(cls) -> "DaemonConfig":
@@ -53,8 +56,12 @@ class DaemonConfig:
 
 
 def running() -> list[Task]:
-    """Cards with a run on them right now: anything in under-work, and a card the planner holds."""
-    return tasks.tasks("under-work") + [t for t in tasks.tasks("planning") if t.status == "planning"]
+    """Cards with a run on them right now: anything in under-work, and a card an agent holds."""
+    return (
+        tasks.tasks("under-work")
+        + [t for t in tasks.tasks("planning") if t.status == "planning"]
+        + [t for t in tasks.tasks("review") if t.status == "reviewing"]
+    )
 
 
 def reclaim() -> list[str]:
@@ -70,17 +77,35 @@ def reclaim() -> list[str]:
         for t in tasks.tasks("under-work")
     ]
     reclaimed += [tasks.save(t, status="queued").id for t in tasks.tasks("planning") if t.status == "planning"]
+    reclaimed += [tasks.save(t, status="queued").id for t in tasks.tasks("review") if t.status == "reviewing"]
     for id in reclaimed:
         tasks.log(type="reclaimed", id=id)
     return reclaimed
 
 
+def reviewable(task: Task) -> bool:
+    """Is there an app on this card the reviewer could actually start?
+
+    A card can reach `review` without one -- you can move it there by hand -- and the daemon has to
+    leave that card alone rather than pick it up every fifteen seconds to fail on it again.
+    """
+    config = settings.load("reviewer")
+    return bool(set(task.meta.get("landed") or {}) & set(settings.app_specs(config, task.meta.get("repos") or [])))
+
+
 def next_job(config: DaemonConfig) -> tuple[str, Task] | None:
     """The card to run next and what to run on it, or nothing to do.
+
+    Reviewing comes first: a card in `review` is work that is already finished and only waiting to
+    be told whether it counts. Starting another coding run ahead of it spends the machine on a
+    fourth unfinished thing while three finished ones say nothing.
 
     `plan_ahead` only ever holds planning back in favour of a coding run that can actually start:
     with nothing to code there is nothing to yield to, and the queue would sit there all night.
     """
+    reviews = [t for t in tasks.tasks("review") if t.status == "queued" and reviewable(t)] if config.review else []
+    if reviews:
+        return "review", reviews[0]
     plans = [t for t in tasks.tasks("planning") if t.status == "queued"] if config.plan else []
     work = [t for t in tasks.tasks("todo") if t.attempts < config.max_attempts] if config.work else []
     waiting = len(tasks.tasks("todo")) + sum(t.status == "ready" for t in tasks.tasks("planning"))
@@ -93,12 +118,15 @@ def run(job: tuple[str, Task], config: DaemonConfig) -> None:
     # Imported here, not at the top: these pull in the whole agent harness, and the board and
     # `rfa status` import this module only to ask what it would do next.
     from rfa.planner import plan_task
+    from rfa.reviewer import review_task
     from rfa.worker import run_task
 
     kind, task = job
     with gates.KeepAwake(config.keep_awake):
         if kind == "plan":
             plan_task(task, settings.load("planner"))
+        elif kind == "review":
+            review_task(task, settings.load("reviewer"))
         else:
             run_task(task, settings.load("coder"))
 

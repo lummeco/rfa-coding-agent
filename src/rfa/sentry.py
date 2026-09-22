@@ -16,6 +16,7 @@ import subprocess
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from rfa import settings, tasks
 from rfa.tasks import Task
@@ -36,6 +37,8 @@ class SentryConfig:
     """Sentry project slug -> the key in `repos:` its issues are drafted against."""
     interval: int = 1800
     query: str = "is:unresolved"
+    period: str = "7d"
+    """Only issues with an event this recently, in Sentry's own units: `24h`, `7d`, `30d`."""
     url: str = "https://sentry.io"
     keychain_service: str = KEYCHAIN_SERVICE
 
@@ -67,8 +70,8 @@ def api(config: SentryConfig, secret: str, path: str) -> list | dict:
 
 
 def issues(config: SentryConfig, secret: str, project: str) -> list[dict]:
-    """The first page of what `query` matches, most recently seen first -- Sentry's own order."""
-    query = urllib.parse.urlencode({"query": config.query})
+    """The first page of what `query` matches within `period`, most recently seen first."""
+    query = urllib.parse.urlencode({"query": config.query, "statsPeriod": config.period})
     return api(config, secret, f"/projects/{config.org}/{project}/issues/?{query}")
 
 
@@ -100,9 +103,15 @@ def idea(issue: dict, event: dict) -> str:
 
 
 def capture(config: SentryConfig, secret: str, project: str, issue: dict) -> Task:
+    """One card per issue, whoever asks: the id is minted from when Sentry first saw the issue, not
+    from now, so two polls at once make the same id and `create` refuses the second."""
     event = api(config, secret, f"/organizations/{config.org}/issues/{issue['id']}/events/latest/")
     return tasks.create(
-        idea(issue, event), [config.projects[project]], sentry=str(issue["id"]), link=issue["permalink"]
+        idea(issue, event),
+        [config.projects[project]],
+        at=datetime.fromisoformat(str(issue["firstSeen"]).replace("Z", "+00:00")),
+        sentry=str(issue["id"]),
+        link=issue["permalink"],
     )
 
 

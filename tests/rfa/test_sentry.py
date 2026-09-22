@@ -120,10 +120,25 @@ def test_every_new_issue_becomes_one_draft_and_only_once():
     assert "```" not in drafted[1].body  # nothing to show for an event without an exception
     assert (
         all(auth == "Bearer t0k3n" for _, auth in FakeSentry.asked)
-        and "query=is%3Aunresolved" in FakeSentry.asked[0][0]
+        and "query=is%3Aunresolved&statsPeriod=7d" in FakeSentry.asked[0][0]
     )
     tasks.move(drafted[0], "planning")
     assert sentry.pull(config, "t0k3n") == [] and len(tasks.tasks()) == 2
+
+
+def test_two_polls_at_once_cannot_both_make_a_card():
+    """The daemon's tick and `rfa sentry` by hand, in the same second, both saw an empty board. The
+    id comes from the issue, not the clock, so the second `create` hits the first card and refuses."""
+    assert [t.id for t in sentry.pull(sentry.SentryConfig.load(), "t0k3n")] == [
+        "20260920-060710-fix-the-sentry-issue-web-1a-typeerror-cannot-read-",
+        "20260922-070000-fix-the-sentry-issue-web-1b-zerodivisionerror-divi",
+    ]
+    with pytest.raises(FileExistsError, match="already in draft"):
+        sentry.capture(sentry.SentryConfig.load(), "t0k3n", "web", ISSUES[0])
+    tasks.move(tasks.tasks("draft")[0], "todo")
+    with pytest.raises(FileExistsError, match="already in todo"):
+        sentry.capture(sentry.SentryConfig.load(), "t0k3n", "web", ISSUES[0])
+    assert len(tasks.tasks()) == 2
 
 
 def test_what_sentry_refuses_is_an_error_with_the_status_in_it():

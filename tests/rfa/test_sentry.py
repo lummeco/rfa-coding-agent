@@ -120,7 +120,7 @@ def test_every_new_issue_becomes_one_draft_and_only_once():
     assert "```" not in drafted[1].body  # nothing to show for an event without an exception
     assert (
         all(auth == "Bearer t0k3n" for _, auth in FakeSentry.asked)
-        and "query=is%3Aunresolved&statsPeriod=7d" in FakeSentry.asked[0][0]
+        and "query=is%3Aunresolved+lastSeen%3A-7d" in FakeSentry.asked[0][0]
     )
     tasks.move(drafted[0], "planning")
     assert sentry.pull(config, "t0k3n") == [] and len(tasks.tasks()) == 2

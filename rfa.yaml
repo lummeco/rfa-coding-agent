@@ -57,7 +57,7 @@ github:
   keychain_service: rfa-github-pat
 
 # Sentry. With this block here the daemon asks each project under `projects:` for the issues `query`
-# matches within `period` -- unresolved ones seen this week, by default -- every `interval` seconds,
+# matches -- unresolved ones seen this week, by default -- every `interval` seconds,
 # and captures each one it has not seen before as a draft naming the repository the project maps to.
 # A draft and nothing further:
 # it lands in front of you exactly as an idea typed into the capture box would, with the exception,
@@ -71,8 +71,8 @@ github:
 sentry:
   org: lummeco
   interval: 1800
-  # Only issues with an event this recently. Sentry's units: 24h, 7d, 30d.
-  period: 7d
+  # Sentry's own search syntax; the window is the `lastSeen:` part. Unresolved, seen this week.
+  query: "is:unresolved lastSeen:-7d"
   keychain_service: rfa-sentry-token
   # Sentry project slug: the repository its issues belong to, as listed under `repos:`. The slug is
   # the project's name in Sentry's own URLs; a project not listed here is never asked about.

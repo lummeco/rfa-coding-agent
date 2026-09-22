@@ -13,6 +13,7 @@ of one call and never written down.
 
 import json
 import subprocess
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -36,9 +37,9 @@ class SentryConfig:
     projects: dict[str, str] = field(default_factory=dict)
     """Sentry project slug -> the key in `repos:` its issues are drafted against."""
     interval: int = 1800
-    query: str = "is:unresolved"
-    period: str = "7d"
-    """Only issues with an event this recently, in Sentry's own units: `24h`, `7d`, `30d`."""
+    query: str = "is:unresolved lastSeen:-7d"
+    """Sentry's own search syntax. `lastSeen:-7d` is the window; the endpoint's `statsPeriod` only
+    knows 24h and 14d, so the window lives here instead."""
     url: str = "https://sentry.io"
     keychain_service: str = KEYCHAIN_SERVICE
 
@@ -65,13 +66,14 @@ def api(config: SentryConfig, secret: str, path: str) -> list | dict:
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
             return json.loads(response.read())
-    except OSError as exc:  # an HTTP error is one too, and says its status
-        raise SentryError(f"GET {path}: {exc}") from exc
+    except OSError as exc:  # an HTTP error is one too, and its body says why
+        said = exc.read()[:300].decode(errors="replace") if isinstance(exc, urllib.error.HTTPError) else ""
+        raise SentryError(f"GET {path}: {exc} {said}".strip()) from exc
 
 
 def issues(config: SentryConfig, secret: str, project: str) -> list[dict]:
-    """The first page of what `query` matches within `period`, most recently seen first."""
-    query = urllib.parse.urlencode({"query": config.query, "statsPeriod": config.period})
+    """The first page of what `query` matches, most recently seen first -- Sentry's own order."""
+    query = urllib.parse.urlencode({"query": config.query})
     return api(config, secret, f"/projects/{config.org}/{project}/issues/?{query}")
 
 

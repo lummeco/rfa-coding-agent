@@ -235,6 +235,10 @@ button.action.quiet { background: transparent; color: var(--text-2); padding-lef
 
 /* Editing fills the panel: the textarea takes whatever the notes above it leave. */
 #detail .body.editing { display: flex; flex-direction: column; overflow: hidden; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin-top: 16px; }
+.stat { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+.stat b { display: block; font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stat span { color: var(--text-3); font-size: 12px; }
 #detail .body.editing > .note { flex: none; }
 #edit-body {
   flex: 1; width: 100%; min-height: 200px; resize: none;
@@ -359,6 +363,7 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   <span class="count" id="count"></span>
   <span class="spacer"></span>
   <button class="action" id="show-archived" aria-pressed="false">Show archived</button>
+  <button class="action" id="analytics">Analytics</button>
   <button class="action primary" id="capture">New idea</button>
   <span class="hint"><kbd>N</kbd> new · <kbd>R</kbd> refresh · <kbd>Esc</kbd> close</span>
 </header>
@@ -522,6 +527,45 @@ function showCapture() {
     `<button class="action primary" id="save">Save draft</button><span class="hint" style="color:var(--text-3);font-size:12px">⌘↵</span>`;
   openPanel();
   document.getElementById("idea").focus();
+}
+
+let windowChoice = "7d";   // the analytics window: "7d", "30d" or "all"
+
+function showAnalytics() {
+  openId = null;
+  detailId = null;
+  document.getElementById("d-title").textContent = "Analytics";
+  document.getElementById("d-sub").textContent = "How much of the pipeline you have used.";
+  document.getElementById("d-actions").innerHTML = "";
+  openPanel();
+  drawAnalytics();
+}
+
+async function drawAnalytics() {
+  const body = document.getElementById("d-body");
+  body.innerHTML = `<div class="hint">reading the runs…</div>`;
+  const res = await api(`/api/analytics?window=${windowChoice}`);
+  if (!res.ok) { body.innerHTML = `<div class="hint">${esc((await res.json()).error)}</div>`; return; }
+  const a = await res.json();
+  const stat = (label, value) => `<div class="stat"><b>${esc(value)}</b><span>${label}</span></div>`;
+  body.innerHTML =
+    `<div class="with"><select id="window">${["7d", "30d", "all"].map(w =>
+      `<option value="${w}" ${w === windowChoice ? "selected" : ""}>${w === "all" ? "all time" : "last " + w.slice(0, -1) + " days"}</option>`).join("")}</select></div>`
+    + `<div class="stats">`
+    + stat("coding runs", a.runs)
+    + stat("coding time", humanRuntime(a.runtime))
+    + stat("lines generated", a.loc)
+    + stat("shipped", a.shipped)
+    + stat("failed", a.failed)
+    + `</div>`;
+}
+
+function humanRuntime(seconds) {
+  const s = Math.round(Number(seconds) || 0);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m ${s % 60}s`;
+  return `${s}s`;
 }
 
 function heading(text) {
@@ -860,6 +904,7 @@ document.getElementById("d-actions").addEventListener("click", e => {
   if (el && openId) move(openId, el.dataset.to);
 });
 document.getElementById("capture").addEventListener("click", showCapture);
+document.getElementById("analytics").addEventListener("click", showAnalytics);
 document.getElementById("d-body").addEventListener("click", e => {
   if (e.target.closest("#watch")) {
     watching = watching === openId ? null : openId;
@@ -892,6 +937,7 @@ document.getElementById("d-body").addEventListener("click", e => {
 
 // The two branch selects: one says where the work starts, the other adds something to read.
 document.getElementById("d-body").addEventListener("change", e => {
+  if (e.target.id === "window") { windowChoice = e.target.value; return drawAnalytics(); }
   const from = e.target.closest("select[data-start]");
   if (from) {
     const repo = from.dataset.start;

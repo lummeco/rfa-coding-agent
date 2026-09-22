@@ -17,6 +17,7 @@ import secrets
 import shlex
 import threading
 import webbrowser
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -153,6 +154,70 @@ def screenshot(id: str, name: str) -> bytes | None:
     return path.read_bytes() if path.is_file() else None
 
 
+def _when(value: object) -> datetime | None:
+    """An event's `ts` as a time, or nothing if it is not a time at all."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def added_lines(id: str) -> int:
+    """The lines the coder added in one run's patches: the `+` lines, minus the `+++` file headers.
+
+    The headers name the file rather than add a line, and everything else in a patch -- `diff`,
+    `index`, `@@`, context and `-` lines -- is not generated code.
+    """
+    if not tasks.ID_RE.fullmatch(id):
+        return 0
+    run = tasks.home() / "var" / "runs" / id
+    if not run.is_dir():
+        return 0
+    return sum(
+        1
+        for patch in sorted(run.glob("*.patch"))
+        for line in patch.read_text(errors="replace").splitlines()
+        if line.startswith("+") and not line.startswith("+++")
+    )
+
+
+def analytics(window: str = "all") -> dict:
+    """How much of the pipeline has been used, for the window ending now.
+
+    A run is a `run_started` to its `run_finished` or `run_error`, and it is counted by when it
+    finished: a run that finished in the window is in every metric, one that finished outside it is
+    in none, and one that is still going has no finish and is not counted. Runtime is that span,
+    not the card's whole life; the lines are whatever the run's patches add. Read-only over the
+    records and recomputed on every call, so the board stays stateless.
+    """
+    by_id: dict[str, list[dict]] = {}
+    for event in tasks.events():
+        if event.get("type") in ("run_started", "run_finished", "run_error"):
+            by_id.setdefault(str(event.get("id") or ""), []).append(event)
+
+    match = re.fullmatch(r"([1-9]\d*)d", window) if isinstance(window, str) and window != "all" else None
+    cutoff = datetime.now(timezone.utc) - timedelta(days=int(match[1])) if match else None
+
+    total = {"runs": 0, "runtime": 0.0, "loc": 0, "shipped": 0, "failed": 0}
+    for id, events in by_id.items():
+        starts = [e for e in events if e.get("type") == "run_started"]
+        ends = [e for e in events if e.get("type") in ("run_finished", "run_error")]
+        for start, end in zip(starts, ends):
+            started, finished = _when(start.get("ts")), _when(end.get("ts"))
+            if started is None or finished is None or (cutoff is not None and finished < cutoff):
+                continue
+            total["runs"] += 1
+            total["runtime"] += (finished - started).total_seconds()
+            total["loc"] += added_lines(id)
+            if end.get("type") == "run_finished" and end.get("shipped"):
+                total["shipped"] += 1
+            else:
+                total["failed"] += 1
+    return total
+
+
 def allowed(headers, token: str, origin: str) -> bool:
     """May this request read or move anything?
 
@@ -200,6 +265,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(404, {"error": "no such screenshot"})
             else:
                 self._send(200, shot, "image/png")
+        elif self.path.startswith("/api/analytics"):
+            window = parse_qs(urlparse(self.path).query).get("window", ["all"])[0]
+            self._json(200, analytics(window))
         elif self.path.startswith("/api/branches"):
             from rfa.planner import options
 

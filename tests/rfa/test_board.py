@@ -6,7 +6,9 @@ can any page you have open, because a cross-site form post to 127.0.0.1 needs no
 a machine writing code, so these are the tests that gate depends on.
 """
 
+import json
 import subprocess
+from datetime import datetime, timedelta, timezone
 from email.message import Message
 
 import pytest
@@ -150,3 +152,89 @@ def test_the_snapshot_reports_a_task_as_archived_in_its_stage(tmp_path, monkeypa
     assert card["archived"] is True
     assert card["stage"] == "draft"
     assert task.path == was  # the file never left its stage folder
+
+
+def test_analytics_counts_a_shipped_run_with_its_lines(tmp_path, monkeypatch):
+    """The numbers the panel shows: one run, its patch's added lines, and it landed a branch."""
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    run = tmp_path / "var" / "runs" / "20260921-120000-a-task"
+    run.mkdir(parents=True)
+    (run / "web.patch").write_text(
+        "diff --git a/a.js b/a.js\n"
+        "index 123..456 100644\n"
+        "--- a/a.js\n"
+        "+++ b/a.js\n"
+        "@@ -1,2 +1,4 @@\n"
+        " context\n"
+        "+added\n"
+        "+added again\n"
+        "-gone\n"
+    )
+    tasks.log(type="run_started", id="20260921-120000-a-task")
+    tasks.log(type="run_finished", id="20260921-120000-a-task", shipped=True, rounds=1, landed={"web": "rfa/a-task"})
+    found = board.analytics("all")
+    assert found["runs"] == 1
+    assert found["loc"] == 2  # the two `+` lines; the `+++` header and the `-` line are not code
+    assert found["shipped"] == 1
+    assert found["failed"] == 0
+
+
+def test_a_run_is_counted_by_when_it_finished(tmp_path, monkeypatch):
+    """Finished twenty days ago: outside the short window, inside the long one, inside all time."""
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    finished = datetime.now(timezone.utc) - timedelta(days=20)
+    started = finished - timedelta(seconds=90)
+
+    def stamp(t):
+        return t.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+    events = tmp_path / "var" / "events.jsonl"
+    events.parent.mkdir(parents=True)
+    events.write_text(
+        json.dumps({"type": "run_started", "id": "20260921-120000-a-task", "ts": stamp(started)})
+        + "\n"
+        + json.dumps({"type": "run_finished", "id": "20260921-120000-a-task", "shipped": True, "ts": stamp(finished)})
+        + "\n"
+    )
+    assert board.analytics("7d")["runs"] == 0
+    assert board.analytics("30d")["runs"] == 1
+    assert board.analytics("all")["runs"] == 1
+
+
+def test_an_error_is_a_run_with_its_span_and_a_failure(tmp_path, monkeypatch):
+    """No `run_finished` does not drop the run: its start-to-end span is the runtime, and it failed."""
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    finished = datetime.now(timezone.utc)
+
+    def stamp(t):
+        return t.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+    events = tmp_path / "var" / "events.jsonl"
+    events.parent.mkdir(parents=True)
+    events.write_text(
+        json.dumps(
+            {"type": "run_started", "id": "20260921-120000-a-task", "ts": stamp(finished - timedelta(seconds=90))}
+        )
+        + "\n"
+        + json.dumps(
+            {"type": "run_error", "id": "20260921-120000-a-task", "error": "docker down", "ts": stamp(finished)}
+        )
+        + "\n"
+    )
+    found = board.analytics("7d")
+    assert found["runs"] == 1
+    assert found["runtime"] == pytest.approx(90)
+    assert found["shipped"] == 0
+    assert found["failed"] == 1
+
+
+def test_a_run_that_is_still_going_has_no_finish_and_is_not_counted(tmp_path, monkeypatch):
+    """Counted by when it finished, so one that has not finished is in no metric yet."""
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    tasks.log(type="run_started", id="20260921-120000-a-task")
+    assert board.analytics("all")["runs"] == 0
+
+
+def test_an_empty_workspace_is_zero_not_an_error(tmp_path, monkeypatch):
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    assert board.analytics("7d") == {"runs": 0, "runtime": 0, "loc": 0, "shipped": 0, "failed": 0}

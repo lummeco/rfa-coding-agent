@@ -6,6 +6,7 @@ import copy
 import importlib
 import os
 import threading
+from typing import Any
 
 from minisweagent import Model
 
@@ -16,17 +17,33 @@ class GlobalModelStats:
     def __init__(self):
         self._cost = 0.0
         self._n_calls = 0
+        self._model_stats: dict[str, dict[str, float]] = {}
         self._lock = threading.Lock()
         self.cost_limit = float(os.getenv("MSWEA_GLOBAL_COST_LIMIT", "0"))
         self.call_limit = int(os.getenv("MSWEA_GLOBAL_CALL_LIMIT", "0"))
         if (self.cost_limit > 0 or self.call_limit > 0) and not os.getenv("MSWEA_SILENT_STARTUP"):
             print(f"Global cost/call limit: ${self.cost_limit:.4f} / {self.call_limit}")
 
-    def add(self, cost: float) -> None:
-        """Add a model call with its cost, checking limits."""
+    def add(
+        self,
+        cost: float,
+        *,
+        model_name: str | None = None,
+        completion_tokens: int = 0,
+        duration: float = 0.0,
+    ) -> None:
+        """Add a model call with its cost, checking limits.
+
+        If model_name is given, the call's completion tokens and duration are also
+        tracked per model name for throughput analytics.
+        """
         with self._lock:
             self._cost += cost
             self._n_calls += 1
+            if model_name is not None:
+                stats = self._model_stats.setdefault(model_name, {"completion_tokens": 0.0, "duration": 0.0})
+                stats["completion_tokens"] += completion_tokens
+                stats["duration"] += duration
         if 0 < self.cost_limit < self._cost or 0 < self.call_limit < self._n_calls + 1:
             raise RuntimeError(f"Global cost/call limit exceeded: ${self._cost:.4f} / {self._n_calls}")
 
@@ -37,6 +54,31 @@ class GlobalModelStats:
     @property
     def n_calls(self) -> int:
         return self._n_calls
+
+    @property
+    def model_stats(self) -> dict[str, dict[str, float]]:
+        """Per-model stats: total completion tokens, total duration, and average tokens per second."""
+        with self._lock:
+            return {
+                name: {
+                    "completion_tokens": stats["completion_tokens"],
+                    "duration": stats["duration"],
+                    "avg_tokens_per_second": (
+                        stats["completion_tokens"] / stats["duration"] if stats["duration"] > 0 else 0.0
+                    ),
+                }
+                for name, stats in self._model_stats.items()
+            }
+
+
+def get_completion_tokens(response: Any) -> int:
+    """Extract the completion token count from a model response (object or dict), defaulting to 0."""
+    usage = response.get("usage") if isinstance(response, dict) else getattr(response, "usage", None)
+    if isinstance(usage, dict):
+        tokens = usage.get("completion_tokens", 0)
+    else:
+        tokens = getattr(usage, "completion_tokens", 0)
+    return tokens if isinstance(tokens, (int, float)) else 0
 
 
 GLOBAL_MODEL_STATS = GlobalModelStats()

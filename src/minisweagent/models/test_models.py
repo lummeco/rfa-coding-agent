@@ -112,7 +112,7 @@ class DeterministicModel:
         output = self.config.outputs[self.current_index]
         if _process_test_actions(output.get("extra", {}).get("actions", [])):
             return self.query(messages, **kwargs)
-        GLOBAL_MODEL_STATS.add(self.config.cost_per_call)
+        GLOBAL_MODEL_STATS.add(self.config.cost_per_call, model_name=self.config.model_name)
         return output
 
     def format_message(self, **kwargs) -> dict:
@@ -168,7 +168,7 @@ class DeterministicToolcallModel:
         output = self.config.outputs[self.current_index]
         if _process_test_actions(output.get("extra", {}).get("actions", [])):
             return self.query(messages, **kwargs)
-        GLOBAL_MODEL_STATS.add(self.config.cost_per_call)
+        GLOBAL_MODEL_STATS.add(self.config.cost_per_call, model_name=self.config.model_name)
         return output
 
     def format_message(self, **kwargs) -> dict:
@@ -228,7 +228,7 @@ class DeterministicResponseAPIToolcallModel:
         output = self.config.outputs[self.current_index]
         if _process_test_actions(output.get("extra", {}).get("actions", [])):
             return self.query(messages, **kwargs)
-        GLOBAL_MODEL_STATS.add(self.config.cost_per_call)
+        GLOBAL_MODEL_STATS.add(self.config.cost_per_call, model_name=self.config.model_name)
         return output
 
     def format_message(self, **kwargs) -> dict:

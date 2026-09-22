@@ -34,10 +34,12 @@ def reset_global_stats():
         # Reset at start
         GLOBAL_MODEL_STATS._cost = 0.0  # noqa: protected-access
         GLOBAL_MODEL_STATS._n_calls = 0  # noqa: protected-access
+        GLOBAL_MODEL_STATS._model_stats = {}  # noqa: protected-access
         yield
         # Reset at end to clean up
         GLOBAL_MODEL_STATS._cost = 0.0  # noqa: protected-access
         GLOBAL_MODEL_STATS._n_calls = 0  # noqa: protected-access
+        GLOBAL_MODEL_STATS._model_stats = {}  # noqa: protected-access
 
 
 def _get_container_executable() -> str | None:

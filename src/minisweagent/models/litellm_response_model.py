@@ -5,7 +5,7 @@ from collections.abc import Callable
 import litellm
 
 from minisweagent.exceptions import FormatError
-from minisweagent.models import GLOBAL_MODEL_STATS
+from minisweagent.models import GLOBAL_MODEL_STATS, get_completion_tokens
 from minisweagent.models.litellm_model import LitellmModel, LitellmModelConfig
 from minisweagent.models.utils.actions_toolcall_response import (
     BASH_TOOL_RESPONSE_API,
@@ -50,11 +50,17 @@ class LitellmResponseModel(LitellmModel):
             raise e
 
     def query(self, messages: list[dict[str, str]], **kwargs) -> dict:
+        start_time = time.time()
         for attempt in retry(logger=logger, abort_exceptions=self.abort_exceptions):
             with attempt:
                 response = self._query(self._prepare_messages_for_api(messages), **kwargs)
         cost_output = self._calculate_cost(response)
-        GLOBAL_MODEL_STATS.add(cost_output["cost"])
+        GLOBAL_MODEL_STATS.add(
+            cost_output["cost"],
+            model_name=self.config.model_name,
+            completion_tokens=get_completion_tokens(response),
+            duration=time.time() - start_time,
+        )
         try:
             actions = self._parse_actions(response)
         except FormatError as e:

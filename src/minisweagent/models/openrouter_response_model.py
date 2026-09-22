@@ -5,7 +5,7 @@ import time
 import requests
 
 from minisweagent.exceptions import FormatError
-from minisweagent.models import GLOBAL_MODEL_STATS
+from minisweagent.models import GLOBAL_MODEL_STATS, get_completion_tokens
 from minisweagent.models.openrouter_model import (
     OpenRouterAPIError,
     OpenRouterAuthenticationError,
@@ -83,11 +83,17 @@ class OpenRouterResponseModel(OpenRouterModel):
         return result
 
     def query(self, messages: list[dict[str, str]], **kwargs) -> dict:
+        start_time = time.time()
         for attempt in retry(logger=logger, abort_exceptions=self.abort_exceptions):
             with attempt:
                 response = self._query(self._prepare_messages_for_api(messages), **kwargs)
         cost_output = self._calculate_cost(response)
-        GLOBAL_MODEL_STATS.add(cost_output["cost"])
+        GLOBAL_MODEL_STATS.add(
+            cost_output["cost"],
+            model_name=self.config.model_name,
+            completion_tokens=get_completion_tokens(response),
+            duration=time.time() - start_time,
+        )
         try:
             actions = self._parse_actions(response)
         except FormatError as e:

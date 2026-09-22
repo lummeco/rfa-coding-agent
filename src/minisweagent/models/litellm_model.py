@@ -10,7 +10,7 @@ import litellm
 from pydantic import BaseModel
 
 from minisweagent.exceptions import FormatError
-from minisweagent.models import GLOBAL_MODEL_STATS
+from minisweagent.models import GLOBAL_MODEL_STATS, get_completion_tokens
 from minisweagent.models.utils.actions_toolcall import (
     BASH_TOOL,
     format_toolcall_observation_messages,
@@ -79,11 +79,17 @@ class LitellmModel:
         return set_cache_control(prepared, mode=self.config.set_cache_control)
 
     def query(self, messages: list[dict[str, str]], **kwargs) -> dict:
+        start_time = time.time()
         for attempt in retry(logger=logger, abort_exceptions=self.abort_exceptions):
             with attempt:
                 response = self._query(self._prepare_messages_for_api(messages), **kwargs)
         cost_output = self._calculate_cost(response)
-        GLOBAL_MODEL_STATS.add(cost_output["cost"])
+        GLOBAL_MODEL_STATS.add(
+            cost_output["cost"],
+            model_name=self.config.model_name,
+            completion_tokens=get_completion_tokens(response),
+            duration=time.time() - start_time,
+        )
         # Note: all model.query() implementations must persist the response and cost on FormatError.
         try:
             actions = self._parse_actions(response)

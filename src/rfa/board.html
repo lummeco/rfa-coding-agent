@@ -780,6 +780,7 @@ function showDetail(id) {
   if (prs.length)
     head += `<div class="note">Pull request${prs.length > 1 ? "s" : ""} open: `
       + prs.map(([r, u]) => `${link(u)} in ${esc(r)}`).join(", ") + `</div>`;
+  if (t.link) head += `<div class="note">From ${link(t.link)}</div>`;
   if (t.stage === "draft") head += `<div class="note">A draft. <strong>Plan it</strong> hands it to the planner.</div>`;
   if (t.status === "queued") head += `<div class="note">Waiting for the planner — <code>rfa plan</code></div>`;
   if (t.open_questions?.length)

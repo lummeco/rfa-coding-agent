@@ -56,6 +56,28 @@ apps:
 github:
   keychain_service: rfa-github-pat
 
+# Sentry. With this block here the daemon asks each project under `projects:` for the issues `query`
+# matches -- unresolved ones, by default -- every `interval` seconds, and captures each one it has
+# not seen before as a draft naming the repository the project maps to. A draft and nothing further:
+# it lands in front of you exactly as an idea typed into the capture box would, with the exception,
+# the culprit and the in-app frames of the latest event under it, because the planner's container
+# has no network to fetch them with. `rfa sentry` is the same look, now. See src/rfa/sentry.py.
+#
+# Read with an organization auth token -- Issue & Event: Read, nothing else -- kept in the login
+# Keychain like the GitHub one:
+#   security add-generic-password -s rfa-sentry-token -a rfa -w
+
+sentry:
+  org: lummeco
+  interval: 1800
+  keychain_service: rfa-sentry-token
+  # Sentry project slug: the repository its issues belong to, as listed under `repos:`. The slug is
+  # the project's name in Sentry's own URLs; a project not listed here is never asked about.
+  projects:
+    lummepro-web: lummeco/lummepro-web
+    customer-app: lummeco/customer-app
+    lummeco-base: lummeco/base
+
 # The models a run may use, by the name you type: `rfa work -m qwen3.8`, `rfa model qwen3.6`.
 #
 # Each one is served as its own Ollama variant, because Ollama gives a model a small default

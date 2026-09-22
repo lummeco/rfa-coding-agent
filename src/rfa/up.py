@@ -10,6 +10,7 @@ import subprocess
 from dataclasses import dataclass, field
 
 from rfa import settings, tasks
+from rfa.sentry import SentryConfig, SentryError, token
 
 
 @dataclass
@@ -102,6 +103,24 @@ def ollama(config: dict) -> Step:
     return Step("ollama", True, f"{ready} ready" + (f" (created {', '.join(made)})" if made else ""))
 
 
+def sentry(config: dict) -> Step:
+    """Only with a `sentry:` block: a token to ask with, and a repository in `repos:` for every project.
+
+    Checked here, with the fix, rather than found out from a line in the daemon's log every half hour.
+    """
+    if (polling := SentryConfig.load(config)) is None:
+        return Step("sentry", True, "not configured")
+    if unknown := [r for r in polling.projects.values() if r not in (config.get("repos") or {})]:
+        return Step(
+            "sentry", False, f"not under `repos:`: {', '.join(unknown)}", f"fix `sentry.projects:` in {settings.path()}"
+        )
+    try:
+        token(polling)
+    except SentryError as e:
+        return Step("sentry", False, str(e))
+    return Step("sentry", True, f"{', '.join(polling.projects) or 'no projects'} every {polling.interval // 60} min")
+
+
 def menubar() -> Step:
     """Open the menu bar app, if it has been built.
 
@@ -131,4 +150,5 @@ def check() -> Report:
     report.add(repos(coder))
     report.add(docker(images([planner, coder, reviewer])))
     report.add(ollama(coder))
+    report.add(sentry(coder))
     return report

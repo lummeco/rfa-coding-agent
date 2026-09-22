@@ -88,6 +88,7 @@ def snapshot() -> dict:
                 "shots": task.meta.get("shots") or [],
                 "copy": copy_commands(task.meta.get("landed") or {}, configured),
                 "prs": task.meta.get("prs") or {},
+                "link": task.meta.get("link"),
                 "open_questions": task.meta.get("open_questions") or [],
                 "body": task.body,
             }

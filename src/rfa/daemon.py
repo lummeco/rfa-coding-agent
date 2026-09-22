@@ -15,13 +15,17 @@ is not that gate: it can only return work to be redone, never approve it in the 
 Planning goes first, because it is short, bounded and it is what puts a packet in front of you --
 until `plan_ahead` cards of work are already waiting, at which point the coder is the bottleneck and
 another packet would only queue behind it.
+
+Sentry is the fourth command, `rfa sentry`: with a `sentry:` block in rfa.yaml, every half hour by
+default, the unresolved issues of each listed project are captured as drafts. Drafts and nothing
+further -- each lands in front of you exactly as an idea typed into the capture box would.
 """
 
 import signal
 import time
 from dataclasses import dataclass, field
 
-from rfa import gates, service, settings, tasks
+from rfa import gates, sentry, service, settings, tasks
 from rfa.tasks import Task
 
 
@@ -175,6 +179,7 @@ def terminate(*_) -> None:
 class Daemon:
     config: DaemonConfig = field(default_factory=DaemonConfig.load)
     paused_until: float = 0.0
+    sentry_due: float = 0.0
     said: str = ""
 
     def say(self, line: str) -> None:
@@ -183,8 +188,24 @@ class Daemon:
             print(f"{tasks.now()}  {line}", flush=True)
             self.said = line
 
+    def poll(self) -> None:
+        """Sentry, once `sentry.interval` has passed since the last look. Ticks happen between runs, so
+        a coding run that took an hour is followed by one poll rather than four -- and a poll that
+        failed waits the same interval, rather than hitting an expired token every fifteen seconds."""
+        if (config := sentry.SentryConfig.load()) is None or time.monotonic() < self.sentry_due:
+            return
+        self.sentry_due = time.monotonic() + config.interval
+        try:
+            if drafted := sentry.pull(config, sentry.token(config)):
+                print(f"{tasks.now()}  {len(drafted)} new from Sentry: {', '.join(t.id for t in drafted)}", flush=True)
+        except Exception as e:
+            # Sentry being down, or a token that has expired, is no reason to stop planning and coding.
+            tasks.log(type="sentry_error", error=str(e))
+            print(f"{tasks.now()}  sentry: {e}", flush=True)
+
     def tick(self) -> None:
         """One look at the board. Runs at most one card, and only with every gate open."""
+        self.poll()
         if (left := self.paused_until - time.monotonic()) > 0:
             return self.say(f"paused for {left / 60:.0f} more min after the last error")
         if (job := next_job(self.config)) is None:

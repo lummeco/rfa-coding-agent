@@ -8,6 +8,7 @@ rfa restart                 stop them and start them again
 rfa status                  what is running, what the gates say, what is on the board
 rfa init                    make the task folders here
 rfa new "let users ..."     capture an idea as a draft
+rfa sentry                  capture Sentry's unresolved issues as drafts, now rather than on the daemon's clock
 rfa ls                      the board, in the terminal
 rfa show <id>               one task, in full
 rfa plan [id ...]           write packets for cards waiting in planning
@@ -168,6 +169,20 @@ def new(
         reasoning=reasoning or None,
     )
     console.print(f"[bold green]Draft[/] {task.id}")
+
+
+@app.command()
+def sentry():
+    """Ask Sentry now rather than on the daemon's clock: each issue with no card yet becomes a draft."""
+    from rfa.sentry import SentryConfig, pull, token
+
+    if (config := SentryConfig.load()) is None:
+        console.print(f"[dim]No `sentry:` in {settings.path()}.[/]")
+        return
+    if not (drafted := pull(config, token(config))):
+        console.print("[dim]Nothing new.[/]")
+    for task in drafted:
+        console.print(f"[bold green]Draft[/] {task.id}")
 
 
 @app.command("ls")

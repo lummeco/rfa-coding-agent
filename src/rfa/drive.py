@@ -1,8 +1,8 @@
 """What the reviewer's scripts import inside the container: a browser, and a record of what the page
 did while it was being driven.
 
-This file is copied into the container, not imported by the host -- playwright is installed in the
-image, not in the workspace. Nothing here knows about tasks, packets or the board.
+This file is copied into the container, not imported by the host -- playwright lives there, next to
+the browsers the image bakes in, and not in the workspace. Nothing here knows about tasks, packets or the board.
 
 A text model cannot see a screenshot, so `sketch` is what the reviewer actually reads: the address,
 the title, the visible words and the controls it could press next. The screenshots are for you, and

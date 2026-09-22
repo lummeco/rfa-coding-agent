@@ -6,9 +6,9 @@ actually true of the running thing. Work that fails goes back to `todo` on its o
 in the pipeline an agent may take without you, and the reason the stage exists.
 
 The container is the coder's, one stage later: the same seeded copy of the repositories, except at
-the branch the work landed on, with playwright and its browsers in the image. The app runs in there
-too, so "localhost" means the container and nothing the review does can reach this Mac. What comes
-out is a verdict and a folder of screenshots.
+the branch the work landed on, out of an image with the browsers baked into it. The app runs in
+there too, so "localhost" means the container and nothing the review does can reach this Mac. What
+comes out is a verdict and a folder of screenshots.
 
 The reviewer reads pages, not pictures: a local text model cannot look at a screenshot. It drives
 the browser and reads back the DOM, the console and the failed requests (see `rfa.drive`). The
@@ -180,13 +180,27 @@ class AppFailed(Exception):
     """The app under review would not start. The card's problem, not the machine's."""
 
 
+def playwright_pin(image: str) -> str:
+    """The playwright `drive.py` imports, read off the image tag it has to match.
+
+    The image bakes the browsers and not the package -- it builds playwright into a virtualenv it
+    then deletes -- so the version installed here is the one those baked browsers belong to. An
+    image with no version in its tag gets whatever pip offers, and may not match.
+    """
+    return m.group(1) if (m := re.search(r":v(\d[\w.]*?)(-|$)", image)) else ""
+
+
 def install_drive(env: Environment) -> None:
-    """Put `rfa.drive` in the container, where playwright is. The host never imports it."""
+    """Put `rfa.drive`, and the playwright it imports, in the container. The host never imports it."""
     subprocess.run(
         [env.config.executable, "cp", str(Path(__file__).parent / "drive.py"), f"{env.container_id}:{DRIVE}"],
         check=True,
         capture_output=True,
     )
+    pin = playwright_pin(env.config.image)
+    result = env.execute({"command": f"pip install --quiet playwright{f'=={pin}' if pin else ''}"}, timeout=600)
+    if result["returncode"] != 0:
+        raise RuntimeError(f"playwright would not install in the review container:\n\n{result['output'][-2000:]}")
 
 
 def url(spec: dict) -> str:

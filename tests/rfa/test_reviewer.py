@@ -5,7 +5,17 @@ import pytest
 from minisweagent.environments.local import LocalEnvironment
 from minisweagent.models.test_models import DeterministicModel, make_output
 from rfa import board, daemon, settings, tasks, up
-from rfa.reviewer import Judgement, Review, ReviewerAgent, criteria, packet_only, problems, review_note, send_back
+from rfa.reviewer import (
+    Judgement,
+    Review,
+    ReviewerAgent,
+    criteria,
+    packet_only,
+    playwright_pin,
+    problems,
+    review_note,
+    send_back,
+)
 
 PACKET = """
 # Task
@@ -45,6 +55,20 @@ def test_criteria_are_read_off_the_packet_and_stop_at_the_next_heading():
         "Opening a different card starts that card at the top.",
     ]
     assert criteria("# Task\n\nno criteria here\n") == []
+
+
+@pytest.mark.parametrize(
+    ("image", "expected"),
+    [
+        ("mcr.microsoft.com/playwright/python:v1.55.0-noble", "1.55.0"),
+        ("mcr.microsoft.com/playwright/python:v1.55.0", "1.55.0"),
+        ("mcr.microsoft.com/playwright/python:next", ""),  # unversioned: pip picks, and may not match
+        ("node:22-bookworm", ""),
+    ],
+)
+def test_the_playwright_installed_is_the_one_the_image_baked_browsers_for(image, expected):
+    """A package newer than the image expects its own browser build, which is not the one in there."""
+    assert playwright_pin(image) == expected
 
 
 def test_previous_rounds_are_cut_off_before_the_card_goes_back():

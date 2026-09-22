@@ -32,9 +32,10 @@ repos:
 apps:
   lummeco/rfa-coding-agent:
     setup:
-      # Its own venv, so the app's dependencies cannot collide with the playwright the reviewer's
-      # own scripts import -- and so a managed system python cannot refuse the install.
-      - python -m venv /tmp/app
+      # Its own environment, so the app's dependencies cannot collide with the playwright the
+      # reviewer's own scripts import. `virtualenv` rather than `python -m venv`: the review image's
+      # python is apt's, which ships without ensurepip, and virtualenv is already in that image.
+      - virtualenv --quiet /tmp/app
       - /tmp/app/bin/pip install --quiet -e .
       # A board with nothing on it shows nothing. The workspace is the repo copy itself; the tasks
       # created here are that copy's, and nothing touches yours.

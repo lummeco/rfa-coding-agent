@@ -102,8 +102,10 @@ agent:
 
 environment:
   environment_class: docker
-  # Playwright's own image: the browsers are in it, and building them at review time would cost more
-  # than the review. It carries python and node, which is what an `apps:` `setup:` usually needs.
+  # Playwright's own image: the browsers are baked in, and downloading them at review time would
+  # cost more than the review. It carries python, git and curl -- but not the playwright package
+  # itself (see `reviewer.playwright_pin`) and not node, so an `apps:` `setup:` that needs npm has
+  # to install it or name an image of its own.
   image: mcr.microsoft.com/playwright/python:v1.55.0-noble
   cwd: /work
   timeout: 300

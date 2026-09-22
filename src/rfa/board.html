@@ -384,6 +384,7 @@ let state = { tasks: [], events: [], stages: [], system: null };
 let openId = null;
 let showArchived = false;   // off by default: archived cards are tucked away until you ask
 let prNote = null;   // {id, text, bad} — survives the re-render refresh() triggers
+let detailId = null;   // the card the panel is showing; null = capture form or closed
 let editing = false;
 
 // `rfa up` prints the board's URL with this start's token in the fragment. The fragment never
@@ -462,6 +463,9 @@ function card(t) {
 function render() {
   // Archived cards are hidden by default; the header toggle brings them back into their stage.
   const visible = state.tasks.filter(t => showArchived || !t.archived);
+  // The lists are rebuilt whole, so where the user had scrolled each one is carried across by hand,
+  // the way prNote is; the browser clamps it if a list shrank.
+  const saved = [...document.querySelectorAll("#board .cards")].map(el => el.scrollTop);
   document.getElementById("count").textContent =
     visible.length ? `${visible.length} task${visible.length > 1 ? "s" : ""}` : "";
   document.getElementById("board").innerHTML = state.stages.map(stage => {
@@ -471,6 +475,7 @@ function render() {
       <div class="cards">${inStage.map(card).join("") || `<div class="empty">Nothing here</div>`}</div>
     </section>`;
   }).join("");
+  document.querySelectorAll("#board .cards").forEach((el, i) => { el.scrollTop = saved[i] || 0; });
   if (openId && !editing) showDetail(openId);
 }
 
@@ -505,6 +510,8 @@ function showCapture() {
   document.getElementById("d-title").textContent = "New idea";
   document.getElementById("d-sub").textContent = "It lands in Draft. You decide when it gets planned.";
   drawCapture();
+  detailId = null;
+  document.getElementById("d-body").scrollTop = 0;
   document.getElementById("d-actions").innerHTML =
     `<button class="action primary" id="save">Save draft</button><span class="hint" style="color:var(--text-3);font-size:12px">⌘↵</span>`;
   openPanel();
@@ -643,6 +650,10 @@ let watching = null;   // the card id whose steps are open; null = nobody asked
 async function drawRun(id) {
   const box = document.getElementById("run");
   if (!box || watching !== id) return;
+  // Follow new output only while the user is at the bottom: if they have scrolled up to read
+  // earlier steps, new steps must not move the view; at the bottom, they land at the bottom.
+  const body = document.getElementById("d-body");
+  const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight <= 40;
   const res = await api(`/api/run?id=${encodeURIComponent(id)}`);
   if (!res.ok) return;
   const { steps, now } = await res.json();
@@ -655,7 +666,7 @@ async function drawRun(id) {
   box.innerHTML = steps.length || live
     ? steps.map(s => step(s, s.returncode ? "bad" : "")).join("") + live
     : `<div class="hint">Nothing yet — the first step lands when the model answers.</div>`;
-  box.scrollIntoView({ block: "nearest" });
+  if (atBottom) body.scrollTop = body.scrollHeight;
 }
 
 function showDetail(id) {
@@ -712,12 +723,18 @@ function showDetail(id) {
     ? `<p><button class="watch" id="watch">${watching === id ? "Hide" : "Watch"} what it did →</button></p>`
       + `<div class="run" id="run"></div>`
     : "";
-  document.getElementById("d-body").classList.toggle("editing", editing);
+  // Re-rendering the card that is already open must not yank the panel back to the top; a new
+  // card, or coming back from editing, starts at the top.
+  const panel = document.getElementById("d-body");
+  const saved = detailId === id && !editing ? panel.scrollTop : 0;
+  panel.classList.toggle("editing", editing);
   if (editing) {
-    document.getElementById("d-body").innerHTML = head + `<textarea id="edit-body">${esc(fullBody)}</textarea>`;
+    panel.innerHTML = head + `<textarea id="edit-body">${esc(fullBody)}</textarea>`;
   } else {
-    document.getElementById("d-body").innerHTML = head + `<div class="md">${md(body)}${history}</div>` + watch;
+    panel.innerHTML = head + `<div class="md">${md(body)}${history}</div>` + watch;
   }
+  panel.scrollTop = saved;
+  detailId = id;
   if (watching === id) drawRun(id);
   if (editing) {
     document.getElementById("d-actions").innerHTML = `<button class="action primary" id="save-edit">Save</button><button class="action quiet" id="cancel-edit">Cancel</button>`;
@@ -744,6 +761,7 @@ function closeDetail() {
   watching = null;
   editing = false;
   openId = null;
+  detailId = null;
   prNote = null;
   document.getElementById("detail").classList.remove("open");
   document.getElementById("detail").setAttribute("aria-hidden", "true");

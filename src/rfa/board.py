@@ -29,11 +29,22 @@ def copy_command(repo: Path, branch: str) -> str:
     """The one line that puts a landed branch into whatever you have checked out, uncommitted.
 
     `show` rather than a diff against the base: the branch is one commit, so the commit itself is
-    already exactly the coder's work and nothing has to remember where it started. It lands in the
-    working tree only -- unstaged, on your current branch, yours to read and stage a hunk at a time.
+    already exactly the coder's work and nothing has to remember where it started.
+
+    `-3` because by the time you press this your branch has usually moved: a plain `git apply` wants
+    the context lines it was cut from and refuses the moment anything around them changed, while a
+    three-way apply merges against the blobs the patch names and only stops at a real clash, which
+    it marks in the file. What it costs is that `-3` implies `--index`, so it would both read and
+    write the staging area -- which is why it runs against a throwaway index instead. That index is
+    `git add -A` of your working tree, so uncommitted work is what the patch merges into rather than
+    something in its way, and it is thrown away after, leaving every change unstaged and whatever
+    you had staged before untouched.
     """
-    where = shlex.quote(str(repo))
-    return f"git -C {where} show --binary {shlex.quote(branch)} | git -C {where} apply"
+    return (
+        f"(cd {shlex.quote(str(repo))} && export GIT_INDEX_FILE=\"$(git rev-parse --git-path rfa-apply-index)\""
+        f" && git add -A && git show --binary {shlex.quote(branch)} | git apply -3;"
+        ' s=$?; rm -f "$GIT_INDEX_FILE"; exit $s)'
+    )
 
 
 def copy_commands(landed: dict, configured: dict) -> dict[str, str]:

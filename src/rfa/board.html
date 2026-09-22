@@ -645,7 +645,8 @@ function showDetail(id) {
   // open, as changes you read and stage yourself rather than a commit that arrives behind you.
   const copies = Object.entries(t.copy || {});
   if (copies.length)
-    head += `<div class="note">Take it into your current branch, unstaged:`
+    head += `<div class="note">Take it into your current branch — unstaged, merged three-way, `
+      + `so a clash leaves conflict markers rather than refusing:`
       + copies.map(([r, cmd]) => `<div class="copy"><code>${esc(cmd)}</code>`
         + `<button class="action" data-copy="${esc(r)}">Copy</button></div>`).join("") + `</div>`;
   if (prs.length)

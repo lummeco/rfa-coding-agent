@@ -2,6 +2,7 @@
 
 import pytest
 import yaml
+from jinja2 import StrictUndefined, Template
 
 from rfa import settings, tasks
 
@@ -9,7 +10,7 @@ WORKSPACE = {
     "models": {
         "qwen3.6": {
             "model_name": "ollama_chat/rfa-qwen3.6-35b",
-            "ollama": {"name": "x", "from": "y"},
+            "ollama": {"name": "x", "from": "y", "num_ctx": 131072},
             "reasoning": "high",
         },
         "qwen3.8": {"model_name": "ollama_chat/rfa-qwen3.8", "reasoning": "none"},
@@ -67,6 +68,26 @@ def test_the_serving_details_never_reach_the_model_call():
 )
 def test_reasoning_becomes_litellms_reasoning_effort(name, asked, effort):
     assert settings.model_config(settings.load("planner"), name, asked)["model_kwargs"]["reasoning_effort"] == effort
+
+
+def test_the_window_a_preset_is_served_with_is_what_a_run_can_watch():
+    """`num_ctx` is written into the Modelfile, so this is the only place a run can read it."""
+    assert settings.context_window(settings.load("planner"), "qwen3.6") == 131072
+    assert settings.context_window(settings.load("planner"), "qwen3.8") == 0  # served however it was served
+
+
+@pytest.mark.parametrize(
+    ("finish_reason", "expected"),
+    [("length", "output token limit"), ("tool_calls", "Unknown tool 'edit'.")],
+)
+def test_a_cut_off_answer_is_told_so_rather_than_told_the_rules_again(finish_reason, expected):
+    """Repeating the format rules to a model that was truncated makes it write the same long answer
+    until the run dies of it."""
+    template = settings.model_config(settings.load("coder"))["format_error_template"]
+    rendered = Template(template, undefined=StrictUndefined).render(
+        error="Unknown tool 'edit'.", actions=[], finish_reason=finish_reason
+    )
+    assert expected in rendered
 
 
 def test_a_reasoning_level_nobody_understands_is_refused():

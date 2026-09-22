@@ -5,12 +5,32 @@ import subprocess
 import pytest
 
 from minisweagent.environments.local import LocalEnvironment
+from minisweagent.exceptions import FormatError
 from minisweagent.models.test_models import DeterministicModel, make_output
-from rfa.worker import CoderAgent, free_branch, land, report, summarize
+from rfa.worker import CoderAgent, free_branch, land, landable, report, summarize
 
 
-def act(command: str) -> dict:
-    return make_output("working", [{"command": command}])
+def act(command: str, prompt_tokens: int = 0) -> dict:
+    output = make_output("working", [{"command": command}])
+    if prompt_tokens:
+        output["extra"]["response"] = {"usage": {"prompt_tokens": prompt_tokens}}
+    return output
+
+
+def cut_off(total_tokens: int) -> dict:
+    """A response the provider stopped at `length` -- what both kinds of truncation look like here."""
+    return {"_cut_off": {"choices": [{"finish_reason": "length"}], "usage": {"total_tokens": total_tokens}}}
+
+
+class CutOffModel(DeterministicModel):
+    """A model that raises on a `cut_off` output the way the real one does: a FormatError carrying
+    the response that was stopped. The response stays plain data, so the trajectory still saves."""
+
+    def query(self, messages: list[dict], **kwargs) -> dict:
+        if response := self.config.outputs[self.current_index + 1].get("_cut_off"):
+            self.current_index += 1
+            raise FormatError({"role": "user", "content": "no tool calls", "extra": {"response": response}})
+        return super().query(messages, **kwargs)
 
 
 def submit() -> dict:
@@ -19,7 +39,7 @@ def submit() -> dict:
 
 def run_coder(outputs: list[dict], tmp_path, checks: list[str], **config) -> CoderAgent:
     agent = CoderAgent(
-        DeterministicModel(outputs=outputs),
+        CutOffModel(outputs=outputs),
         LocalEnvironment(cwd=str(tmp_path)),
         checks=checks,
         cwd=str(tmp_path),
@@ -79,6 +99,42 @@ def test_every_check_runs_so_the_coder_sees_all_the_damage_at_once(tmp_path):
 )
 def test_the_card_says_why_a_run_failed(patches, checks, expected, tmp_path):
     assert expected in summarize(run_coder([submit()], tmp_path, checks, rounds=1), patches)
+
+
+def test_a_full_window_ends_the_run_instead_of_spending_it_on_the_same_wall(tmp_path):
+    """Three retries into a window with no room left are three ways to lose the rest of the run."""
+    agent = run_coder([cut_off(131000)] * 3, tmp_path, [], context_window=131072)
+    assert agent.exit_status() == "ContextExceeded" and agent.n_calls == 1
+    assert "filled the model's context window" in summarize(agent, {})
+
+
+def test_a_model_that_only_rambled_is_asked_again_rather_than_cut_off(tmp_path):
+    """The same `length` response, with room to spare: being brief is something it can still do."""
+    agent = run_coder([cut_off(40000), act("touch fixed"), submit()], tmp_path, ["test -f fixed"], rounds=1)
+    assert agent.exit_status() == "Submitted" and all(r["ok"] for r in agent.results)
+
+
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        ({"context_window": 131072}, "120000 of the model's 131072 tokens"),
+        ({}, "2 of this run's 2 steps"),
+    ],
+)
+def test_the_coder_is_told_when_the_run_is_about_to_end_under_it(config, expected, tmp_path):
+    """A deadline nobody can see is a run that stops mid-edit with the work still in the container."""
+    agent = run_coder([act("true", prompt_tokens=120000)] * 2, tmp_path, [], step_limit=2, **config)
+    warned = [m for m in agent.messages if expected in str(m.get("content"))]
+    assert warned and "submit" in warned[-1]["content"]
+    assert agent.exit_status() == "LimitsExceeded"
+
+
+def test_a_run_that_was_cut_off_does_not_land_its_half_finished_diff(tmp_path):
+    """The checks never ran on it: landing it as finished work is how half a change reaches a PR."""
+    agent = run_coder([act("touch half")] * 2, tmp_path, ["true"], step_limit=2)
+    assert not landable(agent, {"web": "diff"}) and not agent.submitted()
+    assert "Stopped before submitting" in summarize(agent, {"web": "diff"})
+    assert landable(run_coder([submit()], tmp_path, ["true"]), {"web": "diff"})
 
 
 def test_the_shipped_coder_config_renders_with_the_variables_the_worker_passes(tmp_path):

@@ -168,6 +168,32 @@ def validate(config: dict, model: str = "", reasoning: str = "") -> None:
         raise ValueError(f"reasoning must be one of {', '.join(REASONING)}, not `{reasoning}`")
 
 
+FORMAT_ERROR = """\
+{% if finish_reason is defined and finish_reason == "length" -%}
+Your last response ran into the output token limit before it got to a tool call, so nothing ran and
+nothing you wrote was kept. Keep the thinking to a few lines and put the bash tool call in every
+response.
+{%- else -%}
+{{ error }}
+{%- endif %}"""
+"""What the model is told when its response carried no action.
+
+Both model classes answer that with the format rules again, which is the right answer to a model
+that wrote the wrong thing and the wrong one to a model that was cut off in the middle of writing
+the right thing -- and a local model with thinking on is cut off often. Told the truth it can be
+brief; told the rules it writes the same long answer until the run dies of it.
+"""
+
+
+def context_window(config: dict, name: str = "") -> int:
+    """How many tokens the chosen preset is served with, from the `ollama:` block `rfa up` uses.
+
+    The number lives nowhere else: `num_ctx` goes into the Modelfile rather than into a call, so a
+    run that wants to stay inside its window has to read it where the variant was created.
+    """
+    return int((presets(config)[pick(config, name)].get("ollama") or {}).get("num_ctx") or 0)
+
+
 def model_config(config: dict, name: str = "", reasoning: str = "") -> dict:
     """The model config a run hands to `get_model`.
 
@@ -183,4 +209,4 @@ def model_config(config: dict, name: str = "", reasoning: str = "") -> dict:
     if level and level not in REASONING:
         raise ValueError(f"reasoning must be one of {', '.join(REASONING)}, not `{level}`")
     effort = {"model_kwargs": {"reasoning_effort": level}} if level else {}
-    return recursive_merge(preset, config.get("model") or {}, effort)
+    return recursive_merge({"format_error_template": FORMAT_ERROR}, preset, config.get("model") or {}, effort)

@@ -62,6 +62,10 @@ github:
 # context and silently drops the start of anything longer -- and the harness alone is ~17k tokens
 # before any work starts. `rfa up` creates whichever variants are missing.
 #
+# `num_ctx` is also the ceiling the coder watches: past 80% of it every observation tells the coder
+# to finish and submit, and a run that fills it anyway stops there rather than spending its last
+# calls on a window with no room left in it.
+#
 # `reasoning` is litellm's reasoning_effort, which becomes Ollama's `think`. Only models with
 # graded thinking read the level itself; for a Qwen, `none` turns thinking off and low/medium/high
 # all turn it on. Thinking costs context and time, so the planner wants it and a long coding run

@@ -14,7 +14,7 @@ from pathlib import Path
 from minisweagent import Environment, Model
 from minisweagent.agents.default import AgentConfig, DefaultAgent
 from minisweagent.environments import get_environment
-from minisweagent.exceptions import Submitted
+from minisweagent.exceptions import FormatError, LimitsExceeded, Submitted
 from minisweagent.models import get_model
 from rfa import settings, tasks
 from rfa.packet import FORBIDDEN_PATHS
@@ -26,10 +26,33 @@ CHECKS_FAILED = (
     "Fix what you broke and submit again. This was round {round} of {rounds}."
 )
 
+WRAP_UP = (
+    "\n\n[{deadline}, and when they run out the run stops where it is: nothing you have done leaves "
+    "the container. Finish the edit you are on, run the checks and submit.]"
+)
+
+REASONS = {
+    "Submitted": "it said it was finished",
+    "ContextExceeded": "it filled the model's context window",
+    "LimitsExceeded": "it ran out of steps or budget",
+    "TimeExceeded": "it ran out of time",
+    "RepeatedFormatError": "the model stopped answering with commands the harness could run",
+}
+"""Why a run ended, in words. The status on its own tells the person reading the card nothing."""
+
+FULL = 0.99
+"""How close to the window counts as full. A provider stops a token or two short of the window it
+was given, and which token is its business rather than something to match exactly."""
+
 
 class CoderConfig(AgentConfig):
     rounds: int = 2
     """How many times the coder may submit before the run is called failed."""
+    context_window: int = 0
+    """Tokens the model is served with (`num_ctx` in rfa.yaml). 0 means the run does not watch it."""
+    wrap_up_at: float = 0.8
+    """The share of the window, or of the step limit, past which every observation tells the coder
+    to finish and submit."""
 
 
 class CoderAgent(DefaultAgent):
@@ -51,6 +74,7 @@ class CoderAgent(DefaultAgent):
         self.baseline = baseline or {}
         self.results: list[dict] = []
         self.round = 0
+        self.prompt_tokens = 0
 
     def regressions(self) -> list[dict]:
         """Failures this run is answerable for.
@@ -61,9 +85,60 @@ class CoderAgent(DefaultAgent):
         """
         return [r for r in self.results if not r["ok"] and self.baseline.get(r["command"], True)]
 
+    def exit_status(self) -> str:
+        return self.messages[-1].get("extra", {}).get("exit_status", "") if self.messages else ""
+
+    def submitted(self) -> bool:
+        """Did the coder end the run itself, or did something end it for the coder?"""
+        return self.exit_status() == "Submitted"
+
+    def query(self) -> dict:
+        """mini's query, except that a window with no room left ends the run then and there.
+
+        A response cut off at `length` with the window already full is not a format mistake the
+        model can correct: the retry that asks it to be brief is one more message in the same
+        window, so the three attempts mini allows are three ways to spend the end of the run on the
+        same wall -- and the work is still inside the container when it stops.
+        """
+        try:
+            message = super().query()
+        except FormatError as e:
+            if not filled_window(e.messages[0], self.config.context_window):
+                raise
+            # The call was billed before parsing failed, and nothing downstream will charge it now.
+            self.cost += e.messages[0].get("extra", {}).get("cost", 0.0)
+            raise LimitsExceeded(
+                {
+                    "role": "exit",
+                    "content": "ContextExceeded",
+                    "extra": {"exit_status": "ContextExceeded", "submission": ""},
+                }
+            ) from e
+        self.prompt_tokens = usage(message).get("prompt_tokens", 0)
+        return message
+
+    def deadline(self) -> str:
+        """What is about to end this run, in numbers the coder can act on."""
+        if 0 < (window := self.config.context_window) * self.config.wrap_up_at <= self.prompt_tokens:
+            return f"{self.prompt_tokens} of the model's {window} tokens of context are used"
+        if 0 < (limit := self.config.step_limit) * self.config.wrap_up_at <= self.n_calls:
+            return f"{self.n_calls} of this run's {limit} steps are used"
+        return ""
+
+    def warn(self, messages: list[dict]) -> list[dict]:
+        """Put the deadline on the observation the coder is about to read.
+
+        Neither limit announces itself: the run stops mid-edit, the diff stays inside the container
+        and the card says the coder changed nothing. The way out is a submit before that, and the
+        coder can only choose one if it can see what is coming.
+        """
+        if messages and (deadline := self.deadline()) and isinstance(messages[-1].get("content"), str):
+            messages[-1]["content"] += WRAP_UP.format(deadline=deadline)
+        return messages
+
     def execute_actions(self, message: dict) -> list[dict]:
         try:
-            return super().execute_actions(message)
+            return self.warn(super().execute_actions(message))
         except Submitted:
             self.round += 1
             self.results = self.run_checks()
@@ -88,6 +163,27 @@ class CoderAgent(DefaultAgent):
 
     def run_checks(self) -> list[dict]:
         return run_checks(self.env, self.checks, self.cwd)
+
+
+def usage(message: dict) -> dict:
+    """What the provider said the call spent, or nothing when it did not say."""
+    response = message.get("extra", {}).get("response")
+    return (response.get("usage") or {}) if isinstance(response, dict) else {}
+
+
+def filled_window(message: dict, window: int) -> bool:
+    """Was the response cut off because the window was full, or because the model rambled?
+
+    From here the two look the same -- `finish_reason: length`, no action in it -- and they want
+    opposite answers: a model that thought for too long can be asked to be brief, while a full
+    window only gets fuller, because the asking is itself another message in it.
+    """
+    response = message.get("extra", {}).get("response")
+    if not window or not isinstance(response, dict):
+        return False
+    if ((response.get("choices") or [{}])[0]).get("finish_reason") != "length":
+        return False
+    return usage(message).get("total_tokens", 0) >= window * FULL
 
 
 def report(results: list[dict]) -> str:
@@ -232,7 +328,9 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
             cwd=cwd,
             baseline=baseline,
             output_path=output / "trajectory.json",
-            **config.get("agent", {}),
+            # The window the variant is served with, unless the workspace said otherwise: a run
+            # that does not know where its ceiling is can only find it by hitting it.
+            **({"context_window": settings.context_window(config, chosen)} | config.get("agent", {})),
         )
         agent.run(
             task.body,
@@ -257,7 +355,7 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         (output / f"{name}.patch").write_text(patch)
     (output / "checks.json").write_text(json.dumps(agent.results, indent=2))
 
-    shipped = bool(patches) and not agent.regressions()
+    shipped = landable(agent, patches)
     # `landed`, not `branches`: the card's own `branches:` is where its work started from, and
     # these are where it ended up. One name for both would quietly overwrite the first with the second.
     landed = {}
@@ -266,9 +364,15 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
             if name in patches:
                 landed[name] = land(repo, ref, f"rfa/{task.id}", output / f"{name}.patch", task.title)
     tasks.log(
-        type="run_finished", id=task.id, shipped=shipped, rounds=agent.round, landed=landed, dropped=dropped
+        type="run_finished",
+        id=task.id,
+        shipped=shipped,
+        rounds=agent.round,
+        landed=landed,
+        dropped=dropped,
+        exit=agent.exit_status(),
     )
-    task.body += changed_note(landed, repos, output) if shipped else failure_note(agent, patches)
+    task.body += changed_note(landed, repos, output) if shipped else failure_note(agent, patches, output)
     task.body += dropped_note(dropped)
     # Work that landed in a repository somebody wrote an `apps:` block for is not done until the
     # reviewer has driven it. Everywhere else there is no app to start, so `done` is the truth.
@@ -286,12 +390,25 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
     )
 
 
+def landable(agent: CoderAgent, patches: dict[str, str]) -> bool:
+    """Is this a diff worth putting on a branch?
+
+    Only when the coder ended the run itself. A run that was cut off -- out of context, out of
+    steps -- leaves a real diff behind too, but it is a snapshot of an edit in progress that the
+    packet's checks have never run on, and landing it as finished work is how half a change ends
+    up in a pull request.
+    """
+    return bool(patches) and not agent.regressions() and agent.submitted()
+
+
 def summarize(agent: CoderAgent, patches: dict[str, str]) -> str:
+    """The line the card leads with when a run shipped nothing. It has to say what to do next."""
+    reason = f"{REASONS.get(agent.exit_status(), 'the run ended')} ({agent.exit_status() or 'unknown'})"
     if not patches:
-        return f"The coder changed nothing ({agent.messages[-1].get('extra', {}).get('exit_status', 'unknown')})."
+        return f"The coder changed nothing: {reason}."
     if broke := [r["command"] for r in agent.regressions()]:
         return f"Broke after {agent.round} round(s): {', '.join(broke)}"
-    return "The run did not finish."
+    return f"Stopped before submitting: {reason}. Its diff was never checked, so nothing was landed."
 
 
 def changed_note(landed: dict[str, str], repos: dict[str, tuple[Path, str]], output: Path) -> str:
@@ -314,8 +431,11 @@ def dropped_note(dropped: dict[str, list[str]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def failure_note(agent: CoderAgent, patches: dict[str, str]) -> str:
+def failure_note(agent: CoderAgent, patches: dict[str, str], output: Path) -> str:
     lines = [f"\n## Result\n\n{summarize(agent, patches)}\n"]
+    if patches:
+        # An unlanded diff is still work somebody may want; saying where it is costs a line.
+        lines.append(f"Patches and the trajectory: `{output}`\n")
     if failures := report(agent.results):
         lines.append(f"```\n{failures[:4000]}\n```\n")
     return "\n".join(lines)

@@ -16,6 +16,7 @@ from minisweagent.agents.default import AgentConfig, DefaultAgent
 from minisweagent.environments import get_environment
 from minisweagent.exceptions import FormatError, LimitsExceeded, Submitted
 from minisweagent.models import get_model
+from minisweagent.utils.serialize import recursive_merge
 from rfa import settings, tasks
 from rfa.packet import FORBIDDEN_PATHS
 from rfa.planner import REPOS_DIR, git, pin, seed
@@ -27,14 +28,23 @@ CHECKS_FAILED = (
 )
 
 WRAP_UP = (
-    "\n\n[{deadline}, and when they run out the run stops where it is: nothing you have done leaves "
-    "the container. Finish the edit you are on, run the checks and submit.]"
+    "\n\n[{deadline}, and when they run out the run stops where it is: the host runs the checks on "
+    "whatever you have changed, and lands it only if they pass. Finish the edit you are on, run the "
+    "checks and submit.]"
+)
+
+UNJUDGEABLE = (
+    "None of the packet's checks run in the container, so nothing the coder did could have been "
+    "judged, and the run did not start. Fix the checks on the card -- they run in a plain container at "
+    "the repository root, not through docker compose -- or the `containers:` block for the repository "
+    "in rfa.yaml, and move the card back to todo.\n\n{report}"
 )
 
 REASONS = {
     "Submitted": "it said it was finished",
     "ContextExceeded": "it filled the model's context window",
     "LimitsExceeded": "it ran out of steps or budget",
+    "AutoSubmitted": "it was cut off, and the host submitted what it had",
     "TimeExceeded": "it ran out of time",
     "RepeatedFormatError": "the model stopped answering with commands the harness could run",
 }
@@ -45,9 +55,16 @@ FULL = 0.99
 was given, and which token is its business rather than something to match exactly."""
 
 
+class Unjudgeable(Exception):
+    """Every check the packet named was already failing before the coder started."""
+
+
 class CoderConfig(AgentConfig):
     rounds: int = 2
     """How many times the coder may submit before the run is called failed."""
+    step_limit: int = 0
+    """Steps the coder gets from its first edit. Reading and setting up before that cost context,
+    not budget: a repository that takes sixty steps to understand is not a run going badly."""
     context_window: int = 0
     """Tokens the model is served with (`num_ctx` in rfa.yaml). 0 means the run does not watch it."""
     wrap_up_at: float = 0.8
@@ -66,15 +83,32 @@ class CoderAgent(DefaultAgent):
         checks: list[str],
         cwd: str,
         baseline: dict[str, bool] | None = None,
+        root: str = REPOS_DIR,
         **kwargs,
     ):
         super().__init__(model, env, config_class=CoderConfig, **kwargs)
         self.checks = checks
         self.cwd = cwd
+        self.root = root
         self.baseline = baseline or {}
         self.results: list[dict] = []
         self.round = 0
         self.prompt_tokens = 0
+        self.edited_at: int | None = None
+        # mini counts from the first call; the budget here counts from the first edit, in `query`.
+        self.budget, self.config.step_limit = self.config.step_limit, 0
+
+    def get_template_vars(self, **kwargs) -> dict:
+        return super().get_template_vars(step_limit=self.budget, **kwargs)
+
+    def steps(self) -> int:
+        """Steps spent since the first edit, which is where the budget starts."""
+        return self.n_calls - self.edited_at if self.edited_at is not None else 0
+
+    def edited(self) -> bool:
+        """Has any repository under the work root changed since its base commit?"""
+        command = f'for d in {self.root}/*/; do git -C "$d" status --porcelain 2>/dev/null; done | head -c 1'
+        return bool(self.env.execute({"command": command})["output"].strip())
 
     def regressions(self) -> list[dict]:
         """Failures this run is answerable for.
@@ -89,8 +123,32 @@ class CoderAgent(DefaultAgent):
         return self.messages[-1].get("extra", {}).get("exit_status", "") if self.messages else ""
 
     def submitted(self) -> bool:
-        """Did the coder end the run itself, or did something end it for the coder?"""
-        return self.exit_status() == "Submitted"
+        """Did the run end on a submit -- the coder's own, or the host's on its behalf?"""
+        return self.exit_status() in ("Submitted", "AutoSubmitted")
+
+    def step(self) -> list[dict]:
+        """mini's step, except that a run cut off with a diff in it is submitted rather than lost.
+
+        Out of steps or out of context, the diff in the container is still a diff, and the checks are
+        the host's to run either way. A run that was cut off with passing checks lands, and one that
+        was cut off with a regression fails on that regression rather than on the cut-off -- the only
+        run this loses is one that changed nothing, and the checks are not worth running on that.
+        """
+        try:
+            return super().step()
+        except LimitsExceeded as e:
+            if self.edited_at is None:
+                raise
+            self.results = self.run_checks()
+            if self.regressions():
+                raise
+            raise Submitted(
+                {
+                    "role": "exit",
+                    "content": "AutoSubmitted",
+                    "extra": {"exit_status": "AutoSubmitted", "submission": "", "cut_off": e.messages[0]["content"]},
+                }
+            ) from e
 
     def query(self) -> dict:
         """mini's query, except that a window with no room left ends the run then and there.
@@ -100,6 +158,14 @@ class CoderAgent(DefaultAgent):
         window, so the three attempts mini allows are three ways to spend the end of the run on the
         same wall -- and the work is still inside the container when it stops.
         """
+        if 0 < self.budget <= self.steps():
+            raise LimitsExceeded(
+                {
+                    "role": "exit",
+                    "content": "LimitsExceeded",
+                    "extra": {"exit_status": "LimitsExceeded", "submission": ""},
+                }
+            )
         try:
             message = super().query()
         except FormatError as e:
@@ -121,8 +187,8 @@ class CoderAgent(DefaultAgent):
         """What is about to end this run, in numbers the coder can act on."""
         if 0 < (window := self.config.context_window) * self.config.wrap_up_at <= self.prompt_tokens:
             return f"{self.prompt_tokens} of the model's {window} tokens of context are used"
-        if 0 < (limit := self.config.step_limit) * self.config.wrap_up_at <= self.n_calls:
-            return f"{self.n_calls} of this run's {limit} steps are used"
+        if 0 < self.budget * self.config.wrap_up_at <= self.steps():
+            return f"{self.steps()} of the {self.budget} steps since your first edit are used"
         return ""
 
     def warn(self, messages: list[dict]) -> list[dict]:
@@ -138,7 +204,7 @@ class CoderAgent(DefaultAgent):
 
     def execute_actions(self, message: dict) -> list[dict]:
         try:
-            return self.warn(super().execute_actions(message))
+            observations = super().execute_actions(message)
         except Submitted:
             self.round += 1
             self.results = self.run_checks()
@@ -160,6 +226,9 @@ class CoderAgent(DefaultAgent):
                     self.get_template_vars(),
                 )
             )
+        if self.edited_at is None and self.edited():
+            self.edited_at = self.n_calls
+        return self.warn(observations)
 
     def run_checks(self) -> list[dict]:
         return run_checks(self.env, self.checks, self.cwd)
@@ -307,20 +376,27 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         reasoning=level or None,
     )
     tasks.log(type="run_started", id=task.id, attempt=task.attempts, model=chosen, reasoning=level)
+    spec = settings.container(config, (task.meta.get("repos") or [""])[0])
+    cwd = f"{REPOS_DIR}/{names[0]}"
     env = None
     try:
-        env = get_environment(config.get("environment", {}), default_type="docker")
+        env = get_environment(environment(config, spec), default_type="docker")
         # Pinned here rather than before the move: a fetch needs the network, and a card that fails
         # on it belongs back in the queue with the rest of the infrastructure failures.
         repos = pin(repos)
         reference = pin(settings.reference_paths(config, task.meta))
         seed(env, repos, reference)
+        # Before the base commit, so whatever the setup leaves in the checkout is not the coder's diff.
+        setup(env, spec, cwd)
         make_git_repos(env, names)
-        checks, cwd = task.meta.get("checks") or [], f"{REPOS_DIR}/{names[0]}"
+        checks = task.meta.get("checks") or []
         # Measure the repository before the coder touches it, so a test that was already red is not
         # counted against the run -- and tell the coder, so it does not go chasing it either.
-        baseline = {r["command"]: r["ok"] for r in run_checks(env, checks, cwd)}
+        measured = run_checks(env, checks, cwd)
+        baseline = {r["command"]: r["ok"] for r in measured}
         tasks.log(type="baseline", id=task.id, failing=[c for c, ok in baseline.items() if not ok])
+        if checks and not any(baseline.values()):
+            raise Unjudgeable(UNJUDGEABLE.format(report=report(measured)))
         agent = CoderAgent(
             get_model(config=settings.model_config(config, chosen, level)),
             env,
@@ -341,6 +417,19 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
             reference=sorted(reference),
         )
         patches, dropped = diffs(env, names)
+    except Unjudgeable as e:
+        # A verdict on the packet, not on the machine: retrying would fail the same way in a minute.
+        tasks.log(type="run_finished", id=task.id, shipped=False, rounds=0, landed={}, dropped={}, exit="Unjudgeable")
+        task.body += f"\n## Result\n\n{e}\n"
+        return tasks.move(
+            task,
+            "done",
+            actor="worker",
+            status="failed",
+            finished_at=tasks.now(),
+            run=str(output),
+            error=str(e).partition("\n")[0],
+        )
     except Exception as e:
         # Docker down, the model unreachable, the image missing: nothing to do with the task itself.
         # Put it back in the queue rather than leaving a card in under-work with no worker on it.
@@ -372,7 +461,7 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         dropped=dropped,
         exit=agent.exit_status(),
     )
-    task.body += changed_note(landed, repos, output) if shipped else failure_note(agent, patches, output)
+    task.body += changed_note(agent, landed, repos, output) if shipped else failure_note(agent, patches, output)
     task.body += dropped_note(dropped)
     # Work that landed in a repository somebody wrote an `apps:` block for is not done until the
     # reviewer has driven it. Everywhere else there is no app to start, so `done` is the truth.
@@ -390,13 +479,27 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
     )
 
 
+def environment(config: dict, spec: dict) -> dict:
+    """The coder's container, with the repository's own image and variables over the workspace's."""
+    return recursive_merge(config.get("environment", {}), {k: spec[k] for k in ("image", "env") if k in spec})
+
+
+def setup(env: Environment, spec: dict, cwd: str) -> None:
+    """The `containers:` block's setup: the dependencies and services the checks need, put there by
+    the host. A coder that has to build its own test environment spends its budget on pip and apt,
+    and a check that needs a database nobody started is a check that was red before it began."""
+    for command in spec.get("setup") or []:
+        result = env.execute({"command": command}, cwd=cwd, timeout=spec.get("setup_timeout", 900))
+        if result["returncode"] != 0:
+            raise RuntimeError(f"`{command}` failed setting up the container:\n\n{result['output'][-3000:]}")
+
+
 def landable(agent: CoderAgent, patches: dict[str, str]) -> bool:
     """Is this a diff worth putting on a branch?
 
-    Only when the coder ended the run itself. A run that was cut off -- out of context, out of
-    steps -- leaves a real diff behind too, but it is a snapshot of an edit in progress that the
-    packet's checks have never run on, and landing it as finished work is how half a change ends
-    up in a pull request.
+    Only when the run ended on a submit, with the packet's checks green after it. A run cut off
+    before it could submit gets the checks run by the host, so what lands is never a diff nobody
+    checked -- but a diff that was checked and passed is the same diff whoever pressed submit.
     """
     return bool(patches) and not agent.regressions() and agent.submitted()
 
@@ -407,13 +510,20 @@ def summarize(agent: CoderAgent, patches: dict[str, str]) -> str:
     if not patches:
         return f"The coder changed nothing: {reason}."
     if broke := [r["command"] for r in agent.regressions()]:
-        return f"Broke after {agent.round} round(s): {', '.join(broke)}"
+        when = f"after {agent.round} round(s)" if agent.round else f"when it was cut off ({agent.exit_status()})"
+        return f"Broke {when}: {', '.join(broke)}"
     return f"Stopped before submitting: {reason}. Its diff was never checked, so nothing was landed."
 
 
-def changed_note(landed: dict[str, str], repos: dict[str, tuple[Path, str]], output: Path) -> str:
+def changed_note(agent: CoderAgent, landed: dict[str, str], repos: dict[str, tuple[Path, str]], output: Path) -> str:
     """Where the work went. A local branch in your own checkout -- nothing was pushed."""
     lines = ["\n## Result\n"]
+    if agent.exit_status() == "AutoSubmitted":
+        cut = agent.messages[-1]["extra"]["cut_off"]
+        lines.append(
+            f"The coder never submitted: {REASONS.get(cut, 'the run ended')} ({cut}). The host ran the "
+            "checks on what it had changed and they passed, so it landed -- read it as unfinished work.\n"
+        )
     for name, branch in landed.items():
         repo, ref = repos[name]
         lines.append(f"- `{name}` on `{branch}` — `git -C {repo} diff {ref}..{branch}`")

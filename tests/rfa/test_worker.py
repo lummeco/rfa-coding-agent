@@ -7,7 +7,17 @@ import pytest
 from minisweagent.environments.local import LocalEnvironment
 from minisweagent.exceptions import FormatError
 from minisweagent.models.test_models import DeterministicModel, make_output
-from rfa.worker import CoderAgent, free_branch, land, landable, report, summarize
+from rfa.worker import (
+    UNJUDGEABLE,
+    CoderAgent,
+    changed_note,
+    environment,
+    free_branch,
+    land,
+    landable,
+    report,
+    summarize,
+)
 
 
 def act(command: str, prompt_tokens: int = 0) -> dict:
@@ -38,14 +48,23 @@ def submit() -> dict:
 
 
 def run_coder(outputs: list[dict], tmp_path, checks: list[str], **config) -> CoderAgent:
+    """A coder over one repository, `web`, with a base commit: what `edited` looks at in the container."""
+    repo = tmp_path / "web"
+    repo.mkdir(exist_ok=True)
+    for args in (
+        ["init", "-q"],
+        ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base", "--allow-empty"],
+    ):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
     agent = CoderAgent(
         CutOffModel(outputs=outputs),
-        LocalEnvironment(cwd=str(tmp_path)),
+        LocalEnvironment(cwd=str(repo)),
         checks=checks,
-        cwd=str(tmp_path),
+        cwd=str(repo),
+        root=str(tmp_path),
         baseline=config.pop("baseline", None),
         system_template="coder",
-        instance_template="{{task}} {{rounds}} {{broken_checks}}",
+        instance_template="{{task}} {{rounds}} {{broken_checks}} {{step_limit}} steps",
         cost_limit=0,
         **config,
     )
@@ -118,23 +137,49 @@ def test_a_model_that_only_rambled_is_asked_again_rather_than_cut_off(tmp_path):
     ("config", "expected"),
     [
         ({"context_window": 131072}, "120000 of the model's 131072 tokens"),
-        ({}, "2 of this run's 2 steps"),
+        ({}, "2 of the 2 steps since your first edit"),
     ],
 )
 def test_the_coder_is_told_when_the_run_is_about_to_end_under_it(config, expected, tmp_path):
     """A deadline nobody can see is a run that stops mid-edit with the work still in the container."""
-    agent = run_coder([act("true", prompt_tokens=120000)] * 2, tmp_path, [], step_limit=2, **config)
+    outputs = [act("touch half", prompt_tokens=120000)] + [act("true", prompt_tokens=120000)] * 2
+    agent = run_coder(outputs, tmp_path, ["false"], baseline={"false": True}, step_limit=2, **config)
     warned = [m for m in agent.messages if expected in str(m.get("content"))]
     assert warned and "submit" in warned[-1]["content"]
     assert agent.exit_status() == "LimitsExceeded"
 
 
-def test_a_run_that_was_cut_off_does_not_land_its_half_finished_diff(tmp_path):
-    """The checks never ran on it: landing it as finished work is how half a change reaches a PR."""
-    agent = run_coder([act("touch half")] * 2, tmp_path, ["true"], step_limit=2)
-    assert not landable(agent, {"web": "diff"}) and not agent.submitted()
-    assert "Stopped before submitting" in summarize(agent, {"web": "diff"})
-    assert landable(run_coder([submit()], tmp_path, ["true"]), {"web": "diff"})
+def test_reading_and_setting_up_cost_no_steps_until_the_first_edit(tmp_path):
+    """Sixty steps spent understanding a repository is not a run going badly. The budget starts at the edit."""
+    agent = run_coder([act("ls")] * 5 + [act("touch fixed"), submit()], tmp_path, ["test -f fixed"], step_limit=2)
+    assert agent.exit_status() == "Submitted" and agent.n_calls == 7 and agent.edited_at == 6
+    assert not any("steps since your first edit" in str(m.get("content")) for m in agent.messages[:-4])
+    assert "2 steps" in agent.messages[1]["content"]  # the template still sees the budget, not mini's 0
+
+
+def test_a_run_cut_off_with_a_clean_diff_is_submitted_by_the_host(tmp_path):
+    """Out of steps at step 120 with green tests was the run this exists for: the checks decide, not the cut-off."""
+    agent = run_coder([act("touch half")] * 3, tmp_path, ["test -f half"], step_limit=2)
+    assert agent.exit_status() == "AutoSubmitted" and agent.submitted() and agent.regressions() == []
+    assert agent.messages[-1]["extra"]["cut_off"] == "LimitsExceeded" and agent.n_calls == 3
+    assert landable(agent, {"web": "diff"})
+    note = changed_note(agent, {"web": "rfa/t"}, {"web": (tmp_path, "abc")}, tmp_path)
+    assert "never submitted" in note and "ran out of steps" in note and "unfinished" in note
+
+
+def test_a_run_cut_off_with_a_regression_fails_on_the_regression(tmp_path):
+    agent = run_coder(
+        [act("touch half")] * 3, tmp_path, ["test ! -f half"], baseline={"test ! -f half": True}, step_limit=2
+    )
+    assert agent.exit_status() == "LimitsExceeded" and not landable(agent, {"web": "diff"})
+    assert summarize(agent, {"web": "diff"}) == "Broke when it was cut off (LimitsExceeded): test ! -f half"
+
+
+def test_a_run_that_was_cut_off_before_changing_anything_does_not_run_the_checks(tmp_path):
+    """Nothing to judge, and `context_window` is the cut-off that comes with no edit: the window filled reading."""
+    agent = run_coder([act("ls", prompt_tokens=1000), cut_off(131000)] * 2, tmp_path, ["exit 3"], context_window=131072)
+    assert agent.exit_status() == "ContextExceeded" and agent.results == [] and not agent.submitted()
+    assert "changed nothing" in summarize(agent, {})
 
 
 def test_the_shipped_coder_config_renders_with_the_variables_the_worker_passes(tmp_path):
@@ -157,8 +202,10 @@ def test_the_shipped_coder_config_renders_with_the_variables_the_worker_passes(t
         primary_repo="/work/repos/web",
         checks=["echo checks-ran"],
         broken_checks=["pnpm typecheck"],
+        reference=[],
     )
     assert "execution packet" in agent.messages[0]["content"]
+    assert "120 steps, counted from your first edit" in agent.messages[1]["content"]
     assert "echo checks-ran" in agent.messages[1]["content"] and "/work/repos/web" in agent.messages[1]["content"]
     assert "already failing" in agent.messages[1]["content"] and "pnpm typecheck" in agent.messages[1]["content"]
     assert agent.round == 1 and all(r["ok"] for r in agent.results)
@@ -195,6 +242,35 @@ def test_infrastructure_trouble_puts_the_card_back_in_the_queue(tmp_path, monkey
     back = tasks.find(task.id)
     assert (back.stage, back.status, back.attempts) == ("todo", "todo", 1)
     assert [e["type"] for e in tasks.events(task.id)][-2:] == ["run_error", "moved"]
+
+
+def test_a_repository_whose_checks_all_fail_before_the_coder_starts_is_refused_with_the_output():
+    """Forty-five minutes of coding that nothing could judge: the card says what to fix instead."""
+    note = UNJUDGEABLE.format(
+        report=report(
+            [
+                {
+                    "command": "docker compose exec app pytest",
+                    "ok": False,
+                    "returncode": 127,
+                    "output": "docker: not found",
+                }
+            ]
+        )
+    )
+    assert "did not start" in note and "docker: not found" in note and "containers:" in note
+
+
+def test_the_repository_container_block_overrides_the_stage_image_and_adds_variables():
+    stage = {"environment_class": "docker", "image": "node:22", "cwd": "/work/repos", "env": {"CI": "1"}}
+    spec = {"image": "python:3.11", "env": {"POSTGRES_HOST": "127.0.0.1"}, "setup": ["apt-get install postgresql"]}
+    assert environment({"environment": stage}, spec) == {
+        "environment_class": "docker",
+        "image": "python:3.11",
+        "cwd": "/work/repos",
+        "env": {"CI": "1", "POSTGRES_HOST": "127.0.0.1"},
+    }
+    assert environment({"environment": stage}, {}) == stage  # a repository with no block gets the stage's container
 
 
 def test_a_check_that_was_already_red_is_not_counted_against_the_run(tmp_path):

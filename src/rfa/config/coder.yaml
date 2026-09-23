@@ -89,8 +89,11 @@ agent:
     EOF
     ```
 
-    You have {{step_limit}} steps. When the work is done and the checks pass, finish with this as a
-    command on its own: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`
+    You have {{step_limit}} steps, counted from your first edit: reading and setting up before that
+    is free, though the context window is not. If the steps or the context run out, the host runs the
+    checks on whatever you have changed and lands it only if they pass -- so keep the tree in a state
+    you would submit. When the work is done and the checks pass, finish with this as a command on its
+    own: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`
 
 environment:
   environment_class: docker

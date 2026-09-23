@@ -85,6 +85,16 @@ def app_specs(config: dict, names: list[str]) -> dict[str, dict]:
     return {name.rpartition("/")[2]: dict(configured[name]) for name in names if name in configured}
 
 
+def container(config: dict, name: str) -> dict:
+    """The `containers:` block for a task's primary repository: the image the coder works in, what
+    the host sets up in it before the coder starts, and the variables its checks read.
+
+    Without one the coder gets the stage's plain image and builds its own test environment out of
+    its budget -- or, more often, does not, and the packet's checks are red before it starts.
+    """
+    return dict((config.get("containers") or {}).get(name) or {})
+
+
 def pairs(meta: dict, key: str) -> list[tuple[str, str]]:
     """`branches: [owner/name@branch]` front matter, in the order it was written."""
     items = meta.get(key) or []

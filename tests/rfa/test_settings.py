@@ -141,3 +141,9 @@ def test_a_card_is_refused_at_capture_rather_than_half_an_hour_later(model, reas
 def test_validate_passes_what_a_run_would_accept():
     settings.validate(settings.load(), "qwen3.8", "none")
     settings.validate(settings.load(), "", "")  # both blank: the workspace decides
+
+
+def test_the_containers_block_is_read_off_the_full_repository_name():
+    config = {"containers": {"lummeco/base": {"image": "python:3.11", "setup": ["true"]}}}
+    assert settings.container(config, "lummeco/base") == {"image": "python:3.11", "setup": ["true"]}
+    assert settings.container(config, "lummeco/web") == {} and settings.container({}, "") == {}

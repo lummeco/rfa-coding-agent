@@ -104,6 +104,10 @@ models:
     model_name: ollama_chat/rfa-qwen3.8
     ollama: {name: rfa-qwen3.8, from: qwen3.8:latest, num_ctx: 131072}
     reasoning: medium
+  qwen3.8-flash:
+    model_name: ollama_chat/rfa-qwen3.8-flash-next-125b
+    ollama: {name: rfa-qwen3.8-flash-next-125b, from: qwen3.8-flash-next:125b-mlx, num_ctx: 262144}
+    reasoning: medium
 
 # What a run uses when nothing else said. A `planner:`/`coder:` block may set its own; `rfa model
 # <name>` and `-m` on a command override both, and a card's own `model:` overrides the default.
@@ -126,6 +130,27 @@ model:
 coder:
   environment:
     image: node:22-bookworm
+
+# What the coder's container needs per repository, keyed like `repos:` and read off a task's first
+# repository. The host runs `setup:` in the repository root before the coder starts and before the
+# base commit, so the packet's checks can run at all: a coder that has to install its own dependencies
+# and start its own database spends its budget on that instead -- and with no `containers:` block the
+# checks were red before it started, which now stops the run at step 0 rather than at step 120.
+#
+#   image:  the coder's image for this repository; default is `coder.environment.image`.
+#   setup:  commands run once in the repository root. 900s each; a failure puts the card back in todo.
+#   env:    variables set on every command, the coder's and the checks'.
+containers:
+  lummeco/base:
+    image: python:3.11-bookworm
+    setup:
+      # Postgres with PostGIS, in the container, started once: a service started in one command is
+      # still running in the next. `tests/conftest.py` connects as test/test to `test` on 127.0.0.1.
+      - apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends postgresql postgresql-15-postgis-3 > /dev/null
+      - service postgresql start
+      - su postgres -c "psql -qc \"CREATE USER test WITH PASSWORD 'test' SUPERUSER\"" && su postgres -c "psql -qc 'CREATE DATABASE test OWNER test'"
+      # What lummeco-base/Dockerfile does for the dev image: the locked dependency set, dev group included.
+      - cd lummeco-base && pip install --quiet poetry poetry-plugin-export && poetry export --without-hashes --with dev -o /tmp/requirements.txt && pip install --quiet -r /tmp/requirements.txt && pip install --quiet --force-reinstall --no-deps jwt==1.3.1
 
 # The daemon `rfa up` leaves running: it plans cards waiting in `planning` and codes cards you
 # approved into `todo`, one at a time, and only while this Mac can take it. It never moves a packet

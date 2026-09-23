@@ -96,7 +96,10 @@ agent:
       its own -- say which functionality.
     - `verification.commands` -- the repository's own lint / typecheck / test commands for what
       changed, as found in its README, Makefile, package.json or pyproject.toml. Empty if you found
-      none. Never invent one.
+      none. Never invent one. They run in a plain container at the repository root with the
+      dependencies installed, so unwrap anything the repository runs through docker compose or a
+      container: `docker compose exec app pytest tests/x` is `cd app && pytest tests/x`. A command
+      that starts with `docker` cannot run there and fails before the coder starts.
     - `verification.manual` -- short steps a person would take to see it work.
     - `non_goals` -- what this task explicitly does not do. Only real ones; empty is fine.
     - `open_questions` -- prefer none. Only a genuine product decision with materially different

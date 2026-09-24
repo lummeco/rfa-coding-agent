@@ -106,7 +106,7 @@ models:
     reasoning: medium
   qwen3.8-flash:
     model_name: ollama_chat/rfa-qwen3.8-flash-next-125b
-    ollama: {name: rfa-qwen3.8-flash-next-125b, from: qwen3.8-flash-next:125b-mlx, num_ctx: 262144}
+    ollama: {name: rfa-qwen3.8-flash-next-125b, from: qwen3.8-flash-next:125b-mlx, num_ctx: 131072}
     reasoning: medium
 
 # What a run uses when nothing else said. A `planner:`/`coder:` block may set its own; `rfa model

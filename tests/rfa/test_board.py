@@ -150,6 +150,7 @@ def test_the_snapshot_reports_a_task_as_archived_in_its_stage(tmp_path, monkeypa
     tasks.save(task, archived=True)
     card = board.snapshot()["tasks"][0]
     assert card["archived"] is True
+    assert card["sentry"] is False
     assert card["stage"] == "draft"
     assert task.path == was  # the file never left its stage folder
 

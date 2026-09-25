@@ -112,3 +112,15 @@ def test_a_paused_card_is_left_alone_and_is_not_counted_as_work_waiting():
     assert next_job(DaemonConfig()) is None
     tasks.save(tasks.find(held[1].id), paused=None)
     assert next_job(DaemonConfig())[1].id == held[1].id
+
+
+def test_an_archived_planning_card_is_never_planned_or_counted_as_waiting():
+    archived = card("planning", "add a duplicate button", status="ready", archived=True)
+    card("planning", "cache the price list", status="queued", archived=True)
+    assert next_job(DaemonConfig()) is None
+    card("todo", "rename the invoice column")
+    queued = card("planning", "export to csv", status="queued")
+    # The archived ready card does not fill the plan_ahead quota, so the live one still gets planned.
+    assert next_job(DaemonConfig(plan_ahead=2)) == ("plan", tasks.find(queued.id))
+    tasks.save(tasks.find(archived.id), archived=None)
+    assert next_job(DaemonConfig(plan_ahead=2))[0] == "work"

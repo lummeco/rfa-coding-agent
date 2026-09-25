@@ -121,7 +121,7 @@ def test_a_card_a_human_drops_into_planning_is_queued_not_being_planned(workspac
 def test_the_board_shows_where_shipped_work_landed(workspace):
     task = tasks.create("an idea", ["lummeco/web"])
     task = tasks.move(tasks.move(tasks.move(task, "planning"), "todo"), "under-work", actor="worker")
-    tasks.move(task, "done", actor="worker", status="shipped", branches={"web": "rfa/t1"})
+    tasks.move(task, "done", actor="worker", status="built", branches={"web": "rfa/t1"})
     assert board.snapshot()["tasks"][0]["branches"] == {"web": "rfa/t1"}
 
 

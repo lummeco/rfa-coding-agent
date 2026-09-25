@@ -78,6 +78,7 @@ def snapshot() -> dict:
                 "archived": task.archived,
                 "paused": task.paused,
                 "sentry": bool(task.meta.get("sentry")),
+                "verdict": task.meta.get("verdict"),
                 "given_title": task.meta.get("title"),
                 "checks": task.meta.get("checks") or [],
                 "planned": bool(task.meta.get("planned_at")),
@@ -198,6 +199,10 @@ def analytics(window: str = "all") -> dict:
     not the card's whole life; the lines are whatever the run's patches add. Read-only over the
     records and recomputed on every call, so the board stays stateless. A run you paused ends there
     too, but it is neither a success nor a failure, so it is left out of every count.
+
+    Outcomes are per card, not per run: each card in done, by when it got there, is failed, built
+    (waiting for your verdict), trashed or shipped. The rate is shipped out of everything that has
+    an outcome; built is left out of it, because that is still waiting on you.
     """
     by_id: dict[str, list[dict]] = {}
     for event in tasks.events():
@@ -207,7 +212,7 @@ def analytics(window: str = "all") -> dict:
     match = re.fullmatch(r"([1-9]\d*)d", window) if isinstance(window, str) and window != "all" else None
     cutoff = datetime.now(timezone.utc) - timedelta(days=int(match[1])) if match else None
 
-    total = {"runs": 0, "runtime": 0.0, "loc": 0, "shipped": 0, "failed": 0}
+    total = {"runs": 0, "runtime": 0.0, "loc": 0, "shipped": 0, "trashed": 0, "built": 0, "failed": 0}
     for id, events in by_id.items():
         starts = [e for e in events if e.get("type") == "run_started"]
         ends = [e for e in events if e.get("type") in ("run_finished", "run_error", "run_paused")]
@@ -219,11 +224,12 @@ def analytics(window: str = "all") -> dict:
             total["runs"] += 1
             total["runtime"] += (finished - started).total_seconds()
             total["loc"] += added_lines(id)
-            if end.get("type") == "run_finished" and end.get("shipped"):
-                total["shipped"] += 1
-            else:
-                total["failed"] += 1
-    return total
+    for task in tasks.tasks("done"):
+        reached = _when(task.meta.get("finished_at") or task.meta.get("created"))
+        if cutoff is None or (reached is not None and reached >= cutoff):
+            total["failed" if task.status == "failed" else task.meta.get("verdict") or "built"] += 1
+    judged = total["shipped"] + total["trashed"] + total["failed"]
+    return {**total, "rate": total["shipped"] / judged if judged else None}
 
 
 EDITABLE = ("title", "repos", "branches", "context_branches", "model", "reasoning", "checks")
@@ -250,6 +256,17 @@ def pause(id: str, paused: bool) -> tasks.Task:
     task = tasks.save(tasks.find(id), paused=paused or None)
     tasks.log(type="paused" if paused else "resumed", id=task.id)
     return task
+
+
+def judge(id: str, verdict: str | None) -> tasks.Task:
+    """Your call on built code: shipped, trashed, or back to waiting. Only yours, and only in done."""
+    task = tasks.find(id)
+    if verdict not in ("shipped", "trashed", None):
+        raise ValueError(f"no such verdict: {verdict}")
+    if task.stage != "done" or task.status == "failed":
+        raise ValueError(f"{task.id} is {task.stage}/{task.status}, not built code waiting for a verdict")
+    tasks.log(type="judged", id=task.id, verdict=verdict)
+    return tasks.save(task, verdict=verdict, status=verdict or "built")
 
 
 def allowed(headers, token: str, origin: str) -> bool:
@@ -314,7 +331,15 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed():
             self._json(403, {"error": "open the board from the link `rfa up` printed"})
             return
-        if self.path not in ("/api/move", "/api/new", "/api/pr", "/api/edit", "/api/archive", "/api/pause"):
+        if self.path not in (
+            "/api/move",
+            "/api/new",
+            "/api/pr",
+            "/api/edit",
+            "/api/archive",
+            "/api/pause",
+            "/api/verdict",
+        ):
             self._json(404, {"error": "not found"})
             return
         payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
@@ -354,9 +379,14 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json(400, {"error": result["message"]})
             return
-        if self.path in ("/api/edit", "/api/pause"):
+        if self.path in ("/api/edit", "/api/pause", "/api/verdict"):
             try:
-                task = edit(payload) if self.path == "/api/edit" else pause(payload["id"], bool(payload.get("paused")))
+                if self.path == "/api/edit":
+                    task = edit(payload)
+                elif self.path == "/api/pause":
+                    task = pause(payload["id"], bool(payload.get("paused")))
+                else:
+                    task = judge(payload["id"], payload.get("verdict") or None)
             except (FileNotFoundError, KeyError, ValueError) as e:
                 self._json(400, {"error": str(e).strip("'")})
                 return

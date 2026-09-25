@@ -404,7 +404,7 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 <script>
 const LABEL = { "under-work": "Under work", "draft": "Draft", "planning": "Planning", "todo": "To do", "review": "Review", "done": "Done" };
-const TONE = { ready: "green", done: "green", shipped: "green", failed: "red", planning: "amber", queued: "", coding: "blue", starting: "blue", todo: "blue", reviewing: "blue" };
+const TONE = { ready: "green", done: "green", built: "amber", shipped: "green", failed: "red", planning: "amber", queued: "", coding: "blue", starting: "blue", todo: "blue", reviewing: "blue" };
 const LIVE = new Set(["planning", "coding", "checking", "starting", "reviewing"]);
 
 let state = { tasks: [], events: [], stages: [], system: null };
@@ -419,7 +419,13 @@ const GROUPS = {
     { key: "queued", label: "Queued", test: t => t.status === "queued" },
     { key: "failed", label: "Failed", test: t => t.status === "failed" },
   ],
-  done: [{ key: "shipped", label: "Shipped" }, { key: "failed", label: "Failed", test: t => t.status === "failed" }],
+  // Shipped and trashed are your verdicts; anything built and not yet judged is waiting on you.
+  done: [
+    { key: "failed", label: "Failed", test: t => t.status === "failed" },
+    { key: "waiting", label: "Waiting" },
+    { key: "trashed", label: "Trashed", closed: true, test: t => t.verdict === "trashed" },
+    { key: "shipped", label: "Shipped", test: t => t.verdict === "shipped" },
+  ],
 };
 const ARCHIVED = { key: "archived", label: "Archived", closed: true };
 let collapsed = {};
@@ -561,8 +567,11 @@ function actionsFor(t) {
   // The reviewer takes both of these edges on its own; these are for overruling it, or for a card
   // whose review could not run at all.
   if (t.stage === "review") return (t.status === "failed" ? "" : pause) + move("done", "Pass it", "primary") + move("todo", "Send back", "quiet") + move("planning", "Re-plan", "quiet") + archive;
-  if (t.stage === "done" && Object.keys(t.landed || {}).length) return move("todo", "Run again", "") + move("review", "Review again", "quiet") + move("planning", "Re-plan", "quiet") + draft + `<button class="action" data-pr="${esc(t.id)}">Create PR</button>` + archive;
-  if (t.stage === "done") return move("todo", "Run again", "") + move("planning", "Re-plan", "quiet") + draft + archive;
+  const judge = t.stage !== "done" || t.status === "failed" ? ""
+    : t.verdict ? `<button class="action quiet" data-verdict="">Undo ${esc(t.verdict)}</button>`
+    : `<button class="action primary" data-verdict="shipped">Ship it</button><button class="action" data-verdict="trashed">Trash</button>`;
+  if (t.stage === "done" && Object.keys(t.landed || {}).length) return judge + move("todo", "Run again", "") + move("review", "Review again", "quiet") + move("planning", "Re-plan", "quiet") + draft + `<button class="action" data-pr="${esc(t.id)}">Create PR</button>` + archive;
+  if (t.stage === "done") return judge + move("todo", "Run again", "") + move("planning", "Re-plan", "quiet") + draft + archive;
   if (t.stage === "under-work") return pause + move("todo", "Requeue", "quiet") + archive;
   return archive;
 }
@@ -630,7 +639,10 @@ async function drawAnalytics() {
     + stat("coding time", humanRuntime(a.runtime))
     + stat("lines generated", a.loc)
     + stat("shipped", a.shipped)
+    + stat("trashed", a.trashed)
+    + stat("built, waiting", a.built)
     + stat("failed", a.failed)
+    + stat("todo → shipped", a.rate == null ? "—" : `${Math.round(a.rate * 100)}%`)
     + `</div>`;
 }
 
@@ -975,6 +987,16 @@ async function setPaused(id, paused) {
   refresh();
 }
 
+async function setVerdict(id, verdict) {
+  const res = await api("/api/verdict", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, verdict }),
+  });
+  if (!res.ok) { alert((await res.json()).error); return; }
+  refresh();
+}
+
 async function toggleArchive(id) {
   const t = state.tasks.find(x => x.id === id);
   if (!t) return;
@@ -1001,6 +1023,8 @@ document.getElementById("d-actions").addEventListener("click", e => {
   if (e.target.closest("#save")) return saveIdea();
   if (e.target.closest("#cancel-draft")) { const id = drafting; drafting = null; return showDetail(id); }
   if (e.target.closest("#edit-draft")) return showCapture(state.tasks.find(x => x.id === openId));
+  const verdict = e.target.closest("button[data-verdict]");
+  if (verdict && openId) return setVerdict(openId, verdict.dataset.verdict);
   const held = e.target.closest("button[data-pause]");
   if (held && openId) return setPaused(openId, held.dataset.pause === "1");
   const arch = e.target.closest("button[data-archive]");

@@ -476,7 +476,7 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         task,
         "done",
         actor="worker",
-        status="shipped" if shipped else "failed",
+        status="built" if shipped else "failed",
         finished_at=tasks.now(),
         run=str(output),
         landed=landed or None,

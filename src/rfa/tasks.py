@@ -50,7 +50,8 @@ TRANSITIONS: dict[tuple[str, str], set[str]] = {
 # The `status` a task takes when it arrives in a stage, unless whoever moved it says otherwise.
 # `queued` is the one that matters: a card a human drops into planning is waiting for the planner,
 # not being planned, and the board should not claim otherwise until `rfa plan` picks it up.
-ON_ARRIVAL = {"planning": "queued", "under-work": "starting", "review": "queued"}
+# `built` in done means working code waiting for your verdict: only you call it shipped or trashed.
+ON_ARRIVAL = {"planning": "queued", "under-work": "starting", "review": "queued", "done": "built"}
 
 # Statuses with an agent on the card right now. Such a card cannot go back to draft under the run:
 # the run still holds the old path and would write the card back where it was.
@@ -249,6 +250,9 @@ def move(task: Task, to: str, actor: str = "human", **updates) -> Task:
             raise TransitionError(f"{task.id} is {task.status} right now; pause it first")
         # A draft is a fresh start: whatever it went through before is not held against it again.
         updates = {"attempts": None, "error": None, "paused": None, **updates}
+    if task.stage == "done":
+        # Sent back for more work: whatever you said about the old result is not about the next one.
+        updates = {"verdict": None, **updates}
     destination = stage_dir(to) / task.path.name
     if destination.exists():
         raise FileExistsError(destination)

@@ -39,7 +39,9 @@ from rfa.planner import plan_task
 
 STATUS_STYLE = {
     "ready": "green",
+    "built": "yellow",
     "shipped": "green",
+    "trashed": "dim",
     "coding": "cyan",
     "reviewing": "cyan",
     "failed": "red",
@@ -260,8 +262,8 @@ def work(
         return
     console.print(f"[bold]Working[/] {task.title}")
     done = run_task(task, settings.load("coder"), model, reasoning)
-    if done.status == "shipped":
-        console.print(f"[bold green]Shipped[/] — patches in [bold]{done.meta['run']}[/]")
+    if done.status == "built":
+        console.print(f"[bold green]Built[/] — patches in [bold]{done.meta['run']}[/]")
     else:
         console.print(f"[bold red]Failed[/] — {done.meta.get('error', '')}\n[dim]{done.meta['run']}[/]")
 

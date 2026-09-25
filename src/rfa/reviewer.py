@@ -329,7 +329,7 @@ def review_task(task: Task, config: dict, model: str = "", reasoning: str = "") 
         task,
         "done",
         actor="reviewer",
-        status="shipped",
+        status="built",
         finished_at=tasks.now(),
         review=str(output),
         shots=shots or None,

@@ -155,8 +155,8 @@ def test_the_snapshot_reports_a_task_as_archived_in_its_stage(tmp_path, monkeypa
     assert task.path == was  # the file never left its stage folder
 
 
-def test_analytics_counts_a_shipped_run_with_its_lines(tmp_path, monkeypatch):
-    """The numbers the panel shows: one run, its patch's added lines, and it landed a branch."""
+def test_analytics_counts_a_run_with_its_lines(tmp_path, monkeypatch):
+    """One run and its patch's added lines."""
     monkeypatch.setenv("RFA_HOME", str(tmp_path))
     run = tmp_path / "var" / "runs" / "20260921-120000-a-task"
     run.mkdir(parents=True)
@@ -176,8 +176,6 @@ def test_analytics_counts_a_shipped_run_with_its_lines(tmp_path, monkeypatch):
     found = board.analytics("all")
     assert found["runs"] == 1
     assert found["loc"] == 2  # the two `+` lines; the `+++` header and the `-` line are not code
-    assert found["shipped"] == 1
-    assert found["failed"] == 0
 
 
 def test_a_run_is_counted_by_when_it_finished(tmp_path, monkeypatch):
@@ -202,8 +200,8 @@ def test_a_run_is_counted_by_when_it_finished(tmp_path, monkeypatch):
     assert board.analytics("all")["runs"] == 1
 
 
-def test_an_error_is_a_run_with_its_span_and_a_failure(tmp_path, monkeypatch):
-    """No `run_finished` does not drop the run: its start-to-end span is the runtime, and it failed."""
+def test_an_error_is_a_run_with_its_span(tmp_path, monkeypatch):
+    """No `run_finished` does not drop the run: its start-to-end span is the runtime."""
     monkeypatch.setenv("RFA_HOME", str(tmp_path))
     finished = datetime.now(timezone.utc)
 
@@ -225,8 +223,6 @@ def test_an_error_is_a_run_with_its_span_and_a_failure(tmp_path, monkeypatch):
     found = board.analytics("7d")
     assert found["runs"] == 1
     assert found["runtime"] == pytest.approx(90)
-    assert found["shipped"] == 0
-    assert found["failed"] == 1
 
 
 def test_a_run_that_is_still_going_has_no_finish_and_is_not_counted(tmp_path, monkeypatch):
@@ -238,18 +234,66 @@ def test_a_run_that_is_still_going_has_no_finish_and_is_not_counted(tmp_path, mo
 
 def test_an_empty_workspace_is_zero_not_an_error(tmp_path, monkeypatch):
     monkeypatch.setenv("RFA_HOME", str(tmp_path))
-    assert board.analytics("7d") == {"runs": 0, "runtime": 0, "loc": 0, "shipped": 0, "failed": 0}
+    assert board.analytics("7d") == {
+        "runs": 0,
+        "runtime": 0,
+        "loc": 0,
+        "shipped": 0,
+        "trashed": 0,
+        "built": 0,
+        "failed": 0,
+        "rate": None,
+    }
 
 
-def test_a_paused_run_ends_its_span_but_is_neither_shipped_nor_failed(tmp_path, monkeypatch):
+def test_a_paused_run_ends_its_span(tmp_path, monkeypatch):
     """Without its end, the paused start would pair with the next run's finish and double its runtime."""
     monkeypatch.setenv("RFA_HOME", str(tmp_path))
     for type in ("run_started", "run_paused", "run_started"):
         tasks.log(type=type, id="20260921-120000-a-task")
     tasks.log(type="run_finished", id="20260921-120000-a-task", shipped=True)
-    assert {k: v for k, v in board.analytics("all").items() if k != "runtime"} == {
-        "runs": 1,
-        "loc": 0,
-        "shipped": 1,
-        "failed": 0,
-    }
+    assert (board.analytics("all")["runs"], board.analytics("all")["loc"]) == (1, 0)
+
+
+def test_only_built_code_in_done_takes_a_verdict_and_a_new_run_clears_it(tmp_path, monkeypatch):
+    """Shipped and trashed are the human's word on built code; the next run starts without one."""
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    tasks.init()
+    task = tasks.move(tasks.move(tasks.move(tasks.create("an idea"), "todo"), "under-work"), "done", actor="worker")
+    assert (task.status, board.snapshot()["tasks"][0]["verdict"]) == ("built", None)
+    assert board.judge(task.id, "trashed").status == "trashed"
+    assert board.judge(task.id, None).meta["verdict"] is None
+    assert board.judge(task.id, "shipped").status == "shipped"
+    with pytest.raises(ValueError, match="no such verdict"):
+        board.judge(task.id, "great")
+    again = tasks.move(tasks.find(task.id), "todo")
+    assert "verdict" not in tasks.read(again.path).meta
+    with pytest.raises(ValueError, match="not built code"):
+        board.judge(task.id, "shipped")
+    failed = tasks.move(tasks.move(again, "under-work"), "done", actor="worker", status="failed")
+    with pytest.raises(ValueError, match="not built code"):
+        board.judge(failed.id, "shipped")
+
+
+def test_outcomes_are_per_card_by_when_it_reached_done_and_the_rate_leaves_waiting_out(tmp_path, monkeypatch):
+    """Shipped out of shipped, trashed and failed; built is still waiting, and an old card is outside 7d."""
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    tasks.init()
+
+    def done(idea: str, verdict: str | None = None, **meta) -> tasks.Task:
+        task = tasks.move(
+            tasks.move(tasks.move(tasks.create(idea), "todo"), "under-work"), "done", actor="worker", **meta
+        )
+        return board.judge(task.id, verdict) if verdict else task
+
+    done("good", "shipped", finished_at=tasks.now())
+    done("also good", "shipped", finished_at=tasks.now())
+    done("bad", "trashed", finished_at=tasks.now())
+    done("broke", status="failed", finished_at=tasks.now())
+    done("waiting", finished_at=tasks.now())
+    done("legacy", status="shipped", finished_at=tasks.now())  # the machine's word, not yours: still waiting
+    done("long ago", "shipped", finished_at="2020-01-01T00:00:00.000Z")
+    found = board.analytics("7d")
+    assert [found[k] for k in ("shipped", "trashed", "built", "failed")] == [2, 1, 2, 1]
+    assert found["rate"] == pytest.approx(0.5)
+    assert board.analytics("all")["shipped"] == 3

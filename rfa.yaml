@@ -136,6 +136,10 @@ coder:
 #   image:  the coder's image for this repository; default is `coder.environment.image`.
 #   setup:  commands run once in the repository root. 900s each; a failure puts the card back in todo.
 #   env:    variables set on every command, the coder's and the checks'.
+#   test:   the repository's own test suite, run by the host -- never the coder -- before the coder
+#           starts and on every submit. It must write a JUnit report to `$RFA_JUNIT`, e.g.
+#           `pytest -q --junitxml=$RFA_JUNIT`. A test that passed before, or one the coder added,
+#           failing sends the work back to the coder; the board marks every test in the diff.
 containers:
   lummeco/base:
     image: python:3.11-bookworm

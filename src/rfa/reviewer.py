@@ -31,6 +31,7 @@ from minisweagent.exceptions import InterruptAgentFlow, Submitted
 from minisweagent.models import get_model
 from rfa import settings, tasks
 from rfa.planner import REPOS_DIR, _errors, seed
+from rfa.rounds import packet_only
 from rfa.tasks import Task
 
 DRIVE = "/work/drive.py"
@@ -43,7 +44,6 @@ RETRY_NOTE = (
 
 CRITERIA_RE = re.compile(r"^##+ +Acceptance criteria *$(.*?)(?=^##+ |\Z)", re.MULTILINE | re.DOTALL)
 NUMBERED_RE = re.compile(r"^ *\d+\. +(.*)$", re.MULTILINE)
-RESULT_RE = re.compile(r"\n##+ +(Result|Review|Not exported) *\n.*", re.DOTALL)
 
 
 class Judgement(BaseModel):
@@ -81,16 +81,6 @@ def criteria(body: str) -> list[str]:
     if not (section := CRITERIA_RE.search(body)):
         return []
     return [m.group(1).strip() for m in NUMBERED_RE.finditer(section.group(1))]
-
-
-def packet_only(body: str) -> str:
-    """The ticket, without what previous runs wrote under it.
-
-    A card that comes back for another coding round must arrive as the ticket it started as. Left
-    alone, the body would grow a result note and a review round after round, and the coder would
-    spend its context reading the story of its own failures instead of the task.
-    """
-    return RESULT_RE.sub("", body).rstrip() + "\n"
 
 
 def problems(review: Review, expected: list[str], shots: int) -> list[str]:

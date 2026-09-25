@@ -370,6 +370,78 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   max-height: 150px; overflow: auto; margin-top: 3px;
 }
 
+/* A done card: its rounds, newest first, each with what it was asked and what it did. */
+#detail.wide { width: min(1180px, 100vw); }
+#detail footer .spacer { flex: 1; }
+button.action.small { font-size: 12px; padding: 5px 12px; }
+button.action:disabled { opacity: .45; cursor: not-allowed; }
+.links { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 13px; color: var(--text-2); margin-bottom: 14px; }
+.links code { font-size: 12px; }
+.links details { flex-basis: 100%; }
+.links summary { cursor: pointer; color: var(--text-3); font-size: 12px; }
+.overall { font-size: 15px; margin: 0 0 18px; }
+.sec {
+  font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--text-3); margin: 0 0 8px; display: flex; gap: 8px; align-items: baseline;
+}
+.sec .tag { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--red); }
+.round { border-top: 1px solid var(--line); padding: 16px 0 8px; }
+.round > p { margin: 0 0 10px; }
+.round details.plan { margin: 0 0 10px; }
+.round details.plan summary, details.more summary { cursor: pointer; color: var(--text-2); font-size: 13px; }
+.round details.plan .md { margin-top: 10px; padding-left: 12px; border-left: 2px solid var(--line); }
+.cmts { list-style: none; padding: 0; margin: 0 0 10px; display: grid; gap: 10px; }
+.cmts li { font-size: 13px; }
+.cmts .where { font: 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-3); }
+.cmts .answer { color: var(--text-2); margin-top: 2px; }
+.cmts .answer::before { content: "↳ "; color: var(--green); }
+.cmts button { border: 0; background: none; color: var(--text-3); cursor: pointer; font: inherit; }
+.cmts button:hover { color: var(--red); }
+.pending { background: color-mix(in srgb, var(--accent) 7%, transparent); border-radius: 10px; padding: 12px 14px; margin-bottom: 16px; }
+.tests { font-size: 12.5px; color: var(--text-2); margin: 0 0 10px; }
+.tests .ok { color: var(--green); font-weight: 600; }
+.tests .bad { color: var(--red); font-weight: 600; }
+.warn { font-size: 12.5px; color: var(--amber); margin: 0 0 10px; }
+.diffbox { margin: 4px 0 12px; font-size: 12px; }
+.diffbox:empty { display: none; }
+.diffbox .repo-name { font: 600 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-2); margin: 10px 0 6px; }
+.diffbox .d2h-wrapper { text-align: left; }
+.diffbox .d2h-file-header { position: static; }
+/* diff2html pins line numbers with `position: absolute`; without a positioned parent they pin to the panel and slide off their rows as it scrolls. */
+.diffbox .d2h-code-wrapper { position: relative; }
+.diffbox tr.commentable td.d2h-code-linenumber { cursor: pointer; }
+.diffbox tr.commentable:hover td { filter: brightness(0.96); }
+.diffbox .d2h-code-linenumber { width: 7.5em; }
+.diffbox .d2h-code-line { padding-left: 7.5em; }
+.tmark { display: inline-block; width: 1.2em; font-weight: 700; text-align: center; cursor: help; float: left; }
+.tmark.passed { color: var(--green); }
+.tmark.failed, .tmark.missing { color: var(--red); }
+.tmark.skipped { color: var(--text-3); }
+tr.rfa-comment td {
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface)) !important; padding: 8px 14px !important;
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; white-space: normal; color: var(--text);
+}
+tr.rfa-comment textarea {
+  width: 100%; min-height: 64px; resize: vertical; font: inherit; color: var(--text);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px;
+}
+tr.rfa-comment .row { display: flex; gap: 8px; align-items: center; }
+tr.rfa-comment .row span { flex: 1; color: var(--text-3); font-size: 12px; }
+.menu { position: relative; }
+.menu .list {
+  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 5; min-width: 230px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lift);
+  padding: 6px; display: none;
+}
+.menu.open .list { display: block; }
+.menu .list button {
+  display: block; width: 100%; text-align: left; font: inherit; font-size: 14px; color: var(--text);
+  background: none; border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer;
+}
+.menu .list button:hover:not(:disabled) { background: var(--surface-2); }
+.menu .list button:disabled { color: var(--text-3); cursor: not-allowed; }
+.menu .list small { display: block; color: var(--text-3); font-size: 11.5px; }
+
 @media (max-width: 700px) {
   header { padding: 18px 20px 14px; }
   #board { padding: 0 20px 20px; grid-auto-columns: minmax(252px, 1fr); }
@@ -567,11 +639,21 @@ function actionsFor(t) {
   // The reviewer takes both of these edges on its own; these are for overruling it, or for a card
   // whose review could not run at all.
   if (t.stage === "review") return (t.status === "failed" ? "" : pause) + move("done", "Pass it", "primary") + move("todo", "Send back", "quiet") + move("planning", "Re-plan", "quiet") + archive;
-  const judge = t.stage !== "done" || t.status === "failed" ? ""
-    : t.verdict ? `<button class="action quiet" data-verdict="">Undo ${esc(t.verdict)}</button>`
-    : `<button class="action primary" data-verdict="shipped">Ship it</button><button class="action" data-verdict="trashed">Trash</button>`;
-  if (t.stage === "done" && Object.keys(t.landed || {}).length) return judge + move("todo", "Run again", "") + move("review", "Review again", "quiet") + move("planning", "Re-plan", "quiet") + draft + `<button class="action" data-pr="${esc(t.id)}">Create PR</button>` + archive;
-  if (t.stage === "done") return judge + move("todo", "Run again", "") + move("planning", "Re-plan", "quiet") + draft + archive;
+  if (t.stage === "done") {
+    // Your verdict on built code comes first; everything that sends the card round again is under
+    // Next actions. Fix comments needs comments on the latest round; with nothing landed there is
+    // nothing to fix, so the card can only be run again from the start.
+    const judge = t.status === "failed" ? ""
+      : t.verdict ? `<button class="action quiet" data-verdict="">Undo ${esc(t.verdict)}</button>`
+      : `<button class="action primary" data-verdict="shipped">Ship it</button><button class="action" data-verdict="trashed">Trash</button>`;
+    const waiting = (t.pending || []).length;
+    const landed = Object.keys(t.landed || {}).length;
+    return judge + `<div class="menu${menuOpen ? " open" : ""}"><button class="action" id="next">Next actions ▾</button><div class="list">`
+      + `<button id="fix"${waiting ? "" : " disabled"}>Fix comments${waiting ? ` (${waiting})` : ""}`
+      + `<small>${waiting ? "Back to To do; the coder fixes only these" : "Click a line in the latest diff to comment"}</small></button>`
+      + (landed ? "" : `<button data-to="todo">Run again<small>From the start branch</small></button>`)
+      + `<button data-to="draft">Move to draft</button></div></div><span class="spacer"></span>` + archive;
+  }
   if (t.stage === "under-work") return pause + move("todo", "Requeue", "quiet") + archive;
   return archive;
 }
@@ -846,9 +928,222 @@ async function drawRun(id) {
   if (atBottom) body.scrollTop = body.scrollHeight;
 }
 
+// --- rounds, diffs and comments ----------------------------------------------------------------
+
+const D2H = "https://cdn.jsdelivr.net/npm/diff2html@3.4.48/bundles";
+let d2h = null;             // the promise of diff2html, loaded the first time a diff is opened
+const diffs = new Map();    // `${id}/${n}` -> what /api/diff said
+const openDiffs = new Set();// `${id}/${n}` the user has open
+let menuOpen = false;
+let commentAt = null;       // the line a comment is being written on; the panel holds still meanwhile
+let lastBody = "";          // what the panel was last drawn from, so a refresh that changes nothing leaves it be
+
+function loadD2h() {
+  return d2h ||= new Promise((resolve, reject) => {
+    const css = Object.assign(document.createElement("link"), { rel: "stylesheet", href: `${D2H}/css/diff2html.min.css` });
+    const js = Object.assign(document.createElement("script"), { src: `${D2H}/js/diff2html-ui-slim.min.js` });
+    js.onload = resolve;
+    js.onerror = () => { d2h = null; reject(new Error("diff2html did not load — is the network up?")); };
+    document.head.append(css, js);
+  });
+}
+
+/** The latest round that landed: the one whose diff takes comments. */
+const latestLanded = t => Math.max(-1, ...(t.rounds || []).filter(r => r.landed).map(r => r.n));
+
+function testsLine(r) {
+  if (r.tests === undefined) return "";
+  if (r.tests === null) return `<div class="tests">No test command configured for this repository — nothing was run beyond the card's checks.</div>`;
+  const c = r.tests.counts || {}, failed = c.failed || 0, tries = r.tests.attempts || 1;
+  const verdict = r.tests.ok ? `<span class="ok">✓ Tests passed</span>` : `<span class="bad">✗ Tests failed</span>`;
+  const how = tries > 1 ? (r.tests.ok ? ` — on attempt ${tries}, after ${tries - 1} automatic fix${tries > 2 ? "es" : ""}` : ` after ${tries} attempts`) : "";
+  return `<div class="tests">${verdict}${how} · ${c.passed || 0} passed · ${failed} failed · ${c.skipped || 0} skipped`
+    + (c.known ? ` · ${c.known} already failing before this change` : "")
+    + ` <span title="${esc(r.tests.command)}">· <code>${esc(r.tests.command)}</code></span></div>`;
+}
+
+function commentList(list, removable) {
+  return `<ul class="cmts">${list.map(c => `<li>`
+    + (c.file ? `<div class="where">${esc(c.repo)}/${esc(c.file)}:${esc(c.line)}${c.side === "old" ? " (removed line)" : ""}</div>` : "")
+    + `<div>${esc(c.text)}${removable ? ` <button data-uncomment="${esc(c.id)}" title="Delete comment">✕</button>` : ""}</div>`
+    + (c.answer !== undefined ? `<div class="answer">${esc(c.answer || "The coder gave no answer for this one.")}</div>` : "")
+    + `</li>`).join("")}</ul>`;
+}
+
+function roundsView(t) {
+  const rs = t.rounds || [];
+  const original = rs.find(r => r.kind === "original");
+  const fixes = rs.filter(r => r.kind === "fix" && r.landed);
+  const answered = fixes.reduce((n, r) => n + (r.comments || []).length, 0);
+  let html = `<p class="overall">${esc(original?.summary || "No summary was written for this run.")}`
+    + (fixes.length ? ` ${fixes.length} review round${fixes.length > 1 ? "s" : ""} since, fixing ${answered} comment${answered === 1 ? "" : "s"}.` : "")
+    + `</p>`;
+  if ((t.pending || []).length)
+    html += `<div class="pending"><div class="sec">Comments for the next fix · ${t.pending.length}</div>${commentList(t.pending, true)}</div>`;
+
+  let k = 0;
+  const labels = new Map(rs.map(r => [r.n, r.kind === "original" ? "Original coding round"
+    : (r.comments || []).length ? `Review round ${++k}` : `Re-run ${++k}`]));
+  const commentable = t.stage === "done" ? latestLanded(t) : -1;
+  for (const r of [...rs].reverse()) {
+    const key = `${t.id}/${r.n}`;
+    html += `<section class="round"><div class="sec">${esc(labels.get(r.n))}`
+      + (r.landed ? "" : `<span class="tag">nothing landed</span>`) + `</div>`;
+    if (r.error) html += `<div class="note bad">${esc(r.error)}</div>`;
+    if (r.kind === "original" && r.plan)
+      html += `<details class="plan"><summary>The plan it was given</summary><div class="md">${md(String(r.plan).replace(/^\s*#\s+Task\s*\n+[^\n]*\n/, ""))}</div></details>`;
+    if (r.kind === "fix" && (r.comments || []).length) html += commentList(r.comments, false);
+    if (r.summary && r.kind === "fix") html += `<p>${esc(r.summary)}</p>`;
+    if (r.summary && r.kind === "original" && rs.length > 1) html += `<p>${esc(r.summary)}</p>`;
+    const outside = Object.entries(r.outside || {});
+    if (outside.length)
+      html += `<div class="warn">Also changed files no comment was on: ${outside.map(([repo, fs]) => fs.map(f => `<code>${esc(repo)}/${esc(f)}</code>`).join(", ")).join(", ")}</div>`;
+    html += testsLine(r);
+    const label = r.kind === "original" ? "View diff" : "View diff vs previous round";
+    html += `<button class="action small" data-diff="${r.n}">${openDiffs.has(key) ? "Hide diff" : label}${r.landed ? "" : " (not landed)"}</button>`
+      + (r.n === commentable && openDiffs.has(key) ? ` <span class="hint" style="font-size:12px;color:var(--text-3)">Click a line number to comment.</span>` : "")
+      + `<div class="diffbox" id="diff-${r.n}"></div></section>`;
+  }
+  return html;
+}
+
+function linksRow(t) {
+  const prs = Object.entries(t.prs || {});
+  const landed = Object.entries(t.landed || {});
+  const copies = Object.entries(t.copy || {});
+  if (!prs.length && !landed.length && !t.link) return "";
+  return `<div class="links">`
+    + prs.map(([r, u]) => `<span>PR ${link(u)}</span>`).join("")
+    + (landed.length && landed.some(([r]) => !(t.prs || {})[r]) ? `<button class="action small" data-pr="${esc(t.id)}">Create GitHub PR</button>` : "")
+    + landed.map(([r, b]) => `<span><code>${esc(b)}</code> in ${esc(r)}</span>`).join("")
+    + (t.link ? `<span>From ${link(t.link)}</span>` : "")
+    + (copies.length ? `<details><summary>Take it into your current branch</summary>` + copies.map(([r, cmd]) =>
+        `<div class="copy"><code>${esc(cmd)}</code><button class="action" data-copy="${esc(r)}">Copy</button></div>`).join("") + `</details>` : "")
+    + `</div>`;
+}
+
+async function toggleDiff(t, n) {
+  const key = `${t.id}/${n}`;
+  openDiffs.has(key) ? openDiffs.delete(key) : openDiffs.add(key);
+  lastBody = "";
+  showDetail(t.id);
+}
+
+/** Draw every open diff of the card into its box, fetching what is not here yet. */
+async function drawDiffs(t) {
+  for (const r of t.rounds || []) {
+    const key = `${t.id}/${r.n}`, box = document.getElementById(`diff-${r.n}`);
+    if (!box || !openDiffs.has(key)) continue;
+    box.innerHTML = `<div class="hint">reading the diff…</div>`;
+    try {
+      await loadD2h();
+      if (!diffs.has(key)) {
+        const res = await api(`/api/diff?id=${encodeURIComponent(t.id)}&round=${r.n}`);
+        if (!res.ok) throw new Error((await res.json()).error);
+        diffs.set(key, await res.json());
+      }
+    } catch (e) { box.innerHTML = `<div class="note bad">${esc(e.message)}</div>`; continue; }
+    if (document.getElementById(`diff-${r.n}`) !== box) return;   // the panel was redrawn meanwhile
+    box.innerHTML = "";
+    const found = diffs.get(key);
+    if (!found.repos.length) box.innerHTML = `<div class="hint">This round changed nothing.</div>`;
+    for (const repo of found.repos) {
+      const el = document.createElement("div");
+      if (found.repos.length > 1) box.insertAdjacentHTML("beforeend", `<div class="repo-name">${esc(repo.repo)}</div>`);
+      box.append(el);
+      const ui = new Diff2HtmlUI(el, repo.patch, { drawFileList: repo.patch.split("\ndiff --git").length > 3, outputFormat: "line-by-line", matching: "lines", colorScheme: "auto", fileContentToggle: false });
+      ui.draw();
+      ui.highlightCode();
+      decorate(el, t, repo, r.n === (t.stage === "done" ? latestLanded(t) : -1));
+    }
+  }
+}
+
+/** Test marks on the lines tests are defined on, and comment hooks on every numbered line. */
+function decorate(root, t, repo, commentable) {
+  for (const file of root.querySelectorAll(".d2h-file-wrapper")) {
+    const path = (file.querySelector(".d2h-file-name")?.textContent || "").split(" → ").pop().trim();
+    const rows = [...file.querySelectorAll("tr")];
+    for (const tr of rows) {
+      const cell = tr.querySelector("td.d2h-code-linenumber");
+      const now = tr.querySelector(".line-num2")?.textContent.trim(), was = tr.querySelector(".line-num1")?.textContent.trim();
+      if (!cell || !(now || was)) continue;
+      const m = now && repo.marks?.[path]?.[now];
+      if (m) {
+        const why = { passed: "passed", failed: "failed", skipped: "skipped", missing: "did not run — it is not in the test report" }[m.outcome];
+        const before = m.before === "failed" || m.before === "error" ? " (failing before this change too)" : "";
+        cell.insertAdjacentHTML("afterbegin", `<span class="tmark ${m.outcome}" title="${esc(`${m.name}: ${why}${before}${m.message ? `\n\n${m.message}` : ""}`)}">`
+          + `${{ passed: "✓", skipped: "–" }[m.outcome] || "✗"}</span>`);
+      }
+      if (commentable) Object.assign(tr.dataset, { repo: repo.repo, file: path, line: now || was, side: now ? "new" : "old" }), tr.classList.add("commentable");
+    }
+    // Comments already left on this file, under the line each is on.
+    for (const c of (t.pending || []).filter(c => c.repo === repo.repo && c.file === path)) {
+      const tr = rows.find(tr => tr.dataset.line === String(c.line) && tr.dataset.side === c.side);
+      tr?.insertAdjacentHTML("afterend", `<tr class="rfa-comment"><td colspan="2"><strong>You:</strong> ${esc(c.text)}`
+        + ` <button class="action small quiet" data-uncomment="${esc(c.id)}">Delete</button></td></tr>`);
+    }
+  }
+}
+
+function openCommentForm(tr) {
+  document.querySelector("tr.rfa-comment.form")?.remove();
+  commentAt = { ...tr.dataset, context: tr.querySelector(".d2h-code-line-ctn")?.textContent || "" };
+  tr.insertAdjacentHTML("afterend", `<tr class="rfa-comment form"><td colspan="2">`
+    + `<textarea id="comment-text" placeholder="What should change here?"></textarea>`
+    + `<div class="row"><span>${esc(commentAt.file)}:${esc(commentAt.line)} · ⌘↵ to save</span>`
+    + `<button class="action small quiet" id="comment-cancel">Cancel</button>`
+    + `<button class="action small primary" id="comment-save">Comment</button></div></td></tr>`);
+  document.getElementById("comment-text").focus();
+}
+
+async function saveComment() {
+  const text = document.getElementById("comment-text")?.value.trim();
+  if (!text || !commentAt || !openId) return;
+  const res = await api("/api/comment", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: openId, ...commentAt, line: Number(commentAt.line), text }),
+  });
+  if (!res.ok) { alert((await res.json()).error); return; }
+  closeCommentForm();
+  await refresh();
+}
+
+function closeCommentForm() {
+  commentAt = null;
+  lastBody = "";
+  document.querySelector("tr.rfa-comment.form")?.remove();
+}
+
+async function deleteComment(cid) {
+  const res = await api("/api/comment", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: openId, delete: cid }),
+  });
+  if (!res.ok) { alert((await res.json()).error); return; }
+  lastBody = "";
+  await refresh();
+}
+
+async function fixComments(id) {
+  const res = await api("/api/fix", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+  if (!res.ok) { alert((await res.json()).error); return; }
+  menuOpen = false;
+  closeDetail();
+  await refresh();
+}
+
 function showDetail(id) {
   const t = state.tasks.find(x => x.id === id);
   if (!t) return closeDetail();
+  // Writing a comment: a refresh must not throw the half-typed text away with the panel.
+  if (commentAt && detailId === id) return;
   openId = id;
   document.getElementById("d-title").textContent = t.title;
   document.getElementById("d-sub").textContent =
@@ -910,10 +1205,27 @@ function showDetail(id) {
   const panel = document.getElementById("d-body");
   const saved = detailId === id && !editing ? panel.scrollTop : 0;
   panel.classList.toggle("editing", editing);
+  // A done card with rounds is read round by round; the rest is still the packet and its notes.
+  const rounded = t.stage === "done" && (t.rounds || []).length && !editing;
+  document.getElementById("detail").classList.toggle("wide", Boolean(rounded && [...openDiffs].some(k => k.startsWith(`${id}/`))));
+  let html;
   if (editing) {
-    panel.innerHTML = head + `<textarea id="edit-body">${esc(fullBody)}</textarea>`;
+    html = head + `<textarea id="edit-body">${esc(fullBody)}</textarea>`;
+  } else if (rounded) {
+    const top = (t.error ? `<div class="note bad">${esc(t.error)}</div>` : "")
+      + (prNote?.id === id ? `<div class="note${prNote.bad ? " bad" : ""}">${esc(prNote.text)}</div>` : "");
+    html = top + linksRow(t) + roundsView(t)
+      + `<details class="more"><summary>Screenshots, history and the run log</summary><div class="md">${gallery(t)}${history}</div>${watch}</details>`;
   } else {
-    panel.innerHTML = head + `<div class="md">${md(body)}${gallery(t)}${history}</div>` + watch;
+    html = head + `<div class="md">${md(body)}${gallery(t)}${history}</div>` + watch;
+  }
+  // Redrawing the same thing would close every open diff and the `details` you opened; only a change redraws.
+  const more = panel.querySelector("details.more")?.open;
+  if (detailId !== id || editing || html !== lastBody) {
+    panel.innerHTML = html;
+    lastBody = html;
+    if (more) panel.querySelector("details.more")?.setAttribute("open", "");
+    if (rounded) drawDiffs(t);
   }
   panel.scrollTop = saved;
   detailId = id;
@@ -947,6 +1259,11 @@ function closeDetail() {
   openId = null;
   detailId = null;
   prNote = null;
+  commentAt = null;
+  menuOpen = false;
+  lastBody = "";
+  openDiffs.clear();
+  document.getElementById("detail").classList.remove("wide");
   document.getElementById("detail").classList.remove("open");
   document.getElementById("detail").setAttribute("aria-hidden", "true");
   document.getElementById("scrim").classList.remove("open");
@@ -1020,6 +1337,11 @@ document.getElementById("board").addEventListener("click", e => {
   if (el) showDetail(el.dataset.id);
 });
 document.getElementById("d-actions").addEventListener("click", e => {
+  if (e.target.closest("#next")) {
+    menuOpen = !menuOpen;
+    return e.target.closest(".menu").classList.toggle("open", menuOpen);
+  }
+  if (e.target.closest("#fix") && openId) return fixComments(openId);
   if (e.target.closest("#save")) return saveIdea();
   if (e.target.closest("#cancel-draft")) { const id = drafting; drafting = null; return showDetail(id); }
   if (e.target.closest("#edit-draft")) return showCapture(state.tasks.find(x => x.id === openId));
@@ -1040,6 +1362,18 @@ document.getElementById("d-actions").addEventListener("click", e => {
 document.getElementById("capture").addEventListener("click", showCapture);
 document.getElementById("analytics").addEventListener("click", showAnalytics);
 document.getElementById("d-body").addEventListener("click", e => {
+  const t = state.tasks.find(x => x.id === openId);
+  const diff = e.target.closest("button[data-diff]");
+  if (diff && t) return toggleDiff(t, Number(diff.dataset.diff));
+  const pr = e.target.closest("button[data-pr]");
+  if (pr) return createPR(pr.dataset.pr);
+  const gone = e.target.closest("button[data-uncomment]");
+  if (gone) return deleteComment(gone.dataset.uncomment);
+  if (e.target.closest("#comment-save")) return saveComment();
+  if (e.target.closest("#comment-cancel")) return closeCommentForm();
+  // A click on a line, not a drag to select some of it: selecting code to copy is not a comment.
+  const line = e.target.closest("tr.commentable");
+  if (line && !String(getSelection()).trim()) return openCommentForm(line);
   if (e.target.closest("#watch")) {
     watching = watching === openId ? null : openId;
     return showDetail(openId);
@@ -1088,6 +1422,12 @@ document.getElementById("d-body").addEventListener("change", e => {
 document.getElementById("close").addEventListener("click", closeDetail);
 document.getElementById("scrim").addEventListener("click", closeDetail);
 document.addEventListener("keydown", e => {
+  if (commentAt && e.target.id === "comment-text") {
+    if (e.key === "Escape") return closeCommentForm();
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") return saveComment();
+    return;
+  }
+  if (e.key === "Escape" && menuOpen) { menuOpen = false; return document.querySelector(".menu")?.classList.remove("open"); }
   if (e.key === "Escape") return closeDetail();
   if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && document.getElementById("idea")) return saveIdea();
   if (e.target.matches("textarea, input")) return;  // typing an idea, not pressing a shortcut

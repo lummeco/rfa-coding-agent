@@ -7,14 +7,18 @@ import pytest
 from minisweagent.environments.local import LocalEnvironment
 from minisweagent.exceptions import FormatError
 from minisweagent.models.test_models import DeterministicModel, make_output
+from rfa.planner import git
 from rfa.worker import (
     UNJUDGEABLE,
     CoderAgent,
+    changed_files,
     changed_note,
     environment,
     free_branch,
     land,
     landable,
+    outside,
+    record_tests,
     report,
     summarize,
 )
@@ -203,11 +207,17 @@ def test_the_shipped_coder_config_renders_with_the_variables_the_worker_passes(t
         checks=["echo checks-ran"],
         broken_checks=["pnpm typecheck"],
         reference=[],
+        test="pytest -q --junitxml=$RFA_JUNIT",
+        comments=[{"repo": "web", "file": "src/a.py", "side": "new", "line": 7, "context": "x = 1", "text": "use 2"}],
     )
+    prompt = agent.messages[1]["content"]
     assert "execution packet" in agent.messages[0]["content"]
-    assert "120 steps, counted from your first edit" in agent.messages[1]["content"]
-    assert "echo checks-ran" in agent.messages[1]["content"] and "/work/repos/web" in agent.messages[1]["content"]
-    assert "already failing" in agent.messages[1]["content"] and "pnpm typecheck" in agent.messages[1]["content"]
+    assert "120 steps, counted from your first edit" in prompt
+    assert "echo checks-ran" in prompt and "/work/repos/web" in prompt
+    assert "already failing" in prompt and "pnpm typecheck" in prompt
+    assert "RFA_JUNIT=/tmp/rfa-junit.xml pytest -q --junitxml=$RFA_JUNIT" in prompt
+    assert "1. `web/src/a.py` line 7: use 2" in prompt and "x = 1" in prompt and '"answers"' in prompt
+    assert "/work/summary.json" in prompt
     assert agent.round == 1 and all(r["ok"] for r in agent.results)
 
 
@@ -290,6 +300,96 @@ def test_breaking_a_check_that_was_green_still_costs_a_round(tmp_path):
 def test_a_run_is_judged_on_regressions_only_even_when_other_checks_are_red(tmp_path):
     agent = run_coder([submit()], tmp_path, ["false", "true"], baseline={"false": False, "true": True})
     assert [r["ok"] for r in agent.results] == [False, True] and agent.regressions() == []
+
+
+def junit_command(tmp_path) -> str:
+    """A suite of two tests: `test_new` passes once the coder has made `fixed`, `test_old` is always red."""
+    new = 'if [ -f fixed ]; then o=""; else o="<failure message=\\"boom\\"/>"; fi'
+    cases = (
+        '<testsuite><testcase classname="tests.test_a" name="test_new">%s</testcase>'
+        '<testcase classname="tests.test_a" name="test_old"><failure message="was red"/></testcase></testsuite>'
+    )
+    return f'{new}; printf \'{cases}\' "$o" > "$RFA_JUNIT"'
+
+
+def test_a_test_the_coder_broke_goes_back_to_it_by_name_and_the_fix_is_accepted(tmp_path):
+    """The host runs the suite, not the model; a test already red before the run is not held against it."""
+    agent = run_coder(
+        [submit(), act("touch fixed"), submit()],
+        tmp_path,
+        [],
+        test=junit_command(tmp_path),
+        test_baseline={"returncode": 0, "outcomes": {"tests.test_a::test_old": "failed"}},
+        junit_path=str(tmp_path / "junit.xml"),
+    )
+    told = [m["content"] for m in agent.messages if "failing now" in str(m.get("content"))]
+    assert (
+        len(told) == 1
+        and "FAILED tests.test_a::test_new\nboom" in told[0]
+        and "FAILED tests.test_a::test_old" not in told[0]
+    )
+    assert agent.round == 2 and agent.regressions() == [] and landable(agent, {"web": "diff"})
+    assert [c["outcome"] for c in agent.tests["cases"]] == ["passed", "failed"]
+
+
+def test_a_suite_that_wrote_no_report_passed_nothing(tmp_path):
+    """A crash before the report is written looks like a clean exit; it must not land as one."""
+    agent = run_coder([submit()], tmp_path, [], test="true", rounds=1, junit_path=str(tmp_path / "junit.xml"))
+    assert agent.tests["cases"] is None and not landable(agent, {"web": "diff"})
+    assert "wrote no JUnit report" in agent.regressions()[0]["output"]
+
+
+def test_the_host_keeps_its_own_record_of_every_test_with_how_it_was_before(tmp_path):
+    tests = {
+        "command": "t",
+        "returncode": 1,
+        "output": "",
+        "cases": [
+            {"id": "m::a", "classname": "m", "name": "a", "file": "", "outcome": "failed", "message": "was red"},
+            {"id": "m::b", "classname": "m", "name": "b", "file": "", "outcome": "skipped", "message": ""},
+        ],
+    }
+    found = record_tests(tests, {"returncode": 1, "outcomes": {"m::a": "failed"}}, "web", 2)
+    assert found["ok"] and found["repo"] == "web" and found["attempts"] == 2
+    assert found["counts"] == {"passed": 0, "failed": 0, "known": 1, "skipped": 1}
+    assert [c["before"] for c in found["cases"]] == ["failed", ""]
+    assert not record_tests(tests, {"returncode": 0, "outcomes": {}}, "web", 1)["ok"]  # a new red test
+
+
+def test_a_fix_round_lands_as_one_more_commit_on_the_same_branch(tmp_path):
+    repo, run = tmp_path / "web", tmp_path / "run"
+    repo.mkdir()
+    run.mkdir()
+    (repo / "a.txt").write_text("one\n")
+    for args in (
+        ["init", "-qb", "main"],
+        ["add", "-A"],
+        ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base"],
+    ):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    patch = run / "web.patch"
+    patch.write_text("diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1,2 @@\n one\n+two\n")
+    assert land(repo, "main", "rfa/t1", patch, "first") == "rfa/t1"
+    first = git(repo, "rev-parse", "rfa/t1").strip()
+    patch.write_text("diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,2 +1,3 @@\n one\n two\n+three\n")
+    assert land(repo, first, "rfa/t1", patch, "fix", onto=True) == "rfa/t1"
+    assert git(repo, "show", "rfa/t1:a.txt") == "one\ntwo\nthree\n"
+    assert git(repo, "rev-parse", "rfa/t1~1").strip() == first  # on top of the first round, not beside it
+    assert sorted(git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads").split()) == ["main", "rfa/t1"]
+
+
+@pytest.mark.parametrize(
+    ("comments", "expected"),
+    [
+        ([{"repo": "web", "file": "a.py"}], {"web": ["b.py"]}),
+        ([{"repo": "web", "file": "a.py"}, {"repo": "web", "file": "b.py"}], {}),
+        ([{"text": "the reviewer's problem, on no line"}], {}),
+    ],
+)
+def test_a_fix_round_says_which_files_it_changed_that_no_comment_was_on(comments, expected):
+    patches = {"web": "diff --git a/a.py b/a.py\n+x\ndiff --git a/b.py b/b.py\n+y\n"}
+    assert outside(comments, patches) == expected
+    assert changed_files(patches) == "Changed a.py, b.py."
 
 
 def test_land_puts_the_patch_on_a_branch_without_disturbing_the_working_tree(tmp_path):

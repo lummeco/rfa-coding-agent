@@ -22,16 +22,17 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from rfa import daemon, github, settings, tasks
+from rfa import daemon, github, rounds, settings, tasks
 
 PAGE = Path(__file__).parent / "board.html"
 
 
-def copy_command(repo: Path, branch: str) -> str:
+def copy_command(repo: Path, branch: str, base: str = "") -> str:
     """The one line that puts a landed branch into whatever you have checked out, uncommitted.
 
-    `show` rather than a diff against the base: the branch is one commit, so the commit itself is
-    already exactly the coder's work and nothing has to remember where it started.
+    A diff from the commit the first round started at, because a branch with fix rounds on it is
+    more than one commit. A branch landed before rounds were recorded is one commit with no base
+    written down, so the commit itself is exactly the coder's work: `show` it.
 
     `-3` because by the time you press this your branch has usually moved: a plain `git apply` wants
     the context lines it was cut from and refuses the moment anything around them changed, while a
@@ -43,21 +44,25 @@ def copy_command(repo: Path, branch: str) -> str:
     you had staged before untouched.
     """
     return (
-        f"(cd {shlex.quote(str(repo))} && export GIT_INDEX_FILE=\"$(git rev-parse --git-path rfa-apply-index)\""
-        f" && git add -A && git show --binary {shlex.quote(branch)} | git apply -3;"
+        f'(cd {shlex.quote(str(repo))} && export GIT_INDEX_FILE="$(git rev-parse --git-path rfa-apply-index)"'
+        f" && git add -A && {f'git diff --binary {shlex.quote(base)} ' if base else 'git show --binary '}"
+        f"{shlex.quote(branch)} | git apply -3;"
         ' s=$?; rm -f "$GIT_INDEX_FILE"; exit $s)'
     )
 
 
-def copy_commands(landed: dict, configured: dict) -> dict[str, str]:
+def copy_commands(landed: dict, configured: dict, state: dict | None = None) -> dict[str, str]:
     """One command per landed branch, keyed the way `landed` is -- by the repository's short name.
 
     A repository that has since left `repos:` is left out rather than guessed at: without its
     checkout there is no path to run the command in.
     """
     full = {key.rpartition("/")[2]: key for key in configured}
+    bases = {}
+    for entry in reversed((state or {}).get("rounds") or []):
+        bases |= {name: c["base"] for name, c in (entry.get("commits") or {}).items()}
     return {
-        name: copy_command(Path(str(configured[key]).partition("@")[0]).expanduser(), branch)
+        name: copy_command(Path(str(configured[key]).partition("@")[0]).expanduser(), branch, bases.get(name, ""))
         for name, branch in landed.items()
         if (key := full.get(name))
     }
@@ -70,6 +75,7 @@ def snapshot() -> dict:
         "stages": list(tasks.STAGES),
         "tasks": [
             {
+                **(state := rounds.view(task)),
                 "id": task.id,
                 "stage": task.stage,
                 "status": task.status,
@@ -92,7 +98,7 @@ def snapshot() -> dict:
                 "error": task.meta.get("error"),
                 "landed": task.meta.get("landed") or {},
                 "shots": task.meta.get("shots") or [],
-                "copy": copy_commands(task.meta.get("landed") or {}, configured),
+                "copy": copy_commands(task.meta.get("landed") or {}, configured, state),
                 "prs": task.meta.get("prs") or {},
                 "link": task.meta.get("link"),
                 "open_questions": task.meta.get("open_questions") or [],
@@ -119,12 +125,13 @@ def progress(id: str, of: str = "") -> dict:
     swapped, so a read can land mid-write; a half-written file is simply not ready yet.
 
     `of=review` is the reviewer's own session, which lives one folder deeper so that reviewing a
-    card does not write over the coding run it is judging.
+    card does not write over the coding run it is judging. Otherwise it is the latest round's.
     """
     if not tasks.ID_RE.fullmatch(id):
         return {"steps": []}
-    run = tasks.home() / "var" / "runs" / id
-    path = (run / "review" / "trajectory.json") if of == "review" else (run / "trajectory.json")
+    run = rounds.run_dir(id)
+    coded = sorted(run.glob("round-*/trajectory.json"), key=lambda p: int(p.parent.name.partition("-")[2]))
+    path = (run / "review" / "trajectory.json") if of == "review" else (coded or [run / "trajectory.json"])[-1]
     if not path.exists():
         return {"steps": []}
     try:
@@ -172,19 +179,20 @@ def _when(value: object) -> datetime | None:
 
 
 def added_lines(id: str) -> int:
-    """The lines the coder added in one run's patches: the `+` lines, minus the `+++` file headers.
+    """The lines the coder added in a card's patches: the `+` lines, minus the `+++` file headers.
 
     The headers name the file rather than add a line, and everything else in a patch -- `diff`,
-    `index`, `@@`, context and `-` lines -- is not generated code.
+    `index`, `@@`, context and `-` lines -- is not generated code. Every round's patch counts, and
+    a card from before rounds has its one patch at the top of its run folder.
     """
     if not tasks.ID_RE.fullmatch(id):
         return 0
-    run = tasks.home() / "var" / "runs" / id
+    run = rounds.run_dir(id)
     if not run.is_dir():
         return 0
     return sum(
         1
-        for patch in sorted(run.glob("*.patch"))
+        for patch in sorted([*run.glob("*.patch"), *run.glob("round-*/*.patch")])
         for line in patch.read_text(errors="replace").splitlines()
         if line.startswith("+") and not line.startswith("+++")
     )
@@ -216,6 +224,7 @@ def analytics(window: str = "all") -> dict:
     for id, events in by_id.items():
         starts = [e for e in events if e.get("type") == "run_started"]
         ends = [e for e in events if e.get("type") in ("run_finished", "run_error", "run_paused")]
+        counted = False
         for start, end in zip(starts, ends):
             started, finished = _when(start.get("ts")), _when(end.get("ts"))
             outside = cutoff is not None and finished is not None and finished < cutoff
@@ -223,7 +232,9 @@ def analytics(window: str = "all") -> dict:
                 continue
             total["runs"] += 1
             total["runtime"] += (finished - started).total_seconds()
-            total["loc"] += added_lines(id)
+            # Every round's patch is kept now, so the card's lines are counted once, not once per run.
+            total["loc"] += 0 if counted else added_lines(id)
+            counted = True
     for task in tasks.tasks("done"):
         reached = _when(task.meta.get("finished_at") or task.meta.get("created"))
         if cutoff is None or (reached is not None and reached >= cutoff):
@@ -249,6 +260,22 @@ def edit(payload: dict) -> tasks.Task:
         settings.validate(settings.load(), fields.get("model") or "", fields.get("reasoning") or "")
     task.body = str(payload.get("body", task.body))
     return tasks.save(task, **fields)
+
+
+def fix(id: str) -> tasks.Task:
+    """Send a done card back to `todo` for a fix round on the comments waiting on it.
+
+    The body goes back to the ticket alone, the comments reach the coder through its prompt, and the
+    attempts start over: this round is yours to ask for, not a retry the daemon should cap.
+    """
+    task = tasks.find(id)
+    if task.stage != "done":
+        raise ValueError(f"{task.id} is in `{task.stage}`; only a done card can be sent back to fix comments")
+    if not rounds.load(task.id)["pending"]:
+        raise ValueError("there are no comments to fix; add one on the latest round's diff first")
+    task.body = rounds.packet_only(task.body)
+    tasks.log(type="fix_requested", id=task.id)
+    return tasks.move(task, "todo", actor="human", status="todo", attempts=None, error=None)
 
 
 def pause(id: str, paused: bool) -> tasks.Task:
@@ -316,6 +343,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(404, {"error": "no such screenshot"})
             else:
                 self._send(200, shot, "image/png")
+        elif self.path.startswith("/api/diff"):
+            query = parse_qs(urlparse(self.path).query)
+            id, n = query.get("id", [""])[0], query.get("round", [""])[0]
+            found = rounds.diff(id, int(n)) if tasks.ID_RE.fullmatch(id) and n.isdigit() else None
+            self._json(*((200, found) if found else (404, {"error": "no such round"})))
         elif self.path.startswith("/api/analytics"):
             window = parse_qs(urlparse(self.path).query).get("window", ["all"])[0]
             self._json(200, analytics(window))
@@ -331,7 +363,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed():
             self._json(403, {"error": "open the board from the link `rfa up` printed"})
             return
-        if self.path not in (
+        posts = (
             "/api/move",
             "/api/new",
             "/api/pr",
@@ -339,10 +371,25 @@ class Handler(BaseHTTPRequestHandler):
             "/api/archive",
             "/api/pause",
             "/api/verdict",
-        ):
+            "/api/comment",
+            "/api/fix",
+        )
+        if self.path not in posts:
             self._json(404, {"error": "not found"})
             return
         payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+        if self.path in ("/api/comment", "/api/fix"):
+            try:
+                if self.path == "/api/fix":
+                    task = fix(payload["id"])
+                    self._json(200, {"id": task.id, "stage": task.stage, "status": task.status})
+                elif (task := tasks.find(payload["id"])).stage != "done":
+                    self._json(400, {"error": "comments go on a done card's latest round"})
+                else:
+                    self._json(200, {"pending": rounds.comment(task.id, payload)["pending"]})
+            except (FileNotFoundError, KeyError, ValueError, tasks.TransitionError) as e:
+                self._json(400, {"error": str(e).strip("'")})
+            return
         if self.path == "/api/new":
             if not (idea := str(payload.get("idea", "")).strip()):
                 self._json(400, {"error": "an idea needs some words"})

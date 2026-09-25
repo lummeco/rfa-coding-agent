@@ -9,6 +9,7 @@ submit, which is what the board counts as a retry.
 """
 
 import json
+import shutil
 from pathlib import Path
 
 from minisweagent import Environment, Model
@@ -17,10 +18,19 @@ from minisweagent.environments import get_environment
 from minisweagent.exceptions import FormatError, LimitsExceeded, Submitted
 from minisweagent.models import get_model
 from minisweagent.utils.serialize import recursive_merge
-from rfa import settings, tasks
+from rfa import junit, rounds, settings, tasks
 from rfa.packet import FORBIDDEN_PATHS
 from rfa.planner import REPOS_DIR, git, pin, seed
 from rfa.tasks import Task
+
+JUNIT = "/tmp/rfa-junit.xml"
+
+UNTESTABLE = (
+    "The repository's `test:` command wrote no JUnit report before the coder started, so no test "
+    "could have been judged, and the run did not start. It must write one to `$RFA_JUNIT` (pytest "
+    "`--junitxml=$RFA_JUNIT`, jest-junit, gotestsum...). Fix `test:` in the `containers:` block for the "
+    "repository in rfa.yaml, and move the card back to todo.\n\n{output}"
+)
 
 CHECKS_FAILED = (
     "You submitted, but checks that passed before you started are failing now:\n\n{report}\n\n"
@@ -70,10 +80,16 @@ class CoderConfig(AgentConfig):
     wrap_up_at: float = 0.8
     """The share of the window, or of the step limit, past which every observation tells the coder
     to finish and submit."""
+    summary_path: str = "/work/summary.json"
+    """Where the coder leaves a line on what it did, and its answer to each review comment. Outside
+    the repositories, so it is never part of the diff."""
+    junit_path: str = JUNIT
+    """Where the repository's `test:` command writes its report, handed to it as `$RFA_JUNIT`."""
+    test_timeout: int = 1800
 
 
 class CoderAgent(tasks.Pausable, DefaultAgent):
-    """mini's agent, with the packet's checks standing between submitting and being done."""
+    """mini's agent, with the packet's checks and the repository's tests between submitting and done."""
 
     def __init__(
         self,
@@ -83,6 +99,8 @@ class CoderAgent(tasks.Pausable, DefaultAgent):
         checks: list[str],
         cwd: str,
         baseline: dict[str, bool] | None = None,
+        test: str = "",
+        test_baseline: dict | None = None,
         root: str = REPOS_DIR,
         **kwargs,
     ):
@@ -91,6 +109,9 @@ class CoderAgent(tasks.Pausable, DefaultAgent):
         self.cwd = cwd
         self.root = root
         self.baseline = baseline or {}
+        self.test = test
+        self.test_baseline = test_baseline or {}
+        self.tests: dict | None = None
         self.results: list[dict] = []
         self.round = 0
         self.prompt_tokens = 0
@@ -115,9 +136,14 @@ class CoderAgent(tasks.Pausable, DefaultAgent):
 
         A check that was already failing before the coder touched anything is the repository's
         problem, not the run's: blaming it burns both rounds on something the packet never asked
-        about, and makes every failure report untrustworthy.
+        about, and makes every failure report untrustworthy. The same goes for each test the
+        repository's `test:` command reports -- but test by test, so one test already red does not
+        excuse every other one.
         """
-        return [r for r in self.results if not r["ok"] and self.baseline.get(r["command"], True)]
+        found = [r for r in self.results if not r["ok"] and self.baseline.get(r["command"], True)]
+        if self.tests and (failed := failing_tests(self.tests, self.test_baseline)):
+            found.append({"command": self.test, "ok": False, "returncode": self.tests["returncode"], "output": failed})
+        return found
 
     def exit_status(self) -> str:
         return self.messages[-1].get("extra", {}).get("exit_status", "") if self.messages else ""
@@ -231,7 +257,18 @@ class CoderAgent(tasks.Pausable, DefaultAgent):
         return self.warn(observations)
 
     def run_checks(self) -> list[dict]:
+        if self.test:
+            self.tests = run_tests(self.env, self.test, self.cwd, self.config.junit_path, self.config.test_timeout)
         return run_checks(self.env, self.checks, self.cwd)
+
+    def summary(self) -> dict:
+        """What the coder wrote to `summary_path`, or nothing when it wrote nothing usable."""
+        raw = self.env.execute({"command": f"cat {self.config.summary_path}"})
+        try:
+            found = json.loads(raw["output"]) if raw["returncode"] == 0 else {}
+        except json.JSONDecodeError:
+            return {}
+        return found if isinstance(found, dict) else {}
 
 
 def usage(message: dict) -> dict:
@@ -273,6 +310,62 @@ def run_checks(env: Environment, checks: list[str], cwd: str) -> list[dict]:
             }
         )
     return results
+
+
+def run_tests(env: Environment, command: str, cwd: str, report: str = JUNIT, timeout: int = 1800) -> dict:
+    """The repository's own test command, run by the host, and each test's result out of its report.
+
+    The report is deleted first: one left over from the coder's own run, or the baseline, is not a
+    result of this one.
+    """
+    ran = env.execute({"command": f"rm -f {report}; export RFA_JUNIT={report}; {command}"}, cwd=cwd, timeout=timeout)
+    written = env.execute({"command": f"cat {report}"})
+    return {
+        "command": command,
+        "returncode": ran["returncode"],
+        "output": ran["output"][-4000:],
+        "cases": junit.parse(written["output"]) if written["returncode"] == 0 else None,
+    }
+
+
+def failing_tests(tests: dict, baseline: dict) -> str:
+    """What the test command says this run broke, in words the coder can act on. Empty when nothing.
+
+    No report at all is a failure: a suite that crashed before writing one has passed nothing. So is
+    a non-zero exit with no failing test in the report -- a collection error, a coverage floor --
+    unless the command was already exiting that way before the coder started.
+    """
+    if tests["cases"] is None:
+        return f"It wrote no JUnit report to $RFA_JUNIT, so no test can be said to have passed.\n\n{tests['output']}"
+    if bad := junit.broken(tests["cases"], baseline.get("outcomes", {})):
+        return "\n\n".join(f"FAILED {c['id']}\n{c['message']}".strip() for c in bad[:20])[:6000]
+    if tests["returncode"] != 0 and baseline.get("returncode", 0) == 0:
+        return f"It exited {tests['returncode']} with no failing test in its report:\n\n{tests['output']}"
+    return ""
+
+
+def record_tests(tests: dict | None, baseline: dict, repo: str, attempts: int) -> dict | None:
+    """The host's own record of the last test run, as the board reads it. The coder never writes this."""
+    if tests is None:
+        return None
+    before = baseline.get("outcomes", {})
+    cases = [c | {"before": before.get(c["id"], "")} for c in tests["cases"] or []]
+    return {
+        "repo": repo,
+        "command": tests["command"],
+        "returncode": tests["returncode"],
+        "ok": not failing_tests(tests, baseline),
+        "attempts": attempts,
+        "output": tests["output"],
+        "cases": cases if tests["cases"] is not None else None,
+        # A test red before the coder started is counted apart, so "passed" never sits beside a red number unexplained.
+        "counts": {
+            "passed": sum(c["outcome"] == "passed" for c in cases),
+            "failed": sum(c["outcome"] in junit.FAILED and c["before"] not in junit.FAILED for c in cases),
+            "known": sum(c["outcome"] in junit.FAILED and c["before"] in junit.FAILED for c in cases),
+            "skipped": sum(c["outcome"] == "skipped" for c in cases),
+        },
+    }
 
 
 def make_git_repos(env: Environment, names: list[str]) -> None:
@@ -322,10 +415,6 @@ def diffs(env: Environment, names: list[str]) -> tuple[dict[str, str], dict[str,
     return changed, dropped
 
 
-def run_dir(id: str) -> Path:
-    return tasks.home() / "var" / "runs" / id
-
-
 def free_branch(repo: Path, name: str) -> str:
     """`name`, or the first `name-2`, `name-3`... the repository does not already have."""
     existing = set(git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads").split())
@@ -334,16 +423,19 @@ def free_branch(repo: Path, name: str) -> str:
     return next(f"{name}-{n}" for n in range(2, 1000) if f"{name}-{n}" not in existing)
 
 
-def land(repo: Path, ref: str, branch: str, patch: Path, message: str) -> str:
+def land(repo: Path, ref: str, branch: str, patch: Path, message: str, onto: bool = False) -> str:
     """Put the coder's patch on a branch in your real checkout, and return the branch name.
 
     Through a throwaway worktree, so the branch appears in the repository while whatever you had
     checked out, staged or half-finished stays exactly as it was. Nothing is pushed: the branch is
     local, and what you do with it is yours.
+
+    `onto` is a fix round: the patch is one more commit on the branch the last round landed, rather
+    than a new branch from `ref`.
     """
-    branch = free_branch(repo, branch)
+    branch = branch if onto else free_branch(repo, branch)
     tree = patch.parent / f"worktree-{repo.name}"
-    git(repo, "worktree", "add", "-q", "-b", branch, str(tree), ref)
+    git(repo, "worktree", "add", "-q", *((str(tree), branch) if onto else ("-b", branch, str(tree), ref)))
     try:
         git(tree, "apply", str(patch))
         git(tree, "add", "-A")
@@ -354,15 +446,24 @@ def land(repo: Path, ref: str, branch: str, patch: Path, message: str) -> str:
 
 
 def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> Task:
-    """Claim a todo, code it, check it, and put it in done saying how it went."""
+    """Claim a todo, code it, check it, and put it in done saying how it went.
+
+    A card that already landed work gets a fix round: it starts from that branch rather than from the
+    card's start branch, is handed the review comments waiting on it, and lands on the same branch.
+    """
     if task.stage != "todo":
         raise ValueError(f"{task.id} is in `{task.stage}`, not `todo`")
     repos = settings.repo_paths(config, task.meta.get("repos") or [], settings.start_branches(task.meta))
     if not repos:
         raise ValueError(f"{task.id} names no repositories; add `repos:` to the card")
     names = list(repos)
-    output = run_dir(task.id)
-    output.mkdir(parents=True, exist_ok=True)
+    before = task.meta.get("landed") or {}
+    state = rounds.view(task)
+    n, comments = len(state["rounds"]), state["pending"]
+    # A round that never got recorded -- the machine failed under it -- is simply run again.
+    output = rounds.round_dir(task.id, n)
+    shutil.rmtree(output, ignore_errors=True)
+    output.mkdir(parents=True)
 
     # The card's own `model:` is what the board and `rfa new -m` set; the command still wins.
     chosen, level = settings.for_task(config, task.meta, model, reasoning)
@@ -383,7 +484,13 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         env = get_environment(environment(config, spec), default_type="docker")
         # Pinned here rather than before the move: a fetch needs the network, and a card that fails
         # on it belongs back in the queue with the rest of the infrastructure failures.
-        repos = pin(repos)
+        # A fix round starts from the commit the last round landed, in this checkout: that branch
+        # is local, and whatever origin has under the same name is not what the comments were on.
+        repos = pin({k: v for k, v in repos.items() if k not in before}) | {
+            name: (path, git(path, "rev-parse", f"{before[name]}^{{commit}}").strip())
+            for name, (path, _) in repos.items()
+            if name in before
+        }
         reference = pin(settings.reference_paths(config, task.meta))
         seed(env, repos, reference)
         # Before the base commit, so whatever the setup leaves in the checkout is not the coder's diff.
@@ -397,12 +504,23 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         tasks.log(type="baseline", id=task.id, failing=[c for c, ok in baseline.items() if not ok])
         if checks and not any(baseline.values()):
             raise Unjudgeable(UNJUDGEABLE.format(report=report(measured)))
+        # The repository's own tests, measured the same way but test by test.
+        test = spec.get("test") or ""
+        if (tested := run_tests(env, test, cwd) if test else None) and tested["cases"] is None:
+            raise Unjudgeable(UNTESTABLE.format(output=tested["output"]))
+        test_baseline = (
+            {"returncode": tested["returncode"], "outcomes": {c["id"]: c["outcome"] for c in tested["cases"]}}
+            if tested
+            else {}
+        )
         agent = CoderAgent(
             get_model(config=settings.model_config(config, chosen, level)),
             env,
             checks=checks,
             cwd=cwd,
             baseline=baseline,
+            test=test,
+            test_baseline=test_baseline,
             output_path=output / "trajectory.json",
             task_id=task.id,
             # The window the variant is served with, unless the workspace said otherwise: a run
@@ -416,8 +534,11 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
             checks=checks,
             broken_checks=[c for c, ok in baseline.items() if not ok],
             reference=sorted(reference),
+            test=test,
+            comments=comments,
         )
         patches, dropped = diffs(env, names)
+        written = agent.summary()
     except Unjudgeable as e:
         # A verdict on the packet, not on the machine: retrying would fail the same way in a minute.
         tasks.log(type="run_finished", id=task.id, shipped=False, rounds=0, landed={}, dropped={}, exit="Unjudgeable")
@@ -448,15 +569,43 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
     for name, patch in patches.items():
         (output / f"{name}.patch").write_text(patch)
     (output / "checks.json").write_text(json.dumps(agent.results, indent=2))
+    if tests := record_tests(agent.tests, test_baseline, names[0], agent.round):
+        (output / "tests.json").write_text(json.dumps(tests, indent=2))
 
     shipped = landable(agent, patches)
     # `landed`, not `branches`: the card's own `branches:` is where its work started from, and
     # these are where it ended up. One name for both would quietly overwrite the first with the second.
-    landed = {}
+    landed, commits = dict(before), {}
     if shipped:
+        message = f"{task.title} (round {n + 1})" if before else task.title
         for name, (repo, ref) in repos.items():
             if name in patches:
-                landed[name] = land(repo, ref, f"rfa/{task.id}", output / f"{name}.patch", task.title)
+                branch = before.get(name) or f"rfa/{task.id}"
+                landed[name] = land(repo, ref, branch, output / f"{name}.patch", message, onto=name in before)
+                commits[name] = {
+                    "branch": landed[name],
+                    "base": ref,
+                    "head": git(repo, "rev-parse", landed[name]).strip(),
+                }
+    answers = written.get("answers") if isinstance(written.get("answers"), dict) else {}
+    rounds.record(
+        task.id,
+        {
+            "n": n,
+            "kind": "fix" if before else "original",
+            "finished": tasks.now(),
+            "landed": shipped,
+            "plan": None if before else task.body,
+            "summary": str(written.get("summary") or "")[:1000] or changed_files(patches),
+            "comments": [c | {"answer": str(answers.get(str(i)) or "")[:2000]} for i, c in enumerate(comments, 1)],
+            "outside": outside(comments, patches),
+            "commits": commits,
+            "tests": {k: tests[k] for k in ("ok", "counts", "attempts", "command")} if tests else None,
+            "error": None if shipped else summarize(agent, patches),
+        },
+        answered=[c["id"] for c in comments] if shipped else [],
+        earlier=state["rounds"],
+    )
     tasks.log(
         type="run_finished",
         id=task.id,
@@ -465,6 +614,7 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         landed=landed,
         dropped=dropped,
         exit=agent.exit_status(),
+        round=n,
     )
     task.body += changed_note(agent, landed, repos, output) if shipped else failure_note(agent, patches, output)
     task.body += dropped_note(dropped)
@@ -497,6 +647,23 @@ def setup(env: Environment, spec: dict, cwd: str) -> None:
         result = env.execute({"command": command}, cwd=cwd, timeout=spec.get("setup_timeout", 900))
         if result["returncode"] != 0:
             raise RuntimeError(f"`{command}` failed setting up the container:\n\n{result['output'][-3000:]}")
+
+
+def changed_files(patches: dict[str, str]) -> str:
+    """The summary a round gets when the coder wrote none: which files it changed."""
+    changed = [f for patch in patches.values() for f in rounds.files(patch)]
+    more = f" and {len(changed) - 8} more" if len(changed) > 8 else ""
+    return f"Changed {', '.join(changed[:8])}{more}." if changed else ""
+
+
+def outside(comments: list[dict], patches: dict[str, str]) -> dict[str, list[str]]:
+    """Files a fix round changed that no comment was on. Said on the round rather than dropped: the
+    host's tests ran on the whole diff, and landing less of it would land code nothing tested."""
+    commented = {(c.get("repo"), c.get("file")) for c in comments}
+    if not any(file for _, file in commented):
+        return {}
+    found = {name: [f for f in rounds.files(patch) if (name, f) not in commented] for name, patch in patches.items()}
+    return {name: paths for name, paths in found.items() if paths}
 
 
 def landable(agent: CoderAgent, patches: dict[str, str]) -> bool:

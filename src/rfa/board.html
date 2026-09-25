@@ -156,6 +156,7 @@ header .hint { color: var(--text-3); font-size: 12px; }
   border-radius: 20px;
   padding: 1px 7px;
 }
+.retry.held { color: var(--text-2); background: var(--line); }
 .repo { font-size: 11px; color: var(--text-3); }
 .cx { display: inline-flex; gap: 3px; margin-left: auto; }
 .cx i { width: 4px; height: 4px; border-radius: 50%; background: var(--line); }
@@ -231,7 +232,13 @@ button.action.quiet { background: transparent; color: var(--text-2); padding-lef
   font: inherit; color: var(--text); background: var(--surface-2);
   border: none; border-radius: 12px; padding: 14px 16px; margin-bottom: 18px;
 }
-#idea:focus { outline: 2px solid var(--accent); }
+#idea:focus, #cap-title:focus, #cap-checks:focus { outline: 2px solid var(--accent); }
+#cap-title, #cap-checks {
+  width: 100%; font: inherit; color: var(--text); background: var(--surface-2);
+  border: none; border-radius: 12px; padding: 10px 16px; margin-bottom: 18px;
+}
+#cap-title { font-weight: 550; }
+#cap-checks { min-height: 70px; resize: vertical; font: 12.5px/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
 
 /* Editing fills the panel: the textarea takes whatever the notes above it leave. */
 #detail .body.editing { display: flex; flex-direction: column; overflow: hidden; }
@@ -451,7 +458,7 @@ function when(iso) {
 
 function card(t) {
   const tone = TONE[t.status] || "";
-  const live = LIVE.has(t.status) ? " pulse" : "";
+  const live = LIVE.has(t.status) && !t.paused ? " pulse" : "";
   const dots = t.complexity
     ? `<span class="cx" title="complexity ${t.complexity}/5">${[1,2,3,4,5].map(n => `<i class="${n <= t.complexity ? "on" : ""}"></i>`).join("")}</span>`
     : "";
@@ -461,6 +468,7 @@ function card(t) {
       <div class="meta">
         <span class="status"><span class="dot ${tone}${live}"></span>${esc(t.status)}</span>
         ${t.attempts ? `<span class="retry" title="${t.attempts} retries">↻ ${t.attempts}</span>` : ""}
+        ${t.paused ? `<span class="retry held">${LIVE.has(t.status) ? "pausing…" : "⏸ paused"}</span>` : ""}
         ${t.repos.length ? `<span class="repo">${esc(t.repos.map(r => r.split("/").pop()).join(", "))}</span>` : ""}
         ${dots}
       </div>
@@ -492,17 +500,24 @@ function actionsFor(t) {
     `<button class="action ${cls}" data-to="${to}">${label}</button>`;
   // Archive is a flag, not a move, so it rides along wherever the task is.
   const archive = `<button class="action" data-archive="${esc(t.id)}" aria-pressed="${t.archived}" title="${t.archived ? "Unarchive" : "Archive"}">${t.archived ? "Unarchive" : "Archive"}</button>`;
-  if (t.stage === "draft") return move("planning", "Plan it", "primary") + archive;
-  if (t.stage === "planning" && t.status === "queued") return move("draft", "Back to draft", "quiet") + archive;
-  if (t.stage === "planning" && t.status === "ready") return `<button class="action" id="edit">Edit</button>` + move("todo", "Approve", "primary") + move("draft", "Send back", "quiet") + archive;
+  // Pausing a card with a run on it stops the run before its next model call; resuming starts over.
+  const pause = t.paused
+    ? `<button class="action primary" data-pause="0">Resume</button>`
+    : `<button class="action" data-pause="1">${LIVE.has(t.status) ? "Pause run" : "Pause"}</button>`;
+  // Not while an agent is on it: the run would write the card back where it was.
+  const draft = LIVE.has(t.status) ? "" : move("draft", "Back to draft", "quiet");
+  if (t.stage === "draft") return `<button class="action" id="edit-draft">Edit</button>` + move("planning", "Plan it", "primary")
+    + (t.planned ? move("todo", "Approve as is", "") : "") + archive;
+  if (t.stage === "planning" && t.status === "ready") return `<button class="action" id="edit">Edit</button>` + move("todo", "Approve", "primary") + draft + archive;
   if (t.stage === "planning" && t.status === "failed") return move("draft", "Back to draft", "") + archive;
-  if (t.stage === "todo") return move("planning", "Re-plan", "quiet") + archive;
+  if (t.stage === "planning") return pause + draft + archive;
+  if (t.stage === "todo") return pause + move("planning", "Re-plan", "quiet") + draft + archive;
   // The reviewer takes both of these edges on its own; these are for overruling it, or for a card
   // whose review could not run at all.
-  if (t.stage === "review") return move("done", "Pass it", "primary") + move("todo", "Send back", "quiet") + move("planning", "Re-plan", "quiet") + archive;
-  if (t.stage === "done" && Object.keys(t.landed || {}).length) return move("todo", "Run again", "") + move("review", "Review again", "quiet") + move("planning", "Re-plan", "quiet") + `<button class="action" data-pr="${esc(t.id)}">Create PR</button>` + archive;
-  if (t.stage === "done") return move("todo", "Run again", "") + move("planning", "Re-plan", "quiet") + archive;
-  if (t.stage === "under-work") return move("todo", "Requeue", "quiet") + archive;
+  if (t.stage === "review") return (t.status === "failed" ? "" : pause) + move("done", "Pass it", "primary") + move("todo", "Send back", "quiet") + move("planning", "Re-plan", "quiet") + archive;
+  if (t.stage === "done" && Object.keys(t.landed || {}).length) return move("todo", "Run again", "") + move("review", "Review again", "quiet") + move("planning", "Re-plan", "quiet") + draft + `<button class="action" data-pr="${esc(t.id)}">Create PR</button>` + archive;
+  if (t.stage === "done") return move("todo", "Run again", "") + move("planning", "Re-plan", "quiet") + draft + archive;
+  if (t.stage === "under-work") return pause + move("todo", "Requeue", "quiet") + archive;
   return archive;
 }
 
@@ -511,20 +526,33 @@ let options = { branches: [], errors: [] };   // what /api/branches said for the
 let start = {};                                // repo -> the branch its work begins on
 let refs = [];                                 // [{repo, branch}] read beside it, at most MAX_REF
 const MAX_REF = 3;
+let drafting = null;   // the draft the capture form is editing; null = a new idea
+let seed = {};         // what the form starts out holding, before anything is typed into it
 
-function showCapture() {
+// `repo@branch`, split at the first @: a repository key never has one, a branch name might.
+const splitRef = b => { const [repo, branch] = b.split(/@(.*)/s); return { repo, branch }; };
+
+/** The capture form, empty for a new idea or filled with a draft to edit every part of it. */
+function showCapture(t = null) {
   openId = null;
-  picked = new Set();
+  drafting = t?.id || null;
+  seed = t
+    ? { idea: t.body, title: t.given_title || "", checks: (t.checks || []).join("\n"), model: t.model || "", reasoning: t.reasoning || "" }
+    : {};
+  picked = new Set(t?.repos || []);
   options = { branches: [], errors: [] };
-  start = {};
-  refs = [];
-  document.getElementById("d-title").textContent = "New idea";
-  document.getElementById("d-sub").textContent = "It lands in Draft. You decide when it gets planned.";
-  drawCapture();
+  start = Object.fromEntries((t?.branches || []).map(b => Object.values(splitRef(b))));
+  refs = (t?.context_branches || []).map(splitRef);
+  document.getElementById("d-title").textContent = t ? "Edit draft" : "New idea";
+  document.getElementById("d-sub").textContent = t ? t.id : "It lands in Draft. You decide when it gets planned.";
+  document.getElementById("d-body").innerHTML = "";   // nothing typed before carries into this form
   detailId = null;
+  if (picked.size) loadBranches(); else drawCapture();
   document.getElementById("d-body").scrollTop = 0;
   document.getElementById("d-actions").innerHTML =
-    `<button class="action primary" id="save">Save draft</button><span class="hint" style="color:var(--text-3);font-size:12px">⌘↵</span>`;
+    `<button class="action primary" id="save">Save draft</button>`
+    + (t ? `<button class="action quiet" id="cancel-draft">Cancel</button>` : "")
+    + `<span class="hint" style="color:var(--text-3);font-size:12px">⌘↵</span>`;
   openPanel();
   document.getElementById("idea").focus();
 }
@@ -576,17 +604,23 @@ function heading(text) {
 // that a full redraw is simpler than tracking which parts went stale.
 function drawCapture() {
   const body = document.getElementById("d-body");
-  const idea = document.getElementById("idea")?.value ?? "";
+  // Redrawn whole, so every field carries what is in it now -- or, the first time, what it started with.
+  const keep = (id, key) => document.getElementById(id)?.value ?? seed[key] ?? "";
+  const idea = keep("idea", "idea");
   const models = state.system?.models || [];
   const levels = state.system?.reasoning || [];
   // A blank choice means "whatever the workspace is set to". A card should only pin a model or a
   // level when you picked one, or it would freeze today's default into itself forever.
-  const pick = (id, blank, values) =>
-    `<select id="${id}"><option value="">${blank}</option>${values.map(v =>
-      `<option value="${esc(v)}">${esc(v)}</option>`).join("")}</select>`;
+  const pick = (id, blank, values) => {
+    const chosen = keep(id, id.slice(4));
+    return `<select id="${id}"><option value="">${blank}</option>${values.map(v =>
+      `<option value="${esc(v)}"${v === chosen ? " selected" : ""}>${esc(v)}</option>`).join("")}</select>`;
+  };
 
   body.innerHTML =
-    `<textarea id="idea" placeholder="What do you want to happen?">${esc(idea)}</textarea>`
+    (drafting ? heading("Title") + `<input id="cap-title" placeholder="The idea's first line" value="${esc(keep("cap-title", "title"))}">` : "")
+    + `<textarea id="idea" placeholder="What do you want to happen?"${drafting ? ` style="min-height:300px"` : ""}>${esc(idea)}</textarea>`
+    + (drafting ? heading("Checks") + `<textarea id="cap-checks" placeholder="One command per line — what the coder's work is judged by">${esc(keep("cap-checks", "checks"))}</textarea>` : "")
     + heading("Repositories")
     + `<div class="pick">${(state.repos || []).map(r =>
         `<button data-repo="${esc(r)}" aria-pressed="${picked.has(r)}">${esc(r.split("/").pop())}</button>`).join("")}</div>`
@@ -636,11 +670,16 @@ async function loadBranches() {
 async function saveIdea() {
   const idea = document.getElementById("idea").value.trim();
   if (!idea) return;
-  const res = await api("/api/new", {
+  const res = await api(drafting ? "/api/edit" : "/api/new", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      idea,
+      ...(drafting ? {
+        id: drafting,
+        body: "\n" + idea + "\n",
+        title: document.getElementById("cap-title").value.trim(),
+        checks: document.getElementById("cap-checks").value.split("\n").map(c => c.trim()).filter(Boolean),
+      } : { idea }),
       repos: [...picked],
       branches: [...picked].filter(r => start[r]).map(r => `${r}@${start[r]}`),
       context_branches: refs.map(r => `${r.repo}@${r.branch}`),
@@ -649,8 +688,10 @@ async function saveIdea() {
     }),
   });
   if (!res.ok) { alert((await res.json()).error); return; }
+  const edited = drafting;
   closeDetail();
-  refresh();
+  await refresh();
+  if (edited) showDetail(edited);
 }
 
 async function saveEdit() {
@@ -753,7 +794,7 @@ function showDetail(id) {
   openId = id;
   document.getElementById("d-title").textContent = t.title;
   document.getElementById("d-sub").textContent =
-    `${LABEL[t.stage] || t.stage} · ${t.status}${t.attempts ? ` · ${t.attempts} retries` : ""}`
+    `${LABEL[t.stage] || t.stage} · ${t.status}${t.paused ? " (paused)" : ""}${t.attempts ? ` · ${t.attempts} retries` : ""}`
     + `${t.model ? ` · ${t.model}` : ""}${t.reasoning ? ` (${t.reasoning})` : ""} · ${when(t.created)}`;
   const from = (t.branches || []).map(b => b.split("@")[1]).join(", ");
   const reading = (t.context_branches || []).map(b => b.split("/").pop()).join(", ");
@@ -781,8 +822,12 @@ function showDetail(id) {
     head += `<div class="note">Pull request${prs.length > 1 ? "s" : ""} open: `
       + prs.map(([r, u]) => `${link(u)} in ${esc(r)}`).join(", ") + `</div>`;
   if (t.link) head += `<div class="note">From ${link(t.link)}</div>`;
-  if (t.stage === "draft") head += `<div class="note">A draft. <strong>Plan it</strong> hands it to the planner.</div>`;
-  if (t.status === "queued") head += `<div class="note">Waiting for the planner — <code>rfa plan</code></div>`;
+  if (t.paused)
+    head += `<div class="note">${LIVE.has(t.status)
+      ? "Pausing — the run stops before its next model call and the card goes back to its queue."
+      : "Paused — the daemon leaves it alone until you <strong>Resume</strong>. A run starts over from the beginning."}</div>`;
+  if (t.stage === "draft") head += `<div class="note">A draft. <strong>Edit</strong> changes any part of it; <strong>Plan it</strong> hands it to the planner${t.planned ? ", or <strong>Approve as is</strong> sends this packet straight to the coder" : ""}.</div>`;
+  if (t.status === "queued" && t.stage === "planning" && !t.paused) head += `<div class="note">Waiting for the planner — <code>rfa plan</code></div>`;
   if (t.open_questions?.length)
     head += `<div class="note"><strong>Open questions</strong><ul>${t.open_questions.map(q => `<li>${esc(q)}</li>`).join("")}</ul></div>`;
 
@@ -838,6 +883,7 @@ async function createPR(id) {
 }
 
 function closeDetail() {
+  drafting = null;
   watching = null;
   editing = false;
   openId = null;
@@ -868,6 +914,18 @@ async function move(id, to) {
   });
   if (!res.ok) { alert((await res.json()).error); return; }
   closeDetail();
+  await refresh();
+  // Sent back to be fixed: stay on it, with Edit one click away.
+  if (to === "draft") showDetail(id);
+}
+
+async function setPaused(id, paused) {
+  const res = await api("/api/pause", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, paused }),
+  });
+  if (!res.ok) { alert((await res.json()).error); return; }
   refresh();
 }
 
@@ -894,6 +952,10 @@ document.getElementById("show-archived").addEventListener("click", () => {
 });
 document.getElementById("d-actions").addEventListener("click", e => {
   if (e.target.closest("#save")) return saveIdea();
+  if (e.target.closest("#cancel-draft")) { const id = drafting; drafting = null; return showDetail(id); }
+  if (e.target.closest("#edit-draft")) return showCapture(state.tasks.find(x => x.id === openId));
+  const held = e.target.closest("button[data-pause]");
+  if (held && openId) return setPaused(openId, held.dataset.pause === "1");
   const arch = e.target.closest("button[data-archive]");
   if (arch) return toggleArchive(arch.dataset.archive);
   const prBtn = e.target.closest("button[data-pr]");

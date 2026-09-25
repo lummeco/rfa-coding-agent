@@ -72,7 +72,7 @@ class CoderConfig(AgentConfig):
     to finish and submit."""
 
 
-class CoderAgent(DefaultAgent):
+class CoderAgent(tasks.Pausable, DefaultAgent):
     """mini's agent, with the packet's checks standing between submitting and being done."""
 
     def __init__(
@@ -404,6 +404,7 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
             cwd=cwd,
             baseline=baseline,
             output_path=output / "trajectory.json",
+            task_id=task.id,
             # The window the variant is served with, unless the workspace said otherwise: a run
             # that does not know where its ceiling is can only find it by hitting it.
             **({"context_window": settings.context_window(config, chosen)} | config.get("agent", {})),
@@ -430,6 +431,10 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
             run=str(output),
             error=str(e).partition("\n")[0],
         )
+    except tasks.Paused:
+        # Back to todo, held, and the attempt given back: you stopped it, the run did not fail.
+        tasks.log(type="run_paused", id=task.id)
+        return tasks.move(task, "todo", actor="worker", status="todo", attempts=task.attempts - 1, paused=True)
     except Exception as e:
         # Docker down, the model unreachable, the image missing: nothing to do with the task itself.
         # Put it back in the queue rather than leaving a card in under-work with no worker on it.

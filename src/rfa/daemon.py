@@ -104,15 +104,18 @@ def next_job(config: DaemonConfig) -> tuple[str, Task] | None:
     be told whether it counts. Starting another coding run ahead of it spends the machine on a
     fourth unfinished thing while three finished ones say nothing.
 
+    A paused card is not there at all, and does not count as work waiting either.
+
     `plan_ahead` only ever holds planning back in favour of a coding run that can actually start:
     with nothing to code there is nothing to yield to, and the queue would sit there all night.
     """
-    reviews = [t for t in tasks.tasks("review") if t.status == "queued" and reviewable(t)] if config.review else []
+    live = {stage: [t for t in tasks.tasks(stage) if not t.paused] for stage in ("planning", "todo", "review")}
+    reviews = [t for t in live["review"] if t.status == "queued" and reviewable(t)] if config.review else []
     if reviews:
         return "review", reviews[0]
-    plans = [t for t in tasks.tasks("planning") if t.status == "queued"] if config.plan else []
-    work = [t for t in tasks.tasks("todo") if t.attempts < config.max_attempts] if config.work else []
-    waiting = len(tasks.tasks("todo")) + sum(t.status == "ready" for t in tasks.tasks("planning"))
+    plans = [t for t in live["planning"] if t.status == "queued"] if config.plan else []
+    work = [t for t in live["todo"] if t.attempts < config.max_attempts] if config.work else []
+    waiting = len(live["todo"]) + sum(t.status == "ready" for t in live["planning"])
     if plans and (not work or waiting < config.plan_ahead):
         return "plan", plans[0]
     return ("work", work[0]) if work else None

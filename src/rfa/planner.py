@@ -40,7 +40,7 @@ class PlannerConfig(AgentConfig):
     """Where in the container the planner leaves the packet. The only thing that leaves it."""
 
 
-class PlannerAgent(DefaultAgent):
+class PlannerAgent(tasks.Pausable, DefaultAgent):
     """Submitting is a proposal, not the end: an unusable packet resumes the same session."""
 
     def __init__(self, model: Model, env: Environment, *, repo_files: dict[str, set[str]], **kwargs):
@@ -283,8 +283,13 @@ def plan_task(task: Task, config: dict, model: str = "", reasoning: str = "") ->
             get_model(config=settings.model_config(config, chosen, level)),
             env,
             reference,
+            task_id=task.id,
             **config.get("agent", {}),
         )
+    except tasks.Paused:
+        # Back in the queue, held: resuming plans it again from the start.
+        tasks.log(type="plan_paused", id=task.id)
+        return tasks.save(task, status="queued", paused=True)
     except Exception as e:
         tasks.log(type="plan_failed", id=task.id, error=str(e))
         return tasks.save(task, status="failed", error=str(e))

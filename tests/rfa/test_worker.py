@@ -334,3 +334,26 @@ def test_land_puts_the_patch_on_a_branch_without_disturbing_the_working_tree(tmp
     assert landed == "export const a = 1;\nexport const b = 2;\n"
     assert not (run / "worktree-web").exists()
     assert free_branch(repo, "rfa/t1") == "rfa/t1-2"
+
+
+def test_pausing_the_card_stops_the_run_before_its_next_model_call(tmp_path, monkeypatch):
+    from rfa import tasks
+
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    tasks.init()
+    task = tasks.save(tasks.create("an idea"), paused=True)
+    model = DeterministicModel(outputs=[act("touch fixed"), submit()])
+    agent = CoderAgent(
+        model,
+        LocalEnvironment(cwd=str(tmp_path)),
+        checks=[],
+        cwd=str(tmp_path),
+        task_id=task.id,
+        system_template="coder",
+        instance_template="{{task}}",
+        cost_limit=0,
+    )
+    with pytest.raises(tasks.Paused):
+        agent.run("the packet", broken_checks=[])
+    assert model.current_index == -1 and not (tmp_path / "fixed").exists()
+    assert agent.messages[-1]["extra"]["exit_status"] == "Paused"

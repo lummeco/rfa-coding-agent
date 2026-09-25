@@ -238,3 +238,17 @@ def test_a_run_that_is_still_going_has_no_finish_and_is_not_counted(tmp_path, mo
 def test_an_empty_workspace_is_zero_not_an_error(tmp_path, monkeypatch):
     monkeypatch.setenv("RFA_HOME", str(tmp_path))
     assert board.analytics("7d") == {"runs": 0, "runtime": 0, "loc": 0, "shipped": 0, "failed": 0}
+
+
+def test_a_paused_run_ends_its_span_but_is_neither_shipped_nor_failed(tmp_path, monkeypatch):
+    """Without its end, the paused start would pair with the next run's finish and double its runtime."""
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    for type in ("run_started", "run_paused", "run_started"):
+        tasks.log(type=type, id="20260921-120000-a-task")
+    tasks.log(type="run_finished", id="20260921-120000-a-task", shipped=True)
+    assert {k: v for k, v in board.analytics("all").items() if k != "runtime"} == {
+        "runs": 1,
+        "loc": 0,
+        "shipped": 1,
+        "failed": 0,
+    }

@@ -114,7 +114,7 @@ def problems(review: Review, expected: list[str], shots: int) -> list[str]:
     return found
 
 
-class ReviewerAgent(DefaultAgent):
+class ReviewerAgent(tasks.Pausable, DefaultAgent):
     """mini's agent, with the host's reading of the verdict standing between submitting and done."""
 
     def __init__(self, model: Model, env: Environment, *, expected: list[str], **kwargs):
@@ -291,6 +291,7 @@ def review_task(task: Task, config: dict, model: str = "", reasoning: str = "") 
             env,
             expected=expected,
             output_path=output / "trajectory.json",
+            task_id=task.id,
             **config.get("agent", {}),
         )
         agent.run(
@@ -305,6 +306,9 @@ def review_task(task: Task, config: dict, model: str = "", reasoning: str = "") 
     except AppFailed as e:
         tasks.log(type="review_failed", id=task.id, error=str(e))
         return send_back(task, [str(e)], output)
+    except tasks.Paused:
+        tasks.log(type="review_paused", id=task.id)
+        return tasks.save(task, status="queued", paused=True)
     except Exception as e:
         tasks.log(type="review_error", id=task.id, error=str(e))
         return tasks.save(task, status="failed", error=str(e))

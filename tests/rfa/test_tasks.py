@@ -180,3 +180,60 @@ def test_the_archived_flag_survives_a_reload(workspace):
     tasks.save(task, archived=True)
     assert tasks.read(task.path).archived is True
     assert tasks.find(task.id).archived is True
+
+
+def test_any_card_that_is_not_running_goes_back_to_draft_as_a_fresh_start(workspace):
+    for route in (["planning"], ["planning", "todo"], ["planning", "todo", "under-work", "done"]):
+        task = tasks.create(f"an idea for {route[-1]}")
+        for stage in route:
+            task = tasks.move(task, stage)
+        tasks.save(task, attempts=3, error="the checks failed", paused=True, planned_at="then")
+        back = tasks.find(tasks.move(tasks.find(task.id), "draft").id)
+        assert (back.stage, back.status, back.attempts, back.paused) == ("draft", "draft", 0, False), route
+        assert "error" not in back.meta and back.meta["planned_at"] == "then"
+
+
+def test_a_card_with_an_agent_on_it_is_paused_before_it_goes_back_to_draft(workspace):
+    task = tasks.save(tasks.move(tasks.create("an idea"), "planning"), status="planning")
+    with pytest.raises(tasks.TransitionError, match="pause it first"):
+        tasks.move(task, "draft")
+    assert tasks.find(task.id).stage == "planning"
+
+
+def test_pausing_is_a_flag_that_survives_a_move_and_is_logged(workspace):
+    task = tasks.move(tasks.move(tasks.create("an idea"), "planning"), "todo")
+    assert board.pause(task.id, True).paused is True
+    assert tasks.move(tasks.find(task.id), "under-work", actor="worker").paused is True
+    assert board.pause(task.id, False).paused is False and "paused" not in tasks.find(task.id).meta
+    assert [e["type"] for e in tasks.events(task.id)][-3:] == ["paused", "moved", "resumed"]
+
+
+def test_a_draft_is_editable_in_every_part_and_a_blank_field_goes_back_to_its_default(workspace):
+    task = tasks.create("an idea", ["a/web"], title="Old title", checks=["pytest"], model="big")
+    edited = board.edit(
+        {
+            "id": task.id,
+            "body": "\n# Task\nFix it properly\n",
+            "title": "",
+            "repos": ["a/web", "a/api"],
+            "branches": ["a/api@feature"],
+            "context_branches": ["a/web@x", "a/web@y", "a/web@z", "a/web@w"],
+            "checks": ["ruff check", "pytest -q"],
+            "model": "",
+        }
+    )
+    again = tasks.find(task.id)
+    assert (again.body, again.title, again.meta["repos"], again.meta["checks"]) == (
+        "\n# Task\nFix it properly\n",
+        "Fix it properly",
+        ["a/web", "a/api"],
+        ["ruff check", "pytest -q"],
+    )
+    assert len(again.meta["context_branches"]) == 3 and "model" not in again.meta and edited.id == task.id
+
+
+def test_an_edit_naming_a_model_the_workspace_lacks_is_refused_and_writes_nothing(workspace):
+    task = tasks.create("an idea")
+    with pytest.raises((KeyError, ValueError)):
+        board.edit({"id": task.id, "body": "changed", "model": "no-such-model"})
+    assert "changed" not in tasks.find(task.id).body

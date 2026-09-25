@@ -101,3 +101,14 @@ def test_the_report_names_the_default_reasoning_level():
     assert report()["default_reasoning"] == ""
     settings.choose_reasoning("high")
     assert report()["default_reasoning"] == "high"
+
+
+def test_a_paused_card_is_left_alone_and_is_not_counted_as_work_waiting():
+    planned = card("planning", "add a duplicate button", status="queued")
+    held = [card("todo", "rename the invoice column", paused=True), card("todo", "cache the price list", paused=True)]
+    # Two todos, but both held: they neither run nor stop the planner.
+    assert next_job(DaemonConfig(plan_ahead=2)) == ("plan", tasks.tasks("planning")[0])
+    tasks.save(tasks.find(planned.id), paused=True)
+    assert next_job(DaemonConfig()) is None
+    tasks.save(tasks.find(held[1].id), paused=None)
+    assert next_job(DaemonConfig())[1].id == held[1].id

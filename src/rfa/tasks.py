@@ -32,6 +32,7 @@ TRANSITIONS: dict[tuple[str, str], set[str]] = {
     ("planning", "todo"): {"human"},
     ("planning", "draft"): {"human"},
     ("todo", "planning"): {"human"},
+    ("todo", "draft"): {"human"},
     ("todo", "under-work"): {"human", "worker"},
     ("under-work", "review"): {"human", "worker"},
     ("under-work", "done"): {"human", "worker"},
@@ -43,12 +44,17 @@ TRANSITIONS: dict[tuple[str, str], set[str]] = {
     ("done", "review"): {"human"},
     ("done", "todo"): {"human"},
     ("done", "planning"): {"human"},
+    ("done", "draft"): {"human"},
 }
 
 # The `status` a task takes when it arrives in a stage, unless whoever moved it says otherwise.
 # `queued` is the one that matters: a card a human drops into planning is waiting for the planner,
 # not being planned, and the board should not claim otherwise until `rfa plan` picks it up.
 ON_ARRIVAL = {"planning": "queued", "under-work": "starting", "review": "queued"}
+
+# Statuses with an agent on the card right now. Such a card cannot go back to draft under the run:
+# the run still holds the old path and would write the card back where it was.
+RUNNING = {"planning", "starting", "coding", "checking", "reviewing"}
 
 ID_RE = re.compile(r"[0-9a-z][0-9a-z-]{0,79}")
 FRONT_MATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?(.*)\Z", re.DOTALL)
@@ -71,6 +77,27 @@ Loader.yaml_implicit_resolvers = {
 
 class TransitionError(ValueError):
     """An edge that is not in TRANSITIONS, or an actor not allowed to take it."""
+
+
+class Paused(Exception):
+    """The card was paused while an agent was on it. Not an error: the run stops and hands it back."""
+
+
+class Pausable:
+    """An agent that looks at its card before every model call, and stops when you paused it.
+
+    Between calls, not mid-call: what the model is answering now is lost either way, and stopping
+    here means the next thing that happens is the host tidying up rather than one more command.
+    """
+
+    def __init__(self, *args, task_id: str = "", **kwargs):
+        super().__init__(*args, **kwargs)
+        self.task_id = task_id
+
+    def query(self) -> dict:
+        if self.task_id and find(self.task_id).paused:
+            raise Paused(self.task_id)
+        return super().query()
 
 
 @dataclass
@@ -103,6 +130,11 @@ class Task:
     def archived(self) -> bool:
         """Hidden from the stage columns, but still in its stage: a flag, not a move."""
         return bool(self.meta.get("archived"))
+
+    @property
+    def paused(self) -> bool:
+        """Left alone by the daemon until resumed. Also a flag, so it survives any move."""
+        return bool(self.meta.get("paused"))
 
     def text(self) -> str:
         meta = {k: v for k, v in self.meta.items() if v is not None}
@@ -212,6 +244,11 @@ def move(task: Task, to: str, actor: str = "human", **updates) -> Task:
         raise TransitionError(f"no such transition: {task.stage} -> {to}")
     if actor not in allowed:
         raise TransitionError(f"{actor!r} may not move {task.stage} -> {to} (allowed: {sorted(allowed)})")
+    if to == "draft":
+        if task.status in RUNNING:
+            raise TransitionError(f"{task.id} is {task.status} right now; pause it first")
+        # A draft is a fresh start: whatever it went through before is not held against it again.
+        updates = {"attempts": None, "error": None, "paused": None, **updates}
     destination = stage_dir(to) / task.path.name
     if destination.exists():
         raise FileExistsError(destination)

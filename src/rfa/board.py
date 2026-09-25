@@ -76,6 +76,10 @@ def snapshot() -> dict:
                 "title": task.title,
                 "attempts": task.attempts,
                 "archived": task.archived,
+                "paused": task.paused,
+                "given_title": task.meta.get("title"),
+                "checks": task.meta.get("checks") or [],
+                "planned": bool(task.meta.get("planned_at")),
                 "repos": task.meta.get("repos") or [],
                 "complexity": task.meta.get("complexity"),
                 "branches": task.meta.get("branches") or [],
@@ -191,11 +195,12 @@ def analytics(window: str = "all") -> dict:
     finished: a run that finished in the window is in every metric, one that finished outside it is
     in none, and one that is still going has no finish and is not counted. Runtime is that span,
     not the card's whole life; the lines are whatever the run's patches add. Read-only over the
-    records and recomputed on every call, so the board stays stateless.
+    records and recomputed on every call, so the board stays stateless. A run you paused ends there
+    too, but it is neither a success nor a failure, so it is left out of every count.
     """
     by_id: dict[str, list[dict]] = {}
     for event in tasks.events():
-        if event.get("type") in ("run_started", "run_finished", "run_error"):
+        if event.get("type") in ("run_started", "run_finished", "run_error", "run_paused"):
             by_id.setdefault(str(event.get("id") or ""), []).append(event)
 
     match = re.fullmatch(r"([1-9]\d*)d", window) if isinstance(window, str) and window != "all" else None
@@ -204,10 +209,11 @@ def analytics(window: str = "all") -> dict:
     total = {"runs": 0, "runtime": 0.0, "loc": 0, "shipped": 0, "failed": 0}
     for id, events in by_id.items():
         starts = [e for e in events if e.get("type") == "run_started"]
-        ends = [e for e in events if e.get("type") in ("run_finished", "run_error")]
+        ends = [e for e in events if e.get("type") in ("run_finished", "run_error", "run_paused")]
         for start, end in zip(starts, ends):
             started, finished = _when(start.get("ts")), _when(end.get("ts"))
-            if started is None or finished is None or (cutoff is not None and finished < cutoff):
+            outside = cutoff is not None and finished is not None and finished < cutoff
+            if started is None or finished is None or outside or end.get("type") == "run_paused":
                 continue
             total["runs"] += 1
             total["runtime"] += (finished - started).total_seconds()
@@ -217,6 +223,32 @@ def analytics(window: str = "all") -> dict:
             else:
                 total["failed"] += 1
     return total
+
+
+EDITABLE = ("title", "repos", "branches", "context_branches", "model", "reasoning", "checks")
+
+
+def edit(payload: dict) -> tasks.Task:
+    """Rewrite a card's body, and whichever of its EDITABLE fields the payload carries.
+
+    An empty field is removed rather than written empty, so a card goes back to whatever the
+    workspace or the body says -- a blank title is the idea's first line again.
+    """
+    task = tasks.find(payload["id"])
+    fields = {key: payload[key] or None for key in EDITABLE if key in payload}
+    if "context_branches" in fields:
+        fields["context_branches"] = (fields["context_branches"] or [])[: settings.MAX_CONTEXT] or None
+    if "model" in fields or "reasoning" in fields:
+        settings.validate(settings.load(), fields.get("model") or "", fields.get("reasoning") or "")
+    task.body = str(payload.get("body", task.body))
+    return tasks.save(task, **fields)
+
+
+def pause(id: str, paused: bool) -> tasks.Task:
+    """Hold a card, or let it go again. A run already on it stops before its next model call."""
+    task = tasks.save(tasks.find(id), paused=paused or None)
+    tasks.log(type="paused" if paused else "resumed", id=task.id)
+    return task
 
 
 def allowed(headers, token: str, origin: str) -> bool:
@@ -281,7 +313,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed():
             self._json(403, {"error": "open the board from the link `rfa up` printed"})
             return
-        if self.path not in ("/api/move", "/api/new", "/api/pr", "/api/edit", "/api/archive"):
+        if self.path not in ("/api/move", "/api/new", "/api/pr", "/api/edit", "/api/archive", "/api/pause"):
             self._json(404, {"error": "not found"})
             return
         payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
@@ -321,11 +353,13 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json(400, {"error": result["message"]})
             return
-        if self.path == "/api/edit":
-            task = tasks.find(payload["id"])
-            task.body = str(payload.get("body", ""))
-            tasks.save(task)
-            self._json(200, {"id": task.id, "stage": task.stage, "status": task.status})
+        if self.path in ("/api/edit", "/api/pause"):
+            try:
+                task = edit(payload) if self.path == "/api/edit" else pause(payload["id"], bool(payload.get("paused")))
+            except (FileNotFoundError, KeyError, ValueError) as e:
+                self._json(400, {"error": str(e).strip("'")})
+                return
+            self._json(200, {"id": task.id, "stage": task.stage, "status": task.status, "paused": task.paused})
             return
         if self.path == "/api/archive":
             try:

@@ -151,6 +151,22 @@ containers:
       - su postgres -c "psql -qc \"CREATE USER test WITH PASSWORD 'test' SUPERUSER\"" && su postgres -c "psql -qc 'CREATE DATABASE test OWNER test'"
       # What lummeco-base/Dockerfile does for the dev image: the locked dependency set, dev group included.
       - cd lummeco-base && pip install --quiet poetry poetry-plugin-export && poetry export --without-hashes --with dev -o /tmp/requirements.txt && pip install --quiet -r /tmp/requirements.txt && pip install --quiet --force-reinstall --no-deps jwt==1.3.1
+    # `make test` without the docker compose around it or the coverage: the whole suite, from the
+    # package root so `import src.*` and tests/conftest.py's defaults for the Postgres above apply.
+    test: cd lummeco-base && python -m pytest tests/ -q --junitxml=$RFA_JUNIT
+  lummeco/rfa-coding-agent:
+    # Python, not the stage's node image: the package wants >=3.10 and pip. git ships in this image,
+    # and the tests make their own repositories with it.
+    image: python:3.11-bookworm
+    env:
+      # litellm fetches its price map from GitHub on import unless told to use the bundled one.
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+      MSWEA_CONFIGURED: "true"
+    setup:
+      - pip install --quiet -e '.[dev]'
+    # rfa's own suite. The rest of `tests/` is mini-swe-agent's, and CI runs it with podman,
+    # apptainer and API keys a coder container does not have.
+    test: python -m pytest tests/rfa -q -p no:cacheprovider --junitxml=$RFA_JUNIT
 
 # The daemon `rfa up` leaves running: it plans cards waiting in `planning` and codes cards you
 # approved into `todo`, one at a time, and only while this Mac can take it. It never moves a packet

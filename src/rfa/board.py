@@ -328,7 +328,7 @@ def fix(id: str) -> tasks.Task:
         raise ValueError("there are no comments to fix; add one on the latest round's diff first")
     task.body = rounds.packet_only(task.body)
     tasks.log(type="fix_requested", id=task.id)
-    return tasks.move(task, "todo", actor="human", status="todo", attempts=None, error=None)
+    return tasks.move(task, "todo", actor="human", status="todo")
 
 
 def pause(id: str, paused: bool) -> tasks.Task:
@@ -336,6 +336,14 @@ def pause(id: str, paused: bool) -> tasks.Task:
     task = tasks.save(tasks.find(id), paused=paused or None)
     tasks.log(type="paused" if paused else "resumed", id=task.id)
     return task
+
+
+def retry(id: str) -> tasks.Task:
+    """Give a to-do card its attempts back, so the daemon picks it up again after it gave up."""
+    if (task := tasks.find(id)).stage != "todo":
+        raise ValueError(f"{id} is in {task.stage}; only a to-do card is retried")
+    tasks.log(type="retried", id=task.id)
+    return tasks.save(task, status="todo", attempts=None, error=None, paused=None)
 
 
 def judge(id: str, verdict: str | None) -> tasks.Task:
@@ -423,6 +431,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/edit",
             "/api/archive",
             "/api/pause",
+            "/api/retry",
             "/api/verdict",
             "/api/comment",
             "/api/fix",
@@ -479,12 +488,14 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json(400, {"error": result["message"]})
             return
-        if self.path in ("/api/edit", "/api/pause", "/api/verdict"):
+        if self.path in ("/api/edit", "/api/pause", "/api/retry", "/api/verdict"):
             try:
                 if self.path == "/api/edit":
                     task = edit(payload)
                 elif self.path == "/api/pause":
                     task = pause(payload["id"], bool(payload.get("paused")))
+                elif self.path == "/api/retry":
+                    task = retry(payload["id"])
                 else:
                     task = judge(payload["id"], payload.get("verdict") or None)
             except (FileNotFoundError, KeyError, ValueError) as e:

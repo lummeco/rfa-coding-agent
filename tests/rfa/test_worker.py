@@ -7,6 +7,7 @@ import pytest
 from minisweagent.environments.local import LocalEnvironment
 from minisweagent.exceptions import FormatError
 from minisweagent.models.test_models import DeterministicModel, make_output
+from rfa import lint
 from rfa.planner import git
 from rfa.worker import (
     UNJUDGEABLE,
@@ -18,6 +19,7 @@ from rfa.worker import (
     kept,
     land,
     landable,
+    new_problems,
     outside,
     record_tests,
     report,
@@ -212,6 +214,7 @@ def test_the_shipped_coder_config_renders_with_the_variables_the_worker_passes(t
         LocalEnvironment(cwd=str(tmp_path)),
         checks=["echo checks-ran"],
         cwd=str(tmp_path),
+        lint="echo []",
         **config,
     )
     agent.run(
@@ -222,6 +225,7 @@ def test_the_shipped_coder_config_renders_with_the_variables_the_worker_passes(t
         broken_checks=["pnpm typecheck"],
         reference=[],
         test="pytest -q --junitxml=$RFA_JUNIT",
+        suggested=["make lint"],
         comments=[
             {"repo": "web", "file": "src/a.py", "side": "new", "line": 7, "context": "x = 1", "text": "use 2"},
             {"text": "the planner prompt changes too"},
@@ -233,6 +237,8 @@ def test_the_shipped_coder_config_renders_with_the_variables_the_worker_passes(t
     assert "echo checks-ran" in prompt and "/work/repos/web" in prompt
     assert "already failing" in prompt and "pnpm typecheck" in prompt
     assert "RFA_JUNIT=/tmp/rfa-junit.xml pytest -q --junitxml=$RFA_JUNIT" in prompt
+    assert "echo []\nRFA_JUNIT" in prompt and "not there before you started" in prompt
+    assert "- `make lint`" in prompt and "does not run them" in prompt
     assert "1. `web/src/a.py` line 7: use 2" in prompt and "x = 1" in prompt and '"answers"' in prompt
     assert "2. On the whole round: the planner prompt changes too" in prompt
     assert "/work/summary.json" in prompt
@@ -476,3 +482,26 @@ def test_pausing_the_card_stops_the_run_before_its_next_model_call(tmp_path, mon
         agent.run("the packet", broken_checks=[])
     assert model.current_index == -1 and not (tmp_path / "fixed").exists()
     assert agent.messages[-1]["extra"]["exit_status"] == "Paused"
+
+
+def test_the_lint_holds_the_coder_to_new_problems_only(tmp_path):
+    """An old problem the repository already had never costs a round; one the coder adds does."""
+    old = '{"filename": "a.py", "code": "E1", "message": "old"}'
+    command = f"""if [ -f bad ]; then echo '[{old}, {{"filename": "a.py", "code": "F401", "message": "new"}}]'; else echo '[{old}]'; fi; exit 1"""
+    baseline = {"returncode": 1, "problems": lint.parse(f"[{old}]")}
+    agent = run_coder(
+        [act("touch bad"), submit(), act("rm bad"), submit()], tmp_path, [], lint=command, lint_baseline=baseline
+    )
+    assert agent.round == 2 and agent.regressions() == []
+    assert any(
+        "a.py: F401 new" in str(m["content"]) and "a.py: E1 old" not in str(m["content"]) for m in agent.messages
+    )
+
+
+@pytest.mark.parametrize(
+    ("returncode", "before", "broke"),
+    [(1, 0, True), (1, 1, False), (0, 0, False)],
+)
+def test_a_lint_whose_output_is_no_report_is_judged_by_its_exit_code(returncode, before, broke):
+    linted = {"returncode": returncode, "output": "lib/main.dart: unused import", "problems": None}
+    assert bool(new_problems(linted, {"returncode": before, "problems": None})) == broke

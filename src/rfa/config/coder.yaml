@@ -73,20 +73,32 @@ agent:
     `{"summary": "one or two sentences on what you changed"{% if comments %}, "answers": {"1": "how you fixed comment 1", ...}{% endif %}}`.
     This is what the card shows for your round{% if comments %}, and every comment needs its answer{% endif %}.
 
-    {% if checks or test %}
+    {% if checks or test or lint %}
     ## How your work is checked
 
     When you submit, the host runs these in `{{primary_repo}}`:
 
     ```bash
     {% for check in checks %}{{check}}
-    {% endfor %}{% if test %}RFA_JUNIT={{junit_path}} {{test}}
+    {% endfor %}{% if lint %}{{lint}}
+    {% endif %}{% if test %}RFA_JUNIT={{junit_path}} {{test}}
     {% endif %}```
 
     A failure comes straight back to you with its output, and you get {{rounds}} rounds in all. Run
     them yourself before submitting rather than spending a round finding out.{% if test %} The last
     one is the repository's own test suite: every test in its report that passed before you started,
-    and every test you add, must pass.{% endif %}
+    and every test you add, must pass.{% endif %}{% if lint %} `{{lint}}` is the repository's own lint,
+    over all of it, and only a problem that was not there before you started counts against you --
+    the ones already there are not yours to fix.{% endif %}
+    {% if suggested %}
+
+    The packet also names these. The host does not run them and they may not work in this container,
+    but they are worth trying on what you changed:
+
+    {% for check in suggested %}
+    - `{{check}}`
+    {% endfor %}
+    {% endif %}
     {% if broken_checks %}
 
     The host ran them before you started, and these were **already failing**:

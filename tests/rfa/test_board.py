@@ -381,3 +381,19 @@ def test_a_packet_is_only_edited_on_a_planning_card(tmp_path, monkeypatch):
     tasks.move(task, "todo", actor="human")
     with pytest.raises(ValueError, match="planning card"):
         board.edit({"id": task.id, "goal": "Something else."})
+
+
+def test_a_card_the_daemon_gave_up_on_is_retried_or_sent_back_to_planned(tmp_path, monkeypatch):
+    """Out of attempts, a to-do card sits there for good unless you hand them back or re-approve it."""
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    tasks.init()
+    task = tasks.save(tasks.move(tasks.create("an idea"), "todo"), attempts=3, error="pip could not reach PyPI", paused=True)
+    retried = tasks.find(board.retry(task.id).id)
+    assert (retried.stage, retried.status, retried.attempts, retried.paused) == ("todo", "todo", 0, False)
+    assert "error" not in retried.meta
+    tasks.save(retried, attempts=3, error="again")
+    planned = tasks.find(tasks.move(tasks.find(task.id), "planning", status="ready").id)
+    assert (planned.stage, planned.status, planned.attempts) == ("planning", "ready", 0)
+    assert "error" not in planned.meta
+    with pytest.raises(ValueError, match="only a to-do card"):
+        board.retry(task.id)

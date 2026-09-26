@@ -18,7 +18,7 @@ from minisweagent.environments import get_environment
 from minisweagent.exceptions import FormatError, LimitsExceeded, Submitted
 from minisweagent.models import get_model
 from minisweagent.utils.serialize import recursive_merge
-from rfa import junit, rounds, settings, tasks
+from rfa import junit, lint, rounds, settings, tasks
 from rfa.packet import FORBIDDEN_PATHS
 from rfa.planner import REPOS_DIR, git, pin, seed
 from rfa.tasks import Task
@@ -46,8 +46,8 @@ WRAP_UP = (
 UNJUDGEABLE = (
     "None of the packet's checks run in the container, so nothing the coder did could have been "
     "judged, and the run did not start. Fix the checks on the card -- they run in a plain container at "
-    "the repository root, not through docker compose -- or the `containers:` block for the repository "
-    "in rfa.yaml, and move the card back to todo.\n\n{report}"
+    "the repository root, not through docker compose -- or give the repository a `lint:` or `test:` "
+    "in its `containers:` block in rfa.yaml, and move the card back to todo.\n\n{report}"
 )
 
 REASONS = {
@@ -101,6 +101,8 @@ class CoderAgent(tasks.Pausable, DefaultAgent):
         baseline: dict[str, bool] | None = None,
         test: str = "",
         test_baseline: dict | None = None,
+        lint: str = "",
+        lint_baseline: dict | None = None,
         root: str = REPOS_DIR,
         **kwargs,
     ):
@@ -112,6 +114,9 @@ class CoderAgent(tasks.Pausable, DefaultAgent):
         self.test = test
         self.test_baseline = test_baseline or {}
         self.tests: dict | None = None
+        self.lint = lint
+        self.lint_baseline = lint_baseline or {}
+        self.linted: dict | None = None
         self.results: list[dict] = []
         self.round = 0
         self.prompt_tokens = 0
@@ -120,7 +125,7 @@ class CoderAgent(tasks.Pausable, DefaultAgent):
         self.budget, self.config.step_limit = self.config.step_limit, 0
 
     def get_template_vars(self, **kwargs) -> dict:
-        return super().get_template_vars(step_limit=self.budget, **kwargs)
+        return super().get_template_vars(step_limit=self.budget, lint=self.lint, **kwargs)
 
     def steps(self) -> int:
         """Steps spent since the first edit, which is where the budget starts."""
@@ -138,11 +143,13 @@ class CoderAgent(tasks.Pausable, DefaultAgent):
         problem, not the run's: blaming it burns both rounds on something the packet never asked
         about, and makes every failure report untrustworthy. The same goes for each test the
         repository's `test:` command reports -- but test by test, so one test already red does not
-        excuse every other one.
+        excuse every other one. And for each problem the repository's `lint:` reports.
         """
         found = [r for r in self.results if not r["ok"] and self.baseline.get(r["command"], True)]
         if self.tests and (failed := failing_tests(self.tests, self.test_baseline)):
             found.append({"command": self.test, "ok": False, "returncode": self.tests["returncode"], "output": failed})
+        if self.linted and (added := new_problems(self.linted, self.lint_baseline)):
+            found.append({"command": self.lint, "ok": False, "returncode": self.linted["returncode"], "output": added})
         return found
 
     def exit_status(self) -> str:
@@ -259,6 +266,8 @@ class CoderAgent(tasks.Pausable, DefaultAgent):
     def run_checks(self) -> list[dict]:
         if self.test:
             self.tests = run_tests(self.env, self.test, self.cwd, self.config.junit_path, self.config.test_timeout)
+        if self.lint:
+            self.linted = run_lint(self.env, self.lint, self.cwd)
         return run_checks(self.env, self.checks, self.cwd)
 
     def summary(self) -> dict:
@@ -342,6 +351,31 @@ def failing_tests(tests: dict, baseline: dict) -> str:
     if tests["returncode"] != 0 and baseline.get("returncode", 0) == 0:
         return f"It exited {tests['returncode']} with no failing test in its report:\n\n{tests['output']}"
     return ""
+
+
+def run_lint(env: Environment, command: str, cwd: str) -> dict:
+    """The repository's own lint command, run by the host over the whole repository, problem by problem."""
+    ran = env.execute({"command": command}, cwd=cwd)
+    return {
+        "command": command,
+        "returncode": ran["returncode"],
+        "output": ran["output"][-4000:],
+        "problems": lint.parse(ran["output"]),
+    }
+
+
+def new_problems(linted: dict, baseline: dict) -> str:
+    """What the lint says this run added, in words the coder can act on. Empty when nothing.
+
+    A linter whose output is not a report is judged the way a check is: by its exit code, and only
+    when it was exiting cleanly before the coder started.
+    """
+    if linted["problems"] is None or baseline.get("problems") is None:
+        broke = linted["returncode"] != 0 and baseline.get("returncode", 0) == 0
+        return f"It exited {linted['returncode']}:\n\n{linted['output']}" if broke else ""
+    return "\n".join(
+        f"{file}: {code} {message}" for file, code, message in lint.new(linted["problems"], baseline["problems"])[:50]
+    )
 
 
 def record_tests(tests: dict | None, baseline: dict, repo: str, attempts: int) -> dict | None:
@@ -496,7 +530,11 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         # Before the base commit, so whatever the setup leaves in the checkout is not the coder's diff.
         setup(env, spec, cwd)
         make_git_repos(env, names)
-        checks = task.meta.get("checks") or []
+        suggested = task.meta.get("checks") or []
+        test, lint_command = spec.get("test") or "", spec.get("lint") or ""
+        # The repository's own lint and tests are known to run here; with either, the packet's
+        # commands are the coder's to try rather than the gate, since the planner writes them blind.
+        checks = [] if test or lint_command else suggested
         # Measure the repository before the coder touches it, so a test that was already red is not
         # counted against the run -- and tell the coder, so it does not go chasing it either.
         measured = run_checks(env, checks, cwd)
@@ -504,8 +542,8 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         tasks.log(type="baseline", id=task.id, failing=[c for c, ok in baseline.items() if not ok])
         if checks and not any(baseline.values()):
             raise Unjudgeable(UNJUDGEABLE.format(report=report(measured)))
-        # The repository's own tests, measured the same way but test by test.
-        test = spec.get("test") or ""
+        # The repository's own tests and lint, measured the same way but test by test and problem by problem.
+        linted = run_lint(env, lint_command, cwd) if lint_command else None
         if (tested := run_tests(env, test, cwd) if test else None) and tested["cases"] is None:
             raise Unjudgeable(UNTESTABLE.format(output=tested["output"]))
         test_baseline = (
@@ -521,6 +559,8 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
             baseline=baseline,
             test=test,
             test_baseline=test_baseline,
+            lint=lint_command,
+            lint_baseline=linted,
             output_path=output / "trajectory.json",
             task_id=task.id,
             # The window the variant is served with, unless the workspace said otherwise: a run
@@ -535,6 +575,7 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
             broken_checks=[c for c, ok in baseline.items() if not ok],
             reference=sorted(reference),
             test=test,
+            suggested=[c for c in suggested if c not in checks],
             comments=comments,
         )
         patches, dropped = diffs(env, names)
@@ -738,6 +779,6 @@ def failure_note(agent: CoderAgent, patches: dict[str, str], output: Path) -> st
     if patches:
         # An unlanded diff is still work somebody may want; saying where it is costs a line.
         lines.append(f"Patches and the trajectory: `{output}`\n")
-    if failures := report(agent.results):
+    if failures := report(agent.regressions()):
         lines.append(f"```\n{failures[:4000]}\n```\n")
     return "\n".join(lines)

@@ -240,4 +240,10 @@ def problems(packet: Packet, repo_files: dict[str, set[str]], tool_calls: int, m
             )
         elif rel not in repo_files[name] and rel.rpartition("/")[0] not in folders[name]:
             found.append(f"`{path}` does not exist, and neither does its folder.")
+    for command in packet.verification.commands:
+        if re.search(r"\b(docker|docker-compose|podman)\b", command):
+            found.append(
+                f"`{command}`: checks run in a plain container at the repository root, where there is no "
+                f"docker. Unwrap it: `docker compose exec app pytest tests/x` is `cd app && pytest tests/x`."
+            )
     return found

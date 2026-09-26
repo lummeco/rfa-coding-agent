@@ -648,8 +648,8 @@ function render() {
 }
 
 function actionsFor(t) {
-  const move = (to, label, cls = "") =>
-    `<button class="action ${cls}" data-to="${to}">${label}</button>`;
+  const move = (to, label, cls = "", status = "") =>
+    `<button class="action ${cls}" data-to="${to}"${status ? ` data-status="${status}"` : ""}>${label}</button>`;
   // Archive is a flag, not a move, so it rides along wherever the task is.
   const archive = `<button class="action" data-archive="${esc(t.id)}" aria-pressed="${t.archived}" title="${t.archived ? "Unarchive" : "Archive"}">${t.archived ? "Unarchive" : "Archive"}</button>`;
   // Pausing a card with a run on it stops the run before its next model call; resuming starts over.
@@ -663,7 +663,10 @@ function actionsFor(t) {
   if (t.stage === "planning" && t.status === "ready") return `<button class="action" id="edit">Edit</button>` + move("todo", "Approve", "primary") + draft + archive;
   if (t.stage === "planning" && t.status === "failed") return move("draft", "Back to draft", "") + archive;
   if (t.stage === "planning") return pause + draft + archive;
-  if (t.stage === "todo") return pause + move("planning", "Re-plan", "quiet") + draft + archive;
+  // The daemon gives up on a card after its last attempt; Retry hands the attempts back. Back to
+  // planned keeps the plan and waits for your approval again, instead of throwing it away.
+  if (t.stage === "todo") return (t.attempts ? `<button class="action primary" id="retry">Retry</button>` : "") + pause
+    + move("planning", "Re-plan", "quiet") + (t.planned ? move("planning", "Back to planned", "quiet", "ready") : draft) + archive;
   // The reviewer takes both of these edges on its own; these are for overruling it, or for a card
   // whose review could not run at all.
   if (t.stage === "review") return (t.status === "failed" ? "" : pause) + move("done", "Pass it", "primary") + move("todo", "Send back", "quiet") + move("planning", "Re-plan", "quiet") + archive;
@@ -1372,17 +1375,27 @@ async function refresh() {
   strip();
 }
 
-async function move(id, to) {
+async function move(id, to, status) {
   const res = await api("/api/move", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id, to }),
+    body: JSON.stringify({ id, to, meta: status ? { status } : {} }),
   });
   if (!res.ok) { alert((await res.json()).error); return; }
   closeDetail();
   await refresh();
   // Sent back to be fixed: stay on it, with Edit one click away.
   if (to === "draft") showDetail(id);
+}
+
+async function retry(id) {
+  const res = await api("/api/retry", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+  if (!res.ok) { alert((await res.json()).error); return; }
+  await refresh();
 }
 
 async function setPaused(id, paused) {
@@ -1433,6 +1446,7 @@ document.getElementById("d-actions").addEventListener("click", e => {
     return e.target.closest(".menu").classList.toggle("open", menuOpen);
   }
   if (e.target.closest("#fix") && openId) return fixComments(openId);
+  if (e.target.closest("#retry") && openId) return retry(openId);
   if (e.target.closest("#save")) return saveIdea();
   if (e.target.closest("#cancel-draft")) { const id = drafting; drafting = null; return showDetail(id); }
   if (e.target.closest("#edit-draft")) return showCapture(state.tasks.find(x => x.id === openId));
@@ -1448,7 +1462,7 @@ document.getElementById("d-actions").addEventListener("click", e => {
   if (e.target.closest("#save-edit")) return saveEdit();
   if (e.target.closest("#cancel-edit")) { editing = false; return showDetail(openId); }
   const el = e.target.closest("button[data-to]");
-  if (el && openId) move(openId, el.dataset.to);
+  if (el && openId) move(openId, el.dataset.to, el.dataset.status);
 });
 document.getElementById("capture").addEventListener("click", showCapture);
 document.getElementById("analytics").addEventListener("click", showAnalytics);

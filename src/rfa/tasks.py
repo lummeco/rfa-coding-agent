@@ -248,8 +248,10 @@ def move(task: Task, to: str, actor: str = "human", **updates) -> Task:
     if to == "draft":
         if task.status in RUNNING:
             raise TransitionError(f"{task.id} is {task.status} right now; pause it first")
-        # A draft is a fresh start: whatever it went through before is not held against it again.
-        updates = {"attempts": None, "error": None, "paused": None, **updates}
+        updates = {"paused": None, **updates}
+    if actor == "human":
+        # Your call is a fresh start: the retries it spent before are not held against it again.
+        updates = {"attempts": None, "error": None, **updates}
     if task.stage == "done":
         # Sent back for more work: whatever you said about the old result is not about the next one.
         updates = {"verdict": None, **updates}

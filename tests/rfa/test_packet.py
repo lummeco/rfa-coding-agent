@@ -113,3 +113,17 @@ def test_problems_grounds_every_path_against_the_repository(path, complaint):
 
 def test_problems_rejects_a_packet_written_without_reading_the_code():
     assert "at least 3 tool calls" in problems(packet(), REPO_FILES, tool_calls=0, min_tool_calls=3)[0]
+
+
+@pytest.mark.parametrize(
+    ("command", "rejected"),
+    [
+        ("docker compose -f docker-compose.dev.yml exec app pytest tests/x", True),
+        ("docker-compose exec app ruff check src", True),
+        ("cd app && pytest tests/x", False),
+        ("pytest tests/test_dockerfile.py", False),
+    ],
+)
+def test_problems_rejects_checks_that_need_docker(command, rejected):
+    found = problems(packet(verification=Verification(commands=[command])), REPO_FILES, tool_calls=5, min_tool_calls=3)
+    assert bool(found) == rejected and all("cd app && pytest tests/x" in f for f in found)

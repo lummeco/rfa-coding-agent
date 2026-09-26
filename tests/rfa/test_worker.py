@@ -208,7 +208,10 @@ def test_the_shipped_coder_config_renders_with_the_variables_the_worker_passes(t
         broken_checks=["pnpm typecheck"],
         reference=[],
         test="pytest -q --junitxml=$RFA_JUNIT",
-        comments=[{"repo": "web", "file": "src/a.py", "side": "new", "line": 7, "context": "x = 1", "text": "use 2"}],
+        comments=[
+            {"repo": "web", "file": "src/a.py", "side": "new", "line": 7, "context": "x = 1", "text": "use 2"},
+            {"text": "the planner prompt changes too"},
+        ],
     )
     prompt = agent.messages[1]["content"]
     assert "execution packet" in agent.messages[0]["content"]
@@ -217,6 +220,7 @@ def test_the_shipped_coder_config_renders_with_the_variables_the_worker_passes(t
     assert "already failing" in prompt and "pnpm typecheck" in prompt
     assert "RFA_JUNIT=/tmp/rfa-junit.xml pytest -q --junitxml=$RFA_JUNIT" in prompt
     assert "1. `web/src/a.py` line 7: use 2" in prompt and "x = 1" in prompt and '"answers"' in prompt
+    assert "2. On the whole round: the planner prompt changes too" in prompt
     assert "/work/summary.json" in prompt
     assert agent.round == 1 and all(r["ok"] for r in agent.results)
 
@@ -384,6 +388,7 @@ def test_a_fix_round_lands_as_one_more_commit_on_the_same_branch(tmp_path):
         ([{"repo": "web", "file": "a.py"}], {"web": ["b.py"]}),
         ([{"repo": "web", "file": "a.py"}, {"repo": "web", "file": "b.py"}], {}),
         ([{"text": "the reviewer's problem, on no line"}], {}),
+        ([{"repo": "web", "file": "a.py"}, {"text": "and the planner prompt"}], {}),
     ],
 )
 def test_a_fix_round_says_which_files_it_changed_that_no_comment_was_on(comments, expected):

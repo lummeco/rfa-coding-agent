@@ -70,7 +70,11 @@ def record(id: str, entry: dict, answered: list[str], earlier: list[dict] | None
 
 
 def comment(id: str, payload: dict) -> dict:
-    """Add a comment on the latest round's diff, or delete one by its `delete` id."""
+    """Add a comment on the latest round's diff, or delete one by its `delete` id.
+
+    A comment with no `file` is on the round as a whole: what it asks may reach files the diff
+    never touched, so it carries no place and no quoted line.
+    """
     with tasks._lock():
         state = load(id)
         if cid := payload.get("delete"):
@@ -78,17 +82,14 @@ def comment(id: str, payload: dict) -> dict:
             return save(id, state)
         if not (text := str(payload.get("text") or "").strip()):
             raise ValueError("a comment needs some words")
-        state["pending"].append(
-            {
-                "id": secrets.token_hex(4),
-                "repo": str(payload["repo"]),
-                "file": str(payload["file"]),
-                "side": "old" if payload.get("side") == "old" else "new",
-                "line": int(payload["line"]),
-                "context": str(payload.get("context") or "")[:2000],
-                "text": text[:4000],
-            }
-        )
+        where = payload.get("file") and {
+            "repo": str(payload["repo"]),
+            "file": str(payload["file"]),
+            "side": "old" if payload.get("side") == "old" else "new",
+            "line": int(payload["line"]),
+            "context": str(payload.get("context") or "")[:2000],
+        }
+        state["pending"].append({"id": secrets.token_hex(4), **(where or {}), "text": text[:4000]})
         return save(id, state)
 
 

@@ -54,8 +54,13 @@ agent:
     base commit, so `git diff` shows only what you change now. A reviewer read that work and left
     these comments. Fix exactly these, and change nothing the comments do not ask for.
 
-    {% for c in comments %}{{loop.index}}. {% if c.file %}`{{c.repo}}/{{c.file}}` line {{c.line}}{% if c.side == "old" %} (a removed line){% endif %}: {% endif %}{{c.text}}
-    {% if c.context %}   ```
+    A comment may ask for a change in a file the previous round never touched -- a line comment
+    that points past its line, or one on the whole round. Go where it points. If a comment can be
+    read more than one way, take the reading most likely meant, make that change, and say which
+    reading you took in its answer: a guess the reviewer can correct beats a round with no work.
+
+    {% for c in comments %}{{loop.index}}. {% if c.get("file") %}`{{c.repo}}/{{c.file}}` line {{c.line}}{% if c.side == "old" %} (a removed line){% endif %}{% else %}On the whole round{% endif %}: {{c.text}}
+    {% if c.get("context") %}   ```
        {{c.context}}
        ```
     {% endif %}

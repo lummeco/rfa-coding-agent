@@ -658,9 +658,10 @@ def changed_files(patches: dict[str, str]) -> str:
 
 def outside(comments: list[dict], patches: dict[str, str]) -> dict[str, list[str]]:
     """Files a fix round changed that no comment was on. Said on the round rather than dropped: the
-    host's tests ran on the whole diff, and landing less of it would land code nothing tested."""
+    host's tests ran on the whole diff, and landing less of it would land code nothing tested.
+    A comment on the whole round may ask for any file, so with one there is nothing outside."""
     commented = {(c.get("repo"), c.get("file")) for c in comments}
-    if not any(file for _, file in commented):
+    if not all(file for _, file in commented):
         return {}
     found = {name: [f for f in rounds.files(patch) if (name, f) not in commented] for name, patch in patches.items()}
     return {name: paths for name, paths in found.items() if paths}

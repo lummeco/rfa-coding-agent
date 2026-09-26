@@ -135,6 +135,11 @@ def test_a_comment_needs_words_and_can_be_taken_back(done_card):
     assert [c["line"] for c in rounds.comment(done_card.id, {"delete": first["id"]})["pending"]] == [9]
 
 
+def test_a_comment_on_the_whole_round_has_no_place(done_card):
+    whole = rounds.comment(done_card.id, {"text": "the planner prompt changes too", "line": "", "file": ""})["pending"][0]
+    assert whole.keys() == {"id", "text"} and whole["text"] == "the planner prompt changes too"
+
+
 def test_only_a_round_that_landed_clears_the_comments_it_answered(done_card):
     """A fix that failed leaves the comments there to try again."""
     ids = [c["id"] for c in comment(done_card.id)["pending"]]

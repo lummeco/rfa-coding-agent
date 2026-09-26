@@ -421,12 +421,13 @@ tr.rfa-comment td {
   background: color-mix(in srgb, var(--accent) 9%, var(--surface)) !important; padding: 8px 14px !important;
   font: 13px/1.45 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; white-space: normal; color: var(--text);
 }
-tr.rfa-comment textarea {
+.rfa-comment textarea {
   width: 100%; min-height: 64px; resize: vertical; font: inherit; color: var(--text);
   background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px;
 }
-tr.rfa-comment .row { display: flex; gap: 8px; align-items: center; }
-tr.rfa-comment .row span { flex: 1; color: var(--text-3); font-size: 12px; }
+div.rfa-comment { background: color-mix(in srgb, var(--accent) 9%, var(--surface)); border-radius: 10px; padding: 10px 14px; margin-bottom: 16px; }
+.rfa-comment .row { display: flex; gap: 8px; align-items: center; }
+.rfa-comment .row span { flex: 1; color: var(--text-3); font-size: 12px; }
 .menu { position: relative; }
 .menu .list {
   position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 5; min-width: 230px;
@@ -650,7 +651,7 @@ function actionsFor(t) {
     const landed = Object.keys(t.landed || {}).length;
     return judge + `<div class="menu${menuOpen ? " open" : ""}"><button class="action" id="next">Next actions ▾</button><div class="list">`
       + `<button id="fix"${waiting ? "" : " disabled"}>Fix comments${waiting ? ` (${waiting})` : ""}`
-      + `<small>${waiting ? "Back to To do; the coder fixes only these" : "Click a line in the latest diff to comment"}</small></button>`
+      + `<small>${waiting ? "Back to To do; the coder fixes only these" : "Comment on a line in the latest diff, or on the whole round"}</small></button>`
       + (landed ? "" : `<button data-to="todo">Run again<small>From the start branch</small></button>`)
       + `<button data-to="draft">Move to draft</button></div></div><span class="spacer"></span>` + archive;
   }
@@ -964,7 +965,7 @@ function testsLine(r) {
 
 function commentList(list, removable) {
   return `<ul class="cmts">${list.map(c => `<li>`
-    + (c.file ? `<div class="where">${esc(c.repo)}/${esc(c.file)}:${esc(c.line)}${c.side === "old" ? " (removed line)" : ""}</div>` : "")
+    + `<div class="where">${c.file ? `${esc(c.repo)}/${esc(c.file)}:${esc(c.line)}${c.side === "old" ? " (removed line)" : ""}` : "Whole round"}</div>`
     + `<div>${esc(c.text)}${removable ? ` <button data-uncomment="${esc(c.id)}" title="Delete comment">✕</button>` : ""}</div>`
     + (c.answer !== undefined ? `<div class="answer">${esc(c.answer || "The coder gave no answer for this one.")}</div>` : "")
     + `</li>`).join("")}</ul>`;
@@ -980,11 +981,14 @@ function roundsView(t) {
     + `</p>`;
   if ((t.pending || []).length)
     html += `<div class="pending"><div class="sec">Comments for the next fix · ${t.pending.length}</div>${commentList(t.pending, true)}</div>`;
+  const commentable = t.stage === "done" ? latestLanded(t) : -1;
+  // For what no one line says: a change of direction, or something the diff never touched.
+  if (commentable >= 0)
+    html += `<p><button class="action small" id="comment-round">Comment on the whole round</button></p>`;
 
   let k = 0;
   const labels = new Map(rs.map(r => [r.n, r.kind === "original" ? "Original coding round"
     : (r.comments || []).length ? `Review round ${++k}` : `Re-run ${++k}`]));
-  const commentable = t.stage === "done" ? latestLanded(t) : -1;
   for (const r of [...rs].reverse()) {
     const key = `${t.id}/${r.n}`;
     html += `<section class="round"><div class="sec">${esc(labels.get(r.n))}`
@@ -1086,14 +1090,28 @@ function decorate(root, t, repo, commentable) {
   }
 }
 
+function commentForm(where, placeholder) {
+  return `<textarea id="comment-text" placeholder="${placeholder}"></textarea>`
+    + `<div class="row"><span>${esc(where)} · ⌘↵ to save</span>`
+    + `<button class="action small quiet" id="comment-cancel">Cancel</button>`
+    + `<button class="action small primary" id="comment-save">Comment</button></div>`;
+}
+
 function openCommentForm(tr) {
-  document.querySelector("tr.rfa-comment.form")?.remove();
+  closeCommentForm();
   commentAt = { ...tr.dataset, context: tr.querySelector(".d2h-code-line-ctn")?.textContent || "" };
   tr.insertAdjacentHTML("afterend", `<tr class="rfa-comment form"><td colspan="2">`
-    + `<textarea id="comment-text" placeholder="What should change here?"></textarea>`
-    + `<div class="row"><span>${esc(commentAt.file)}:${esc(commentAt.line)} · ⌘↵ to save</span>`
-    + `<button class="action small quiet" id="comment-cancel">Cancel</button>`
-    + `<button class="action small primary" id="comment-save">Comment</button></div></td></tr>`);
+    + commentForm(`${commentAt.file}:${commentAt.line}`, "What should change here?") + `</td></tr>`);
+  document.getElementById("comment-text").focus();
+}
+
+/** A comment on no line: it reaches the coder as one on the round as a whole. */
+function openRoundCommentForm(button) {
+  closeCommentForm();
+  commentAt = {};
+  button.parentElement.hidden = true;
+  button.parentElement.insertAdjacentHTML("afterend", `<div class="rfa-comment form">`
+    + commentForm("On the whole round", "What should change, anywhere in the work?") + `</div>`);
   document.getElementById("comment-text").focus();
 }
 
@@ -1103,7 +1121,7 @@ async function saveComment() {
   const res = await api("/api/comment", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id: openId, ...commentAt, line: Number(commentAt.line), text }),
+    body: JSON.stringify({ id: openId, ...commentAt, ...(commentAt.file && { line: Number(commentAt.line) }), text }),
   });
   if (!res.ok) { alert((await res.json()).error); return; }
   closeCommentForm();
@@ -1113,7 +1131,9 @@ async function saveComment() {
 function closeCommentForm() {
   commentAt = null;
   lastBody = "";
-  document.querySelector("tr.rfa-comment.form")?.remove();
+  document.querySelector(".rfa-comment.form")?.remove();
+  const whole = document.getElementById("comment-round");
+  if (whole) whole.parentElement.hidden = false;
 }
 
 async function deleteComment(cid) {
@@ -1371,6 +1391,8 @@ document.getElementById("d-body").addEventListener("click", e => {
   if (gone) return deleteComment(gone.dataset.uncomment);
   if (e.target.closest("#comment-save")) return saveComment();
   if (e.target.closest("#comment-cancel")) return closeCommentForm();
+  const whole = e.target.closest("#comment-round");
+  if (whole) return openRoundCommentForm(whole);
   // A click on a line, not a drag to select some of it: selecting code to copy is not a comment.
   const line = e.target.closest("tr.commentable");
   if (line && !String(getSelection()).trim()) return openCommentForm(line);

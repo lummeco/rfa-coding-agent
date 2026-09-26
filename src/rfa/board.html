@@ -419,6 +419,20 @@ button.action:disabled { opacity: .45; cursor: not-allowed; }
 .links details { flex-basis: 100%; }
 .links summary { cursor: pointer; color: var(--text-3); font-size: 12px; }
 .overall { font-size: 15px; margin: 0 0 18px; }
+/* A done card's tabs: stuck to the top of the panel so switching never means scrolling back up. */
+.tabs {
+  position: sticky; top: -20px; z-index: 3; background: var(--surface);
+  display: flex; gap: 2px; overflow-x: auto; margin: -20px -26px 18px; padding: 10px 20px 0;
+  border-bottom: 1px solid var(--line);
+}
+.tabs button {
+  font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer;
+  background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  padding: 6px 10px 9px; color: var(--text-2);
+}
+.tabs button:hover { color: var(--text); }
+.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 550; }
+.tabs .n { color: var(--text-3); font-variant-numeric: tabular-nums; margin-left: 4px; font-weight: 400; }
 .sec {
   font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
   color: var(--text-3); margin: 0 0 8px; display: flex; gap: 8px; align-items: baseline;
@@ -996,12 +1010,13 @@ async function loadShots(t) {
   if (arrived && detailId === t.id) showDetail(t.id);
 }
 
-function gallery(t) {
+function shotsGrid(t) {
   const have = (t.shots || []).map(n => [n, shotUrls.get(`${t.id}/${t.attempts}/${n}`)]).filter(([, u]) => u);
   if (!have.length) return "";
-  return `<h2>What the reviewer saw</h2><div class="shots">` + have.map(([n, u]) =>
+  return `<div class="shots">` + have.map(([n, u]) =>
     `<a href="${u}" target="_blank" rel="noreferrer"><img src="${u}" alt="${esc(n)}" title="${esc(n)}"></a>`).join("") + `</div>`;
 }
+const gallery = t => shotsGrid(t) && `<h2>What the reviewer saw</h2>` + shotsGrid(t);
 
 // --- the run log -----------------------------------------------------------------------------
 
@@ -1059,6 +1074,7 @@ let commentAt = null;       // the line a comment is being written on; the panel
 let lastBody = "";          // what the panel was last drawn from, so a refresh that changes nothing leaves it be
 let boardHtml = "";         // the same, for the columns
 let lastSnapshot = "";      // the snapshot as it came, so a push that changes nothing redraws nothing
+let tab = "runs";           // which of a done card's tabs is showing
 
 function loadD2h() {
   return d2h ||= new Promise((resolve, reject) => {
@@ -1169,18 +1185,38 @@ async function drawDiffs(t) {
       }
     } catch (e) { box.innerHTML = `<div class="note bad">${esc(e.message)}</div>`; continue; }
     if (document.getElementById(`diff-${r.n}`) !== box) return;   // the panel was redrawn meanwhile
-    box.innerHTML = "";
-    const found = diffs.get(key);
-    if (!found.repos.length) box.innerHTML = `<div class="hint">This round changed nothing.</div>`;
-    for (const repo of found.repos) {
-      const el = document.createElement("div");
-      if (found.repos.length > 1) box.insertAdjacentHTML("beforeend", `<div class="repo-name">${esc(repo.repo)}</div>`);
-      box.append(el);
-      const ui = new Diff2HtmlUI(el, repo.patch, { drawFileList: repo.patch.split("\ndiff --git").length > 3, outputFormat: "line-by-line", matching: "lines", colorScheme: "auto", fileContentToggle: false });
-      ui.draw();
-      ui.highlightCode();
-      decorate(el, t, repo, r.n === (t.stage === "done" ? latestLanded(t) : -1));
+    paint(box, diffs.get(key), t, r.n === (t.stage === "done" ? latestLanded(t) : -1), "This round changed nothing.");
+  }
+}
+
+/** Everything the card changed, start to latest round: what a pull request would show. Read only. */
+async function drawFullDiff(t) {
+  const box = document.getElementById("diff-full"), key = `${t.id}/full/${latestLanded(t)}`;
+  if (!box) return;
+  box.innerHTML = `<div class="hint">reading the diff…</div>`;
+  try {
+    await loadD2h();
+    if (!diffs.has(key)) {
+      const res = await api(`/api/fulldiff?id=${encodeURIComponent(t.id)}`);
+      if (!res.ok) throw new Error((await res.json()).error);
+      diffs.set(key, await res.json());
     }
+  } catch (e) { box.innerHTML = `<div class="note bad">${esc(e.message)}</div>`; return; }
+  if (document.getElementById("diff-full") !== box) return;
+  paint(box, diffs.get(key), t, false, "Nothing landed, so there is nothing to compare.");
+}
+
+function paint(box, found, t, commentable, empty) {
+  box.innerHTML = found.repos.length ? "" : `<div class="hint">${empty}</div>`;
+  for (const repo of found.repos) {
+    const el = document.createElement("div");
+    if (found.repos.length > 1) box.insertAdjacentHTML("beforeend", `<div class="repo-name">${esc(repo.repo)}</div>`);
+    if (repo.error) box.insertAdjacentHTML("beforeend", `<div class="note bad">${esc(repo.error)}</div>`);
+    box.append(el);
+    const ui = new Diff2HtmlUI(el, repo.patch, { drawFileList: repo.patch.split("\ndiff --git").length > 3, outputFormat: "line-by-line", matching: "lines", colorScheme: "auto", fileContentToggle: false });
+    ui.draw();
+    ui.highlightCode();
+    decorate(el, t, repo, commentable);
   }
 }
 
@@ -1348,7 +1384,9 @@ function showDetail(id) {
   panel.classList.toggle("editing", editing);
   // A done card with rounds is read round by round; the rest is still the packet and its notes.
   const rounded = t.stage === "done" && (t.rounds || []).length && !editing;
-  document.getElementById("detail").classList.toggle("wide", Boolean(rounded && [...openDiffs].some(k => k.startsWith(`${id}/`))));
+  if (tab === "shots" && !(t.shots || []).length) tab = "runs";
+  const diffing = tab === "full" || (tab === "runs" && [...openDiffs].some(k => k.startsWith(`${id}/`)));
+  document.getElementById("detail").classList.toggle("wide", Boolean(rounded && diffing));
   let html;
   if (editing) {
     // A planned card is edited section by section; the rest of the packet is preserved on save.
@@ -1356,20 +1394,34 @@ function showDetail(id) {
   } else if (rounded) {
     const top = (t.error ? `<div class="note bad">${esc(t.error)}</div>` : "")
       + (prNote?.id === id ? `<div class="note${prNote.bad ? " bad" : ""}">${esc(prNote.text)}</div>` : "");
-    html = top + linksRow(t) + roundsView(t)
-      + `<details class="more"><summary>Screenshots, history and the run log</summary><div class="md">${gallery(t)}${history}</div>${watch}</details>`;
+    const tabs = [
+      ["runs", "Runs", t.rounds.length],
+      ["full", "Full diff"],
+      ...((t.shots || []).length ? [["shots", "Screenshots", t.shots.length]] : []),
+      ["history", "History", mine.length],
+      ["log", "Run log"],
+    ];
+    const content = {
+      runs: () => linksRow(t) + roundsView(t),
+      full: () => `<p class="tests">From where the first round started to the latest round, all rounds together.</p><div class="diffbox" id="diff-full"></div>`,
+      shots: () => shotsGrid(t) || `<div class="hint">loading the screenshots…</div>`,
+      history: () => history.replace("<h2>History</h2>", "") || `<div class="hint">Nothing recorded yet.</div>`,
+      log: () => `<div class="run" id="run"></div>`,
+    }[tab];
+    html = `<div class="tabs" role="tablist">${tabs.map(([key, label, n]) =>
+        `<button role="tab" data-tab="${key}" aria-selected="${tab === key}">${label}${n ? `<span class="n">${n}</span>` : ""}</button>`).join("")}</div>`
+      + top + content();
   } else {
     html = head + `<div class="md">${md(body)}${gallery(t)}${history}</div>` + watch;
   }
   // Redrawing the same thing would close every open diff and the `details` you opened; only a change redraws.
   // Compared by what it is drawn from, not by the html: "3m ago" becoming "4m ago" is no change.
-  const drawnFrom = JSON.stringify([t, mine, prNote?.id === id && prNote, watching === id]);
-  const more = panel.querySelector("details.more")?.open;
+  const drawnFrom = JSON.stringify([t, mine, prNote?.id === id && prNote, watching === id, tab, shotsGrid(t)]);
   if (detailId !== id || editing || drawnFrom !== lastBody) {
     panel.innerHTML = html;
     lastBody = drawnFrom;
-    if (more) panel.querySelector("details.more")?.setAttribute("open", "");
-    if (rounded) drawDiffs(t);
+    if (rounded && tab === "runs") drawDiffs(t);
+    if (rounded && tab === "full") drawFullDiff(t);
   }
   panel.scrollTop = saved;
   detailId = id;
@@ -1407,6 +1459,7 @@ function closeDetail() {
   menuOpen = false;
   lastBody = "";
   openDiffs.clear();
+  tab = "runs";
   document.getElementById("detail").classList.remove("wide");
   document.getElementById("detail").classList.remove("open");
   document.getElementById("detail").setAttribute("aria-hidden", "true");
@@ -1591,6 +1644,14 @@ document.getElementById("d-body").addEventListener("click", e => {
   // A click on a line, not a drag to select some of it: selecting code to copy is not a comment.
   const line = e.target.closest("tr.commentable");
   if (line && !String(getSelection()).trim()) return openCommentForm(line);
+  const pick = e.target.closest("button[data-tab]");
+  if (pick) {
+    tab = pick.dataset.tab;
+    // The log tab is the run log opened: it polls while the run is live, like Watch does.
+    watching = tab === "log" ? openId : null;
+    document.getElementById("d-body").scrollTop = 0;
+    return showDetail(openId);
+  }
   if (e.target.closest("#watch")) {
     watching = watching === openId ? null : openId;
     return showDetail(openId);

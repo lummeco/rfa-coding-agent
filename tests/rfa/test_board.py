@@ -14,7 +14,7 @@ from email.message import Message
 
 import pytest
 
-from rfa import board, tasks
+from rfa import board, rounds, settings, tasks
 from rfa.packet import Packet
 
 TOKEN = "s3cret-token"
@@ -190,6 +190,39 @@ def test_a_command_is_offered_for_every_landed_repo_that_is_still_configured(tmp
     assert list(found) == ["web"]
     assert found["web"].startswith(f"(cd {tmp_path}/web && ")
     assert "git show --binary rfa/a-task | git apply -3" in found["web"]
+
+
+def test_the_full_diff_is_every_round_together_and_not_what_the_base_gained_since(tmp_path, monkeypatch):
+    """Two rounds landed on one branch, and `main` moved on meanwhile: the full diff is both rounds'
+    work against where the first began, with none of main's new commit in it, reversed or otherwise."""
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    tasks.init()
+    repo = tmp_path / "web"
+    repo.mkdir()
+    git = lambda *args: subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    commit = lambda message: git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qam", message)
+    git("init", "-qb", "main")
+    (repo / "a.txt").write_text("one\n")
+    (repo / "b.txt").write_text("base\n")
+    git("add", "-A")
+    commit("base")
+    git("checkout", "-qb", "rfa/a-task")
+    (repo / "a.txt").write_text("one\nROUND ONE\n")
+    commit("round one")
+    (repo / "a.txt").write_text("one\nROUND ONE\nROUND TWO\n")
+    commit("round two")
+    git("checkout", "-q", "main")
+    (repo / "b.txt").write_text("main moved on\n")
+    commit("elsewhere")
+    settings.path().write_text(f"repos:\n  lummeco/web: {repo}\n")
+    task = tasks.save(tasks.create("an idea", ["lummeco/web"]), landed={"web": "rfa/a-task"})
+    commits = lambda base: {"web": {"branch": "rfa/a-task", "base": base, "head": "x"}}
+    rounds.save(task.id, {"rounds": [{"commits": commits("main")}, {"commits": commits("rfa/a-task")}], "pending": []})
+
+    [found] = board.full_diff(task.id)["repos"]
+    assert (found["repo"], found["error"]) == ("web", "")
+    assert rounds.files(found["patch"]) == ["a.txt"]
+    assert "+ROUND ONE\n+ROUND TWO\n" in found["patch"]
 
 
 def test_the_snapshot_reports_a_task_as_archived_in_its_stage(tmp_path, monkeypatch):

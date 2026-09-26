@@ -17,6 +17,7 @@ import json
 import re
 import secrets
 import shlex
+import subprocess
 import threading
 import time
 import webbrowser
@@ -60,15 +61,46 @@ def copy_commands(landed: dict, configured: dict, state: dict | None = None) -> 
     A repository that has since left `repos:` is left out rather than guessed at: without its
     checkout there is no path to run the command in.
     """
-    full = {key.rpartition("/")[2]: key for key in configured}
-    bases = {}
-    for entry in reversed((state or {}).get("rounds") or []):
-        bases |= {name: c["base"] for name, c in (entry.get("commits") or {}).items()}
+    bases = first_bases(state or {})
     return {
-        name: copy_command(Path(str(configured[key]).partition("@")[0]).expanduser(), branch, bases.get(name, ""))
-        for name, branch in landed.items()
-        if (key := full.get(name))
+        name: copy_command(repo, landed[name], bases.get(name, ""))
+        for name, repo in checkouts(landed, configured).items()
     }
+
+
+def first_bases(state: dict) -> dict[str, str]:
+    """Where each repository's work began: the base of the earliest round that landed a commit there."""
+    bases = {}
+    for entry in reversed(state.get("rounds") or []):
+        bases |= {name: c["base"] for name, c in (entry.get("commits") or {}).items()}
+    return bases
+
+
+def checkouts(landed: dict, configured: dict) -> dict[str, Path]:
+    """The checkout of every landed repository still under `repos:`, by its short name."""
+    full = {key.rpartition("/")[2]: key for key in configured}
+    return {
+        name: Path(str(configured[key]).partition("@")[0]).expanduser() for name in landed if (key := full.get(name))
+    }
+
+
+def full_diff(id: str) -> dict:
+    """Everything a card changed, from where its first round started to where its branch is now.
+
+    Each round's own patch is against the round before; this is the whole of it, the diff a pull
+    request shows. Three dots, because the base is often a branch name that has moved on since:
+    what it gained is not the card's work. A card from before rounds were recorded is one commit.
+    """
+    task = tasks.find(id)
+    landed = task.meta.get("landed") or {}
+    bases = first_bases(rounds.load(task.id))
+    repos = []
+    for name, repo in checkouts(landed, settings.load().get("repos") or {}).items():
+        args = ("diff", f"{bases[name]}...{landed[name]}") if name in bases else ("show", "--format=", landed[name])
+        done = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, errors="replace")
+        error = done.stderr.strip() if done.returncode else ""
+        repos.append({"repo": name, "patch": done.stdout, "marks": {}, "error": error})
+    return {"repos": repos}
 
 
 def snapshot() -> dict:
@@ -493,6 +525,12 @@ class Handler(BaseHTTPRequestHandler):
             id, n = query.get("id", [""])[0], query.get("round", [""])[0]
             found = rounds.diff(id, int(n)) if tasks.ID_RE.fullmatch(id) and n.isdigit() else None
             self._json(*((200, found) if found else (404, {"error": "no such round"})))
+        elif self.path.startswith("/api/fulldiff"):
+            id = parse_qs(urlparse(self.path).query).get("id", [""])[0]
+            try:
+                self._json(200, full_diff(id) if tasks.ID_RE.fullmatch(id) else {"repos": []})
+            except FileNotFoundError:
+                self._json(404, {"error": "no such card"})
         elif self.path.startswith("/api/analytics"):
             window = parse_qs(urlparse(self.path).query).get("window", ["all"])[0]
             self._json(200, analytics(window))

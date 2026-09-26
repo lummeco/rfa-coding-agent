@@ -644,14 +644,18 @@ function render() {
   const saved = [...document.querySelectorAll("#board .cards")].map(el => el.scrollTop);
   document.getElementById("count").textContent =
     visible.length ? `${visible.length} task${visible.length > 1 ? "s" : ""}` : "";
-  document.getElementById("board").innerHTML = state.stages.map(stage => {
+  const html = state.stages.map(stage => {
     const inStage = state.tasks.filter(t => t.stage === stage);
     return `<section class="column" data-stage="${esc(stage)}">
       <h2>${esc(LABEL[stage] || stage)}<span class="n">${inStage.filter(t => !t.archived).length}</span></h2>
       <div class="cards">${groupsOf(stage, inStage).map(g => group(stage, g)).join("") || `<div class="empty">Nothing here</div>`}</div>
     </section>`;
   }).join("");
-  document.querySelectorAll("#board .cards").forEach((el, i) => { el.scrollTop = saved[i] || 0; });
+  // A change the columns do not show leaves them alone, hover and focus included.
+  if (html !== boardHtml) {
+    document.getElementById("board").innerHTML = boardHtml = html;
+    document.querySelectorAll("#board .cards").forEach((el, i) => { el.scrollTop = saved[i] || 0; });
+  }
   if (openId && !editing) showDetail(openId);
 }
 
@@ -1030,6 +1034,8 @@ const openDiffs = new Set();// `${id}/${n}` the user has open
 let menuOpen = false;
 let commentAt = null;       // the line a comment is being written on; the panel holds still meanwhile
 let lastBody = "";          // what the panel was last drawn from, so a refresh that changes nothing leaves it be
+let boardHtml = "";         // the same, for the columns
+let lastSnapshot = "";      // the snapshot as it came, so a push that changes nothing redraws nothing
 
 function loadD2h() {
   return d2h ||= new Promise((resolve, reject) => {
@@ -1333,10 +1339,12 @@ function showDetail(id) {
     html = head + `<div class="md">${md(body)}${gallery(t)}${history}</div>` + watch;
   }
   // Redrawing the same thing would close every open diff and the `details` you opened; only a change redraws.
+  // Compared by what it is drawn from, not by the html: "3m ago" becoming "4m ago" is no change.
+  const drawnFrom = JSON.stringify([t, mine, prNote?.id === id && prNote, watching === id]);
   const more = panel.querySelector("details.more")?.open;
-  if (detailId !== id || editing || html !== lastBody) {
+  if (detailId !== id || editing || drawnFrom !== lastBody) {
     panel.innerHTML = html;
-    lastBody = html;
+    lastBody = drawnFrom;
     if (more) panel.querySelector("details.more")?.setAttribute("open", "");
     if (rounded) drawDiffs(t);
   }
@@ -1389,9 +1397,28 @@ async function refresh() {
       `<span class="shut">${esc((await res.json()).error)}</span>`;
     return;
   }
-  state = await res.json();
+  const text = await res.text();
+  if (text === lastSnapshot) return;
+  state = JSON.parse(lastSnapshot = text);
   render();
   strip();
+}
+
+// The server says "changed" the moment a file the board is drawn from does, and the board redraws
+// what that touched -- no reload, no timer. A fetch rather than an EventSource, because only a
+// fetch can carry the token header. A dropped stream is picked up again, and a refresh on the way
+// back in covers whatever changed while it was down. A refused one is not: the token will not get
+// any better, and the refresh puts the reason in the strip.
+async function live() {
+  try {
+    const res = await api("/api/stream");
+    refresh();
+    if (!res.ok) return;
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    for (let chunk; !(chunk = await reader.read()).done;)
+      if (chunk.value.includes("data: changed")) refresh();
+  } catch {}
+  setTimeout(live, 3000);
 }
 
 async function move(id, to, status) {
@@ -1613,7 +1640,7 @@ document.addEventListener("keydown", e => {
   if (e.key.toLowerCase() === "r" && !e.metaKey && !e.ctrlKey) refresh();
 });
 
-refresh();
+live();
 // Faster than the board, because this is the one thing you sit and watch.
 setInterval(() => watching && drawRun(watching), 1500);
 </script>

@@ -54,14 +54,34 @@ def test_a_page_on_another_site_is_refused_even_holding_the_token():
 
 
 def test_the_board_stays_where_you_leave_it():
-    """Nothing re-fetches the snapshot on a timer: a reload, R, or an action is what redraws it, so a
-    diff you are reading does not jump under you. The one timer on the page is the run log you
-    opened on purpose, and it is allowed to keep moving."""
+    """Nothing re-fetches the snapshot on a timer: the server saying something changed, R, or an
+    action is what redraws it, so a diff you are reading does not jump under you. The one timer on
+    the page is the run log you opened on purpose, and it is allowed to keep moving."""
     page = board.PAGE.read_text()
     timers = [line for line in page.splitlines() if "setInterval" in line]
     assert all("refresh" not in line for line in timers), "an always-on timer must not redraw the board"
     assert any("drawRun" in line for line in timers), "the opt-in run log still updates while you watch"
-    assert re.search(r"^refresh\(\);$", page, re.M), "the snapshot is still fetched once when the page loads"
+    assert re.search(r"^live\(\);$", page, re.M), "the page listens for changes from the moment it loads"
+    assert "location.reload" not in page, "a change is drawn in place, never by reloading the page"
+
+
+def test_the_stream_speaks_only_when_a_file_the_board_draws_changes(tmp_path, monkeypatch):
+    """Quiet while nothing moves, "changed" once per change, and a ping so a closed tab is noticed."""
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    tasks.init()
+    card = tasks.create("an idea")
+    sent = []
+
+    def write(chunk: bytes) -> None:
+        sent.append(chunk)
+        if len(sent) == 1:
+            tasks.move(card, "planning")
+        elif len(sent) == 3:
+            raise BrokenPipeError
+
+    with pytest.raises(BrokenPipeError):
+        board.stream(write, every=0.01, ping=0.05)
+    assert sent == [b": ping\n\n", b"data: changed\n\n", b": ping\n\n"]
 
 
 def test_a_run_reports_every_command_and_what_is_happening_now(tmp_path, monkeypatch):

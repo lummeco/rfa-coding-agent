@@ -1,7 +1,9 @@
 """The board: one static page over the task folders, and the endpoints to read and move them.
 
 There is no state here. Every request reads the folders, so anything you do with `mv`, an editor or
-the CLI shows up on the next refresh, and the board going down loses nothing.
+the CLI shows up on the next refresh, and the board going down loses nothing. `/api/stream` is how
+the page learns a refresh is worth doing: it says "changed" whenever a file the board draws from
+does, and the page redraws only what that change touched.
 
 Binding to localhost is not access control. Every process on this Mac can reach the board, and so
 can any web page you happen to have open -- a cross-site form post to 127.0.0.1 needs nobody's
@@ -16,9 +18,10 @@ import re
 import secrets
 import shlex
 import threading
+import time
 import webbrowser
 from datetime import datetime, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -379,6 +382,49 @@ def judge(id: str, verdict: str | None) -> tasks.Task:
     return tasks.save(task, verdict=verdict, status=verdict or "built")
 
 
+def fingerprint() -> list[tuple[str, int, int]]:
+    """Every file the snapshot is read from, by when it was last written and how long it is.
+
+    A stat per file rather than a snapshot per tick: the snapshot runs the gates, and those shell
+    out. What this misses is only what no file records -- memory or power drifting across a gate --
+    and that waits for the next change, or R.
+    """
+    home = tasks.home()
+    paths = [
+        *(home / "tasks").glob("*/*.md"),
+        *(home / "var" / "runs").glob("*/rounds.json"),
+        *(home / "var").glob("*.pid"),
+        *(home / "var" / name for name in ("events.jsonl", "model", "reasoning")),
+        settings.path(),
+    ]
+    found = []
+    for path in sorted(paths):
+        try:
+            stat = path.stat()
+        except FileNotFoundError:  # moved between the glob and the stat: the next tick sees where it went
+            continue
+        found.append((str(path), stat.st_mtime_ns, stat.st_size))
+    return found
+
+
+def stream(write, every: float = 1.0, ping: float = 15.0) -> None:
+    """Say "changed" each time the fingerprint moves, until the page goes away.
+
+    The page's own fetch holds this open, token header and all -- an `EventSource` cannot send a
+    header, and the token is the one thing that keeps other sites out. The ping is how a closed tab
+    is noticed: writing to it is what fails.
+    """
+    seen, quiet = fingerprint(), 0.0
+    while True:
+        time.sleep(every)
+        if (now := fingerprint()) != seen:
+            seen, quiet = now, 0.0
+            write(b"data: changed\n\n")
+        elif (quiet := quiet + every) >= ping:
+            quiet = 0.0
+            write(b": ping\n\n")
+
+
 def allowed(headers, token: str, origin: str) -> bool:
     """May this request read or move anything?
 
@@ -417,6 +463,15 @@ class Handler(BaseHTTPRequestHandler):
             self._json(403, {"error": "open the board from the link `rfa up` printed"})
         elif self.path.startswith("/api/tasks"):
             self._json(200, snapshot())
+        elif self.path == "/api/stream":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            try:
+                stream(lambda chunk: (self.wfile.write(chunk), self.wfile.flush()))
+            except (BrokenPipeError, ConnectionResetError):
+                pass
         elif self.path.startswith("/api/run"):
             query = parse_qs(urlparse(self.path).query)
             self._json(200, progress(query.get("id", [""])[0], query.get("of", [""])[0]))
@@ -592,7 +647,9 @@ def create_pr(task: tasks.Task) -> dict:
 
 
 def serve(host: str = "127.0.0.1", port: int = 4380, open_browser: bool = True) -> None:
-    server = HTTPServer((host, port), Handler)
+    # Threaded, because every open page holds `/api/stream` for as long as it is open.
+    server = ThreadingHTTPServer((host, port), Handler)
+    server.daemon_threads = True
     server.token = secrets.token_urlsafe(16)
     server.origin = f"http://{host}:{port}"
     # Written down rather than only printed: `rfa status`, `rfa up` and the menu bar all open the

@@ -232,6 +232,45 @@ def test_a_draft_is_editable_in_every_part_and_a_blank_field_goes_back_to_its_de
     assert len(again.meta["context_branches"]) == 3 and "model" not in again.meta and edited.id == task.id
 
 
+def test_reordering_a_column_writes_the_order_into_the_cards(workspace):
+    """The order is the file's front matter, not the page's memory: a fresh read says the same."""
+    a = tasks.move(tasks.create("first idea"), "planning")
+    b = tasks.move(tasks.create("second idea"), "planning")
+    board.reorder({"id": a.id, "index": 1})
+    assert [t.id for t in tasks.tasks("planning")] == [b.id, a.id]
+    assert tasks.read(a.path).meta["order"] == 2
+    assert tasks.read(b.path).meta["order"] == 1
+
+
+def test_reordering_is_not_a_move(workspace):
+    """It leaves stage, status and attempts exactly as they were, and fires no transition."""
+    a = tasks.save(tasks.move(tasks.create("first idea"), "planning"), status="queued")
+    tasks.save(tasks.move(tasks.create("second idea"), "planning"), status="queued", attempts=2)
+    before = {t.id: (t.stage, t.status, t.attempts) for t in tasks.tasks("planning")}
+    board.reorder({"id": a.id, "index": 1})
+    after = {t.id: (t.stage, t.status, t.attempts) for t in tasks.tasks("planning")}
+    assert before == after
+    assert [e["type"] for e in tasks.events(a.id)] == ["created", "moved", "reordered"]
+
+
+def test_a_card_without_an_order_lands_after_the_ones_you_have_placed(workspace):
+    a = tasks.move(tasks.create("first idea"), "planning")
+    b = tasks.move(tasks.create("second idea"), "planning")
+    board.reorder({"id": a.id, "index": 1})
+    c = tasks.move(tasks.create("third idea"), "planning")
+    assert [t.id for t in tasks.tasks("planning")] == [b.id, a.id, c.id]
+
+
+def test_reordering_refuses_a_position_outside_the_column(workspace):
+    a = tasks.move(tasks.create("first idea"), "planning")
+    with pytest.raises(ValueError):
+        board.reorder({"id": a.id, "index": 5})
+    with pytest.raises(ValueError):
+        board.reorder({"id": a.id, "index": -1})
+    with pytest.raises(FileNotFoundError):
+        board.reorder({"id": "20200101-000000", "index": 0})
+
+
 def test_an_edit_naming_a_model_the_workspace_lacks_is_refused_and_writes_nothing(workspace):
     task = tasks.create("an idea")
     with pytest.raises((KeyError, ValueError)):

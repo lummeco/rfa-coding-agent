@@ -346,6 +346,28 @@ def retry(id: str) -> tasks.Task:
     return tasks.save(task, status="todo", attempts=None, error=None, paused=None)
 
 
+def reorder(payload: dict) -> tasks.Task:
+    """Move a card to a new position in its own column.
+
+    Not a move: stage, status and attempts are untouched, and no transition is involved -- the
+    order is written into the column's cards, so the board, the daemon and `rfa plan`/`rfa work`
+    all read the same queue order out of the files it came from."""
+    task = tasks.find(payload["id"])
+    column = tasks.tasks(task.stage)
+    try:
+        index = int(payload["index"])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("a position is needed")
+    if not 0 <= index < len(column):
+        raise ValueError(f"position {index} is out of range for a column of {len(column)}")
+    placed = [t for t in column if t.id != task.id]
+    placed.insert(index, task)
+    for position, card in enumerate(placed):
+        tasks.save(card, order=position + 1)
+    tasks.log(type="reordered", id=task.id, index=index)
+    return task
+
+
 def judge(id: str, verdict: str | None) -> tasks.Task:
     """Your call on built code: shipped, trashed, or back to waiting. Only yours, and only in done."""
     task = tasks.find(id)
@@ -429,6 +451,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/new",
             "/api/pr",
             "/api/edit",
+            "/api/reorder",
             "/api/archive",
             "/api/pause",
             "/api/retry",
@@ -488,7 +511,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json(400, {"error": result["message"]})
             return
-        if self.path in ("/api/edit", "/api/pause", "/api/retry", "/api/verdict"):
+        if self.path in ("/api/edit", "/api/pause", "/api/retry", "/api/verdict", "/api/reorder"):
             try:
                 if self.path == "/api/edit":
                     task = edit(payload)
@@ -496,6 +519,8 @@ class Handler(BaseHTTPRequestHandler):
                     task = pause(payload["id"], bool(payload.get("paused")))
                 elif self.path == "/api/retry":
                     task = retry(payload["id"])
+                elif self.path == "/api/reorder":
+                    task = reorder(payload)
                 else:
                     task = judge(payload["id"], payload.get("verdict") or None)
             except (FileNotFoundError, KeyError, ValueError) as e:

@@ -2,7 +2,7 @@
 
 import pytest
 
-from rfa import settings, tasks
+from rfa import board, settings, tasks
 from rfa.daemon import Daemon, DaemonConfig, next_job, reclaim, report, running
 
 # draft -> the stage we want, through the moves a human would make.
@@ -46,6 +46,16 @@ def test_with_nothing_to_code_there_is_nothing_to_yield_to():
     for n in range(5):
         card("planning", f"already planned {n}", status="ready")
     assert next_job(DaemonConfig(plan_ahead=2))[0] == "plan"
+
+
+def test_the_queue_is_worked_in_the_order_you_set_it():
+    """The daemon takes the first eligible card in the user's order, not the oldest."""
+    card("todo", "an older card")
+    card("todo", "a newer card")
+    first, other = tasks.tasks("todo")
+    assert next_job(DaemonConfig())[1].id == first.id
+    board.reorder({"id": other.id, "index": 0})
+    assert next_job(DaemonConfig())[1].id == other.id
 
 
 def test_a_card_that_keeps_coming_back_is_left_for_a_human():

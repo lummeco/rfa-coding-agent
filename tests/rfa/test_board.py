@@ -7,6 +7,7 @@ a machine writing code, so these are the tests that gate depends on.
 """
 
 import json
+import re
 import subprocess
 from datetime import datetime, timedelta, timezone
 from email.message import Message
@@ -50,6 +51,17 @@ def test_a_page_on_another_site_is_refused_even_holding_the_token():
     """Belt and braces: a browser that would send the token cross-site still says where it came from."""
     assert board.allowed(headers(X_RFA_Token=TOKEN, Origin="https://evil.example"), TOKEN, ORIGIN) is False
     assert board.allowed(headers(X_RFA_Token=TOKEN, Origin=ORIGIN), TOKEN, ORIGIN) is True
+
+
+def test_the_board_stays_where_you_leave_it():
+    """Nothing re-fetches the snapshot on a timer: a reload, R, or an action is what redraws it, so a
+    diff you are reading does not jump under you. The one timer on the page is the run log you
+    opened on purpose, and it is allowed to keep moving."""
+    page = board.PAGE.read_text()
+    timers = [line for line in page.splitlines() if "setInterval" in line]
+    assert all("refresh" not in line for line in timers), "an always-on timer must not redraw the board"
+    assert any("drawRun" in line for line in timers), "the opt-in run log still updates while you watch"
+    assert re.search(r"^refresh\(\);$", page, re.M), "the snapshot is still fetched once when the page loads"
 
 
 def test_a_run_reports_every_command_and_what_is_happening_now(tmp_path, monkeypatch):

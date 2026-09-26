@@ -1,7 +1,7 @@
 agent:
   attempts: 3
   min_tool_calls: 3
-  step_limit: 40
+  step_limit: 80
   cost_limit: 0
   system_template: |
     You are the Planner stage of an autonomous software-development pipeline. You work inside a

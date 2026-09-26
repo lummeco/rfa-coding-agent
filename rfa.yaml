@@ -98,11 +98,11 @@ sentry:
 models:
   qwen3.6:
     model_name: ollama_chat/rfa-qwen3.6-35b
-    ollama: {name: rfa-qwen3.6-35b, from: qwen3.6:35b-a3b-q8_0, num_ctx: 131072}
+    ollama: {name: rfa-qwen3.6-35b, from: qwen3.6:35b-a3b-q8_0, num_ctx: 262144}
     reasoning: high
   qwen3.8:
     model_name: ollama_chat/rfa-qwen3.8
-    ollama: {name: rfa-qwen3.8, from: qwen3.8:latest, num_ctx: 131072}
+    ollama: {name: rfa-qwen3.8, from: qwen3.8:latest, num_ctx: 262144}
     reasoning: medium
 
 # What a run uses when nothing else said. A `planner:`/`coder:` block may set its own; `rfa model
@@ -114,7 +114,7 @@ default_model: qwen3.8
 #
 # `keep_alive` is how long Ollama holds the model in memory after a call. Its default is 5 minutes,
 # which is shorter than a single coder step may run (`timeout: 600`), so the model is evicted mid-run
-# and every reload pays the load cost again -- on a big model at 131072 context that is what a run
+# and every reload pays the load cost again -- on a big model at 262144 context that is what a run
 # sees as a timeout. Holding it past the longest step means one load per run instead of one per step.
 # The cost is memory held while nothing is running, which `daemon.memory_min_pct` then counts against
 # starting the next card.
@@ -131,7 +131,7 @@ coder:
 # repository. The host runs `setup:` in the repository root before the coder starts and before the
 # base commit, so the packet's checks can run at all: a coder that has to install its own dependencies
 # and start its own database spends its budget on that instead -- and with no `containers:` block the
-# checks were red before it started, which now stops the run at step 0 rather than at step 120.
+# checks were red before it started, which now stops the run at step 0 rather than at step 240.
 #
 #   image:  the coder's image for this repository; default is `coder.environment.image`.
 #   setup:  commands run once in the repository root. 900s each; a failure puts the card back in todo.

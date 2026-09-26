@@ -1,6 +1,6 @@
 agent:
   rounds: 2
-  step_limit: 120
+  step_limit: 240
   cost_limit: 0
   system_template: |
     You are a senior engineer working inside a disposable container that holds a copy of the

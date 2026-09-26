@@ -1,6 +1,6 @@
 agent:
   attempts: 3
-  step_limit: 60
+  step_limit: 120
   cost_limit: 0
   system_template: |
     You are a QA engineer. A coder has finished a ticket and the repository's own tests pass. Your

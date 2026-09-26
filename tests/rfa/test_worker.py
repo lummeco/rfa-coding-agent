@@ -178,7 +178,7 @@ def test_reading_and_setting_up_cost_no_steps_until_the_first_edit(tmp_path):
 
 
 def test_a_run_cut_off_with_a_clean_diff_is_submitted_by_the_host(tmp_path):
-    """Out of steps at step 120 with green tests was the run this exists for: the checks decide, not the cut-off."""
+    """Out of steps at step 240 with green tests was the run this exists for: the checks decide, not the cut-off."""
     agent = run_coder([act("touch half")] * 3, tmp_path, ["test -f half"], step_limit=2)
     assert agent.exit_status() == "AutoSubmitted" and agent.submitted() and agent.regressions() == []
     assert agent.messages[-1]["extra"]["cut_off"] == "LimitsExceeded" and agent.n_calls == 3
@@ -233,7 +233,7 @@ def test_the_shipped_coder_config_renders_with_the_variables_the_worker_passes(t
     )
     prompt = agent.messages[1]["content"]
     assert "execution packet" in agent.messages[0]["content"]
-    assert "120 steps, counted from your first edit" in prompt
+    assert "240 steps, counted from your first edit" in prompt
     assert "echo checks-ran" in prompt and "/work/repos/web" in prompt
     assert "already failing" in prompt and "pnpm typecheck" in prompt
     assert "RFA_JUNIT=/tmp/rfa-junit.xml pytest -q --junitxml=$RFA_JUNIT" in prompt

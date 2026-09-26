@@ -193,7 +193,7 @@ def test_the_reviewer_is_a_stage_like_the_other_two(workspace):
     )
     reviewer = settings.load("reviewer")
     assert reviewer["environment"]["image"] == "my/own:tag"  # mine wins over the packaged default
-    assert reviewer["agent"]["step_limit"] == 60  # and the rest of the packaged config survives
+    assert reviewer["agent"]["step_limit"] == 120  # and the rest of the packaged config survives
     assert "reviewer" not in settings.load("coder")
     # The browser image is the size of a browser: only worth pulling once there is an app to drive.
     assert "my/own:tag" in up.images([settings.load("planner"), settings.load("coder"), reviewer])

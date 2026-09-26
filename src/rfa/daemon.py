@@ -155,11 +155,17 @@ def report() -> dict:
     """
     config, workspace = DaemonConfig.load(), settings.load()
     job, last = next_job(config), finished()
+    # What is configured, not what a run would insist on: this must answer even when `models:`
+    # is empty, where `settings.pick` is right to refuse.
+    model = settings.chosen() or workspace.get("default_model") or ""
+
+    def task_model(t: Task) -> str:
+        # A run uses the card's own model when it named one, and the daemon's otherwise.
+        return str(t.meta.get("model") or "") or model
+
     return {
         "home": str(tasks.home()),
-        # What is configured, not what a run would insist on: this must answer even when `models:`
-        # is empty, where `settings.pick` is right to refuse.
-        "model": settings.chosen() or workspace.get("default_model") or "",
+        "model": model,
         "models": sorted(settings.presets(workspace)),
         "reasoning": list(settings.REASONING),
         "default_reasoning": settings.chosen_reasoning(),
@@ -169,8 +175,14 @@ def report() -> dict:
         "services": {s.name: s.pid() or 0 for s in service.services()},
         "gates": [vars(gate) for gate in gates.check(config, running())],
         "stages": {stage: len(tasks.tasks(stage)) for stage in tasks.STAGES},
-        "running": [{"id": t.id, "title": t.title, "status": t.status} for t in running()],
-        "next": {"job": job[0], "id": job[1].id, "title": job[1].title} if job else None,
+        "running": [
+            {"id": t.id, "title": t.title, "status": t.status, "model": task_model(t)} for t in running()
+        ],
+        "next": (
+            {"job": job[0], "id": job[1].id, "title": job[1].title, "model": task_model(job[1])}
+            if job
+            else None
+        ),
         "last": None
         if last is None
         else {"id": last.id, "title": last.title, "status": last.status, "at": last.meta["finished_at"]},

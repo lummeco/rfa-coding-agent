@@ -1,6 +1,6 @@
 import pytest
 
-from rfa.packet import Packet, PacketFile, Verification, problems
+from rfa.packet import Packet, PacketFile, Verification, parse, problems
 
 REPO_FILES = {"invoicing": {"src/editor/InvoiceEditor.tsx", "src/editor/LineRow.tsx", "tests/editor.test.ts"}}
 
@@ -51,6 +51,47 @@ def test_render_marks_areas_as_hints_and_never_leaks_the_grounded_paths():
 )
 def test_render_numbers_manual_steps_only_when_they_are_a_sequence(verification, expected):
     assert expected in packet(verification=verification).render()
+
+
+def test_parse_reads_a_rendered_packet_back_into_its_fields():
+    p = packet(
+        constraints=["Keep it local."],
+        areas=["invoice editor"],
+        verification=Verification(commands=["pnpm test"], manual=["Open it.", "Click it."]),
+        non_goals=["Bulk duplication."],
+    )
+    fields = parse("\n" + p.render())
+    assert fields["title"] == p.title
+    assert fields["goal"] == p.goal
+    assert fields["current_behavior"] == p.current_behavior
+    assert fields["required_behavior"] == p.required_behavior
+    assert fields["constraints"] == p.constraints
+    assert fields["areas"] == p.areas
+    assert fields["acceptance_criteria"] == p.acceptance_criteria
+    assert fields["verification"] == {"commands": ["pnpm test"], "manual": ["Open it.", "Click it."]}
+    assert fields["non_goals"] == p.non_goals
+
+
+def test_parse_keeps_nested_bullets_with_their_item():
+    fields = parse(packet().render())
+    assert fields["required_behavior"] == ["Add a duplicate action.", "Copy:\n  - product\n  - VAT"]
+
+
+def test_parse_render_is_a_round_trip():
+    p = packet(
+        constraints=["Keep it local."],
+        areas=["invoice editor"],
+        verification=Verification(commands=["pnpm test"], manual=["Open it.", "Click it."]),
+        non_goals=["Bulk duplication."],
+    )
+    again = Packet(**parse(p.render()), complexity=p.complexity, complexity_reason=p.complexity_reason)
+    assert again.render() == p.render()
+
+
+@pytest.mark.parametrize("body", ["\n# Idea\n\nSome idea, not a packet.\n", ""])
+def test_parse_refuses_a_body_that_is_not_a_packet(body):
+    with pytest.raises(ValueError, match="not a rendered packet"):
+        parse(body)
 
 
 @pytest.mark.parametrize(

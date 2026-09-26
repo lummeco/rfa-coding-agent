@@ -14,6 +14,7 @@ from email.message import Message
 import pytest
 
 from rfa import board, tasks
+from rfa.packet import Packet, Verification
 
 TOKEN = "s3cret-token"
 ORIGIN = "http://127.0.0.1:4380"
@@ -297,3 +298,86 @@ def test_outcomes_are_per_card_by_when_it_reached_done_and_the_rate_leaves_waiti
     assert [found[k] for k in ("shipped", "trashed", "built", "failed")] == [2, 1, 2, 1]
     assert found["rate"] == pytest.approx(0.5)
     assert board.analytics("all")["shipped"] == 3
+
+
+def planned_ready(tmp_path, monkeypatch) -> tasks.Task:
+    """A planning card the planner has finished: its body is the rendered packet, and it waits to be read."""
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    tasks.init()
+    packet = Packet(
+        title="Add duplicate invoice line functionality.",
+        goal="Allow a user to duplicate an existing invoice line.",
+        current_behavior="Lines can be added, edited and deleted, but not duplicated.",
+        required_behavior=["Add a duplicate action.", "Copy:\n  - product\n  - VAT"],
+        areas=["invoice editor"],
+        acceptance_criteria=["Clicking Duplicate creates exactly one new line."],
+        verification=Verification(commands=["pnpm test"], manual=["Open it."]),
+        non_goals=["Bulk duplication."],
+        complexity=2,
+        complexity_reason="A normal feature following an existing pattern.",
+    )
+    task = tasks.move(tasks.create("an idea"), "planning", actor="human")
+    task.body = "\n" + packet.render()
+    return tasks.save(
+        task, status="ready", title=packet.title, complexity=2, open_questions=["Which line to copy from?"]
+    )
+
+
+def test_the_snapshot_exposes_a_ready_packets_sections(tmp_path, monkeypatch):
+    """The detail view edits the packet section by section, so the snapshot reads it back out of the body."""
+    planned_ready(tmp_path, monkeypatch)
+    card = board.snapshot()["tasks"][0]
+    assert card["packet"]["goal"] == "Allow a user to duplicate an existing invoice line."
+    assert card["packet"]["acceptance_criteria"] == ["Clicking Duplicate creates exactly one new line."]
+    assert card["packet"]["constraints"] == []
+    assert card["open_questions"] == ["Which line to copy from?"]
+
+
+def test_the_snapshot_does_not_expose_a_packet_on_any_other_card(tmp_path, monkeypatch):
+    """Only a planning card that is ready is one; the rest are edited as raw body text."""
+    task = planned_ready(tmp_path, monkeypatch)
+    assert board.snapshot()["tasks"][0]["packet"] is not None
+    tasks.move(task, "todo", actor="human")
+    assert board.snapshot()["tasks"][0]["packet"] is None
+
+
+def test_editing_a_packets_sections_rewrites_the_body_and_keeps_the_rest(tmp_path, monkeypatch):
+    """The body is the source of truth the coder reads: the sections the owner did not touch
+    come back exactly, nested bullets and all, and the shape is render()'s."""
+    task = planned_ready(tmp_path, monkeypatch)
+    edited = board.edit(
+        {
+            "id": task.id,
+            "goal": "Allow a user to duplicate an invoice line, with or without its VAT.",
+            "acceptance_criteria": ["Clicking Duplicate creates exactly one new line.", "The copy is editable."],
+            "open_questions": ["Which line to copy from?", "And why?"],
+        }
+    )
+    body = tasks.read(edited.path).body
+    assert "## Goal\nAllow a user to duplicate an invoice line, with or without its VAT." in body
+    assert "## Acceptance criteria\n1. Clicking Duplicate creates exactly one new line.\n2. The copy is editable." in body
+    assert "## Required behavior\n- Add a duplicate action.\n- Copy:\n  - product\n  - VAT" in body
+    assert "## Relevant areas\nLikely relevant:\n- invoice editor" in body
+    assert "## Verification\n```bash\npnpm test\n```\nManual:\n1. Open it." in body
+    assert "## Non-goals\n- Bulk duplication." in body
+    # open_questions stays on the meta, not in the body.
+    assert tasks.read(edited.path).meta["open_questions"] == ["Which line to copy from?", "And why?"]
+    assert "Open questions" not in body
+
+
+def test_an_edited_packet_survives_a_reload(tmp_path, monkeypatch):
+    """The body is the source of truth, so the snapshot reads back whatever the owner saved."""
+    task = planned_ready(tmp_path, monkeypatch)
+    board.edit({"id": task.id, "current_behavior": "Lines can be added, but not duplicated.", "non_goals": []})
+    card = board.snapshot()["tasks"][0]
+    assert card["packet"]["current_behavior"] == "Lines can be added, but not duplicated."
+    assert card["packet"]["non_goals"] == []
+    assert "## Non-goals" not in tasks.read(task.path).body
+
+
+def test_a_packet_is_only_edited_on_a_planning_card(tmp_path, monkeypatch):
+    """Past planning, the body carries the run's notes; rewriting it from the packet would drop them."""
+    task = planned_ready(tmp_path, monkeypatch)
+    tasks.move(task, "todo", actor="human")
+    with pytest.raises(ValueError, match="planning card"):
+        board.edit({"id": task.id, "goal": "Something else."})

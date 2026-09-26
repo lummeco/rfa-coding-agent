@@ -106,6 +106,8 @@ header .hint { color: var(--text-3); font-size: 12px; }
   letter-spacing: 0;
 }
 .cards { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding: 2px 2px 8px; }
+.card-wrap[draggable] .card { cursor: grab; }
+.card-wrap[draggable]:active .card { cursor: grabbing; }
 
 .card {
   background: var(--surface);
@@ -599,7 +601,8 @@ function card(t) {
   const dots = t.complexity
     ? `<span class="cx" title="complexity ${t.complexity}/5">${[1,2,3,4,5].map(n => `<i class="${n <= t.complexity ? "on" : ""}"></i>`).join("")}</span>`
     : "";
-  return `<div class="card-wrap${t.archived ? " archived" : ""}">
+  const draggable = !t.archived && (t.stage === "planning" || t.stage === "todo") ? " draggable" : "";
+  return `<div class="card-wrap${t.archived ? " archived" : ""}${draggable}" data-drag-id="${esc(t.id)}">
     <button class="card ${t.status === "failed" ? "failed" : ""}" data-id="${esc(t.id)}">
       <div class="title">${esc(t.title)}</div>
       <div class="meta">
@@ -643,7 +646,7 @@ function render() {
     visible.length ? `${visible.length} task${visible.length > 1 ? "s" : ""}` : "";
   document.getElementById("board").innerHTML = state.stages.map(stage => {
     const inStage = state.tasks.filter(t => t.stage === stage);
-    return `<section class="column">
+    return `<section class="column" data-stage="${esc(stage)}">
       <h2>${esc(LABEL[stage] || stage)}<span class="n">${inStage.filter(t => !t.archived).length}</span></h2>
       <div class="cards">${groupsOf(stage, inStage).map(g => group(stage, g)).join("") || `<div class="empty">Nothing here</div>`}</div>
     </section>`;
@@ -1409,6 +1412,16 @@ async function move(id, to, status) {
   if (to === "draft") showDetail(id);
 }
 
+async function reorder(id, index) {
+  const res = await api("/api/reorder", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, index }),
+  });
+  if (!res.ok) { alert((await res.json()).error); return; }
+  await refresh();
+}
+
 async function retry(id) {
   const res = await api("/api/retry", {
     method: "POST",
@@ -1451,6 +1464,37 @@ async function toggleArchive(id) {
   refresh();
 }
 
+// Dragging a planning or to-do card to a new place in its own column is an order, not a move:
+// the card stays where it is, and the column's order is what the daemon and `rfa work` pick from.
+let dragging = null;
+document.getElementById("board").addEventListener("dragstart", e => {
+  const wrap = e.target.closest(".card-wrap[draggable]");
+  if (!wrap) return;
+  dragging = wrap.dataset.dragId;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", dragging);
+});
+document.getElementById("board").addEventListener("dragover", e => {
+  const t = dragging && state.tasks.find(x => x.id === dragging);
+  const column = e.target.closest(".column");
+  if (t && column && column.dataset.stage === t.stage) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }
+});
+document.getElementById("board").addEventListener("drop", e => {
+  if (!dragging) return;
+  const t = state.tasks.find(x => x.id === dragging);
+  const column = e.target.closest(".column");
+  if (!t || !column || column.dataset.stage !== t.stage) return;
+  e.preventDefault();
+  const id = dragging;
+  dragging = null;
+  const cards = [...column.querySelectorAll(".card-wrap[draggable]")].filter(w => w.dataset.dragId !== id);
+  let index = cards.length;
+  for (let i = 0; i < cards.length; i++) {
+    const box = cards[i].getBoundingClientRect();
+    if (e.clientY < box.top + box.height / 2) { index = i; break; }
+  }
+  reorder(id, index);
+});
 document.getElementById("board").addEventListener("click", e => {
   const head = e.target.closest("button[data-group]");
   if (head) {

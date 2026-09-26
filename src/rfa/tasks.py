@@ -184,15 +184,25 @@ def read(path: Path, stage: str = "") -> Task:
     return Task(path.stem, stage or path.parent.name, path, meta, match.group(2))
 
 
+def _order_key(task: Task):
+    """A card you have placed comes first, in the position you gave it; the ones you have not
+    placed yet keep their oldest-id-first order, after the ones you have. A column you have never
+    touched therefore looks exactly as it did before."""
+    if isinstance(order := task.meta.get("order"), int):
+        return (0, order, "")
+    return (1, 0, task.path.name)
+
+
 def tasks(stage: str = "") -> list[Task]:
-    """Every task, or every task in one stage, oldest id first (ids start with their timestamp)."""
-    wanted = [stage] if stage else list(STAGES)
-    return [
-        read(path, name)
-        for name in wanted
-        for path in sorted(stage_dir(name).glob("*.md"))
-        if ID_RE.fullmatch(path.stem)
-    ]
+    """Every task, or every task in one stage.
+
+    The stage's own order: a card's explicit `order` first, in the order you set it, then the
+    cards you have not placed yet, oldest id first (ids start with their timestamp)."""
+    found: list[Task] = []
+    for name in [stage] if stage else STAGES:
+        paths = [path for path in sorted(stage_dir(name).glob("*.md")) if ID_RE.fullmatch(path.stem)]
+        found.extend(sorted((read(path, name) for path in paths), key=_order_key))
+    return found
 
 
 def find(id: str) -> Task:

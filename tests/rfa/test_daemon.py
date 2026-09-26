@@ -103,6 +103,20 @@ def test_the_report_names_the_default_reasoning_level():
     assert report()["default_reasoning"] == "high"
 
 
+def test_the_report_names_the_model_each_run_uses():
+    """A card that named a model runs with it; one that did not falls back to the daemon's.
+
+    The strip shows the model a run uses, not a hardcoded default, so `running` and `next` both carry it.
+    """
+    settings.choose("qwen3.6")
+    mine = card("under-work", "rebuild the importer", status="coding", model="qwen3.6-small")
+    shared = card("todo", "rename the invoice column")
+    found = {r["id"]: r for r in report()["running"]}
+    assert found[mine.id]["model"] == "qwen3.6-small"
+    assert report()["next"]["id"] == shared.id
+    assert report()["next"]["model"] == "qwen3.6"
+
+
 def test_a_paused_card_is_left_alone_and_is_not_counted_as_work_waiting():
     planned = card("planning", "add a duplicate button", status="queued")
     held = [card("todo", "rename the invoice column", paused=True), card("todo", "cache the price list", paused=True)]

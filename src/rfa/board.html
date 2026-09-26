@@ -17,6 +17,7 @@
   --green: #1d9d4e;
   --amber: #b26a00;
   --red: #d70015;
+  --purple: #af52de;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.06);
   --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.06), 0 12px 32px rgba(0, 0, 0, 0.10);
   --radius: 14px;
@@ -34,6 +35,7 @@
     --green: #30d158;
     --amber: #ff9f0a;
     --red: #ff453a;
+    --purple: #bf5af2;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.30), 0 6px 20px rgba(0, 0, 0, 0.40);
     --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.40), 0 12px 32px rgba(0, 0, 0, 0.55);
   }
@@ -42,7 +44,7 @@
   --bg: #000000; --surface: #1c1c1e; --surface-2: #2c2c2e;
   --text: #f5f5f7; --text-2: #98989d; --text-3: #6e6e73;
   --line: rgba(255, 255, 255, 0.10);
-  --accent: #0a84ff; --green: #30d158; --amber: #ff9f0a; --red: #ff453a;
+  --accent: #0a84ff; --green: #30d158; --amber: #ff9f0a; --red: #ff453a; --purple: #bf5af2;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.30), 0 6px 20px rgba(0, 0, 0, 0.40);
   --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.40), 0 12px 32px rgba(0, 0, 0, 0.55);
 }
@@ -347,7 +349,10 @@ button.action.quiet { background: transparent; color: var(--text-2); padding-lef
 #strip .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 #strip .dot.on { background: var(--green); }
 #strip .dot.off { background: var(--text-3); }
-#strip .dot.hold { background: var(--amber); }
+#strip .dot.blocked { background: var(--red); }
+#strip .dot.plan { background: var(--accent); }
+#strip .dot.code { background: var(--amber); }
+#strip .dot.review { background: var(--purple); }
 #strip .shut { color: var(--amber); }
 
 /* Capture: what this one card should run with. */
@@ -931,21 +936,37 @@ function openPanel() {
 
 // The daemon is a separate process; without this the board shows a card sitting in `todo` and
 // gives you no way to tell "nothing is running it" from "it is holding until you plug the Mac in".
+// One line, one dot, one message: what the daemon is doing right now, and why it is not when it is not.
 function strip() {
   const sys = state.system;
   if (!sys) return;
-  const bit = (cls, label, value) =>
-    `<span class="pill"><i class="dot ${cls}"></i>${label}${value ? ` <b>${esc(value)}</b>` : ""}</span>`;
-  const shut = sys.gates.filter(g => !g.ok);
-  const parts = [
-    bit(sys.services.daemon ? (shut.length ? "hold" : "on") : "off", "daemon",
-        sys.services.daemon ? (shut.length ? "holding" : "watching") : "stopped"),
-  ];
-  for (const gate of shut) parts.push(`<span class="pill shut">✗ ${esc(gate.detail)}</span>`);
-  if (sys.running.length) parts.push(bit("on", "running", sys.running[0].title));
-  else if (sys.next) parts.push(`<span class="pill">next <b>${esc(sys.next.job)}</b> ${esc(sys.next.title)}</span>`);
-  if (sys.model) parts.push(`<span class="pill">model <b>${esc(sys.model)}</b></span>`);
-  document.getElementById("strip").innerHTML = parts.join("");
+  const line = (cls, message) => `<span class="pill"><i class="dot ${cls}"></i>${message}</span>`;
+  const withModel = (verb, t) =>
+    `daemon: ${verb} <b>${esc(t.title)}</b> with model <b>${esc(t.model)}</b>`;
+  const gate = name => sys.gates.find(g => g.name === name);
+  // Only a power or memory gate "blocks": the slot gate closes because a card is running, and that
+  // is the run itself, not a reason to hold.
+  const blocked = [gate("power"), gate("memory")].filter(g => g && !g.ok);
+  let cls, message;
+  if (!sys.services.daemon) {
+    cls = "off";
+    message = "daemon: stopped";
+  } else if (sys.running.length) {
+    // A card is on it right now: name it and the model the run uses, whatever the gates say.
+    const t = sys.running[0];
+    if (t.status === "planning") cls = "plan", message = withModel("planning", t);
+    else if (t.status === "reviewing") cls = "review", message = withModel("reviewing", t);
+    else cls = "code", message = withModel("coding", t);
+  } else if (sys.next) {
+    if (blocked.length) cls = "blocked", message = `daemon: blocked — ${esc(blocked.map(g => g.detail).join("; "))}`;
+    else if (sys.next.job === "plan") cls = "plan", message = withModel("planning", sys.next);
+    else if (sys.next.job === "review") cls = "review", message = withModel("reviewing", sys.next);
+    else cls = "code", message = withModel("coding", sys.next);
+  } else {
+    cls = "on";
+    message = "daemon: waiting for work";
+  }
+  document.getElementById("strip").innerHTML = line(cls, message);
 }
 
 // --- what the reviewer saw ---------------------------------------------------------------------

@@ -664,36 +664,31 @@ function actionsFor(t) {
   const pause = t.paused
     ? `<button class="action primary" data-pause="0">Resume</button>`
     : `<button class="action" data-pause="1">${LIVE.has(t.status) ? "Pause run" : "Pause"}</button>`;
-  // Not while an agent is on it: the run would write the card back where it was.
-  const draft = LIVE.has(t.status) ? "" : move("draft", "Back to draft", "quiet");
-  if (t.stage === "draft") return `<button class="action" id="edit-draft">Edit</button>` + move("planning", "Plan it", "primary")
-    + (t.planned ? move("todo", "Approve as is", "") : "") + archive;
-  if (t.stage === "planning" && t.status === "ready") return `<button class="action" id="edit">Edit</button>` + move("todo", "Approve", "primary") + draft + archive;
-  if (t.stage === "planning" && t.status === "failed") return move("draft", "Back to draft", "") + archive;
-  if (t.stage === "planning") return pause + draft + archive;
-  // The daemon gives up on a card after its last attempt; Retry hands the attempts back. Back to
-  // planned keeps the plan and waits for your approval again, instead of throwing it away.
-  if (t.stage === "todo") return (t.attempts ? `<button class="action primary" id="retry">Retry</button>` : "") + pause
-    + move("planning", "Re-plan", "quiet") + (t.planned ? move("planning", "Back to planned", "quiet", "ready") : draft) + archive;
-  // The reviewer takes both of these edges on its own; these are for overruling it, or for a card
-  // whose review could not run at all.
-  if (t.stage === "review") return (t.status === "failed" ? "" : pause) + move("done", "Pass it", "primary") + move("todo", "Send back", "quiet") + move("planning", "Re-plan", "quiet") + archive;
+  if (t.stage === "draft") return `<button class="action" id="edit-draft">Edit</button>` + move("planning", "Plan", "primary") + archive;
+  if (t.stage === "planning" && t.status === "ready") return `<button class="action" id="edit">Edit</button>` + move("todo", "Approve", "primary") + archive;
+  if (t.stage === "planning" && t.status === "failed") return archive;
+  if (t.stage === "planning") return pause + archive;
+  // Back to planned keeps the plan and waits for your approval again, instead of throwing it away.
+  if (t.stage === "todo") return pause + (t.planned ? move("planning", "Back to planned", "quiet", "ready") : "") + archive;
+  // The reviewer takes the pass/send-back edges on its own; this is only the run control, and a
+  // failed review is left with Archive alone.
+  if (t.stage === "review") return (t.status === "failed" ? "" : pause) + archive;
   if (t.stage === "done") {
     // Your verdict on built code comes first; everything that sends the card round again is under
     // Next actions. Fix comments needs comments on the latest round; with nothing landed there is
     // nothing to fix, so the card can only be run again from the start.
     const judge = t.status === "failed" ? ""
       : t.verdict ? `<button class="action quiet" data-verdict="">Undo ${esc(t.verdict)}</button>`
-      : `<button class="action primary" data-verdict="shipped">Ship it</button><button class="action" data-verdict="trashed">Trash</button>`;
+      : `<button class="action primary" data-verdict="shipped">Ship it</button><button class="action" data-verdict="trashed">Trash it</button>`;
     const waiting = (t.pending || []).length;
     const landed = Object.keys(t.landed || {}).length;
     return judge + `<div class="menu${menuOpen ? " open" : ""}"><button class="action" id="next">Next actions ▾</button><div class="list">`
       + `<button id="fix"${waiting ? "" : " disabled"}>Fix comments${waiting ? ` (${waiting})` : ""}`
       + `<small>${waiting ? "Back to To do; the coder fixes only these" : "Comment on a line in the latest diff, or on the whole round"}</small></button>`
-      + (landed ? "" : `<button data-to="todo">Run again<small>From the start branch</small></button>`)
-      + `<button data-to="draft">Move to draft</button></div></div><span class="spacer"></span>` + archive;
+      + (landed ? "" : `<button data-to="todo">Run again fresh</button>`)
+      + `</div></div><span class="spacer"></span>` + archive;
   }
-  if (t.stage === "under-work") return pause + move("todo", "Requeue", "quiet") + archive;
+  if (t.stage === "under-work") return pause + move("todo", "Back to queue", "quiet") + archive;
   return archive;
 }
 

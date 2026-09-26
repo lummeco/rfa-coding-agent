@@ -73,7 +73,11 @@ def up(
     if not report.ok:
         console.print("\n[bold red]Not ready.[/] Fix the above and run [bold]rfa up[/] again.")
         raise typer.Exit(1)
-    forget()  # the board mints a fresh token at startup and writes the address back
+    # A running board keeps its token, and its address with it. Without that address its token is
+    # lost, so it is restarted to mint a fresh one; a board that is not up leaves nothing to trust.
+    if not (services(port)[1].pid() and url()):
+        services(port)[1].stop()
+        forget()
     for service in services(port):
         detail = "started" if service.start() else "already running"
         if not (pid := service.pid()):
@@ -82,7 +86,7 @@ def up(
         console.print(f"  [green]✓[/] [bold]{service.name:<10}[/] {detail} (pid {pid}) — {service.log}")
     app = menubar()
     console.print(f"  {'[green]✓[/]' if app.ok else '[red]✗[/]'} [bold]{app.name:<10}[/] {app.detail}")
-    if not (address := url()):
+    if not (address := url(wait=10)):
         console.print(f"\n[bold red]The board did not say where it is.[/] See {services(port)[1].log}")
         raise typer.Exit(1)
     console.print(f"\n[bold green]Up.[/] Board on [bold]{address}[/] — the daemon plans and codes from here on.")

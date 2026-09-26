@@ -119,13 +119,16 @@ def services(port: int = DEFAULT_PORT) -> list[Service]:
     return [Service("daemon", ["daemon"]), Service("board", ["board", "--no-open", "--port", str(port)])]
 
 
-def url() -> str:
+def url(wait: float = 0) -> str:
     """Where the board is, with this start's token. The board itself writes it; nobody can guess it.
 
     Empty when the board is not up, which is the truth: without a live token there is no address
-    that would get you in.
+    that would get you in. `wait` gives a board that was just started time to write it.
     """
     path = tasks.home() / "var" / "board.url"
+    deadline = time.monotonic() + wait
+    while not path.exists() and time.monotonic() < deadline:
+        time.sleep(0.2)
     return path.read_text().strip() if path.exists() else ""
 
 

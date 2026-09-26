@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from rfa import daemon, github, rounds, settings, tasks
+from rfa import daemon, github, packet, rounds, settings, tasks
 
 PAGE = Path(__file__).parent / "board.html"
 
@@ -103,6 +103,7 @@ def snapshot() -> dict:
                 "link": task.meta.get("link"),
                 "open_questions": task.meta.get("open_questions") or [],
                 "body": task.body,
+                "packet": planned_packet(task),
             }
             for task in tasks.tasks()
         ],
@@ -110,6 +111,20 @@ def snapshot() -> dict:
         "repos": sorted(configured),
         "system": daemon.report(),
     }
+
+
+def planned_packet(task: tasks.Task) -> dict | None:
+    """The packet a card is ready with, read back out of its body.
+
+    The body is the source of truth, so this is parse, not a copy of what the planner saved:
+    whatever the owner edited last is what the detail view edits again.
+    """
+    if task.stage != "planning" or task.status != "ready":
+        return None
+    try:
+        return packet.parse(task.body)
+    except ValueError:
+        return None
 
 
 def tail(message: dict) -> str:
@@ -244,6 +259,7 @@ def analytics(window: str = "all") -> dict:
 
 
 EDITABLE = ("title", "repos", "branches", "context_branches", "model", "reasoning", "checks")
+PACKET_SECTIONS = ("goal", "current_behavior", "acceptance_criteria", "constraints", "non_goals")
 
 
 def edit(payload: dict) -> tasks.Task:
@@ -251,6 +267,11 @@ def edit(payload: dict) -> tasks.Task:
 
     An empty field is removed rather than written empty, so a card goes back to whatever the
     workspace or the body says -- a blank title is the idea's first line again.
+
+    On a planned card the payload may instead carry the packet's sections: then the body is the
+    packet, so it is parsed, the sections carried are applied, and it is rendered again -- the
+    sections left out come back exactly as the planner wrote them. `open_questions` is not part
+    of the body; editing it updates the card's meta.
     """
     task = tasks.find(payload["id"])
     fields = {key: payload[key] or None for key in EDITABLE if key in payload}
@@ -258,8 +279,40 @@ def edit(payload: dict) -> tasks.Task:
         fields["context_branches"] = (fields["context_branches"] or [])[: settings.MAX_CONTEXT] or None
     if "model" in fields or "reasoning" in fields:
         settings.validate(settings.load(), fields.get("model") or "", fields.get("reasoning") or "")
-    task.body = str(payload.get("body", task.body))
+    if "open_questions" in payload:
+        fields["open_questions"] = [q.strip() for q in (payload["open_questions"] or []) if str(q).strip()] or None
+    if any(key in payload for key in PACKET_SECTIONS):
+        if task.stage != "planning":
+            raise ValueError(f"{task.id} is in `{task.stage}`; the packet is edited on a planning card")
+        task.body = rendered_packet(task, payload)
+    else:
+        task.body = str(payload.get("body", task.body))
     return tasks.save(task, **fields)
+
+
+def rendered_packet(task: tasks.Task, payload: dict) -> str:
+    """The card's body with its editable sections rewritten, by the Packet's own template.
+
+    The body is what the coder reads, so the round-trip is parse -> edit -> render(): the
+    sections the owner did not touch survive exactly, and the shape is `render()`'s, so the
+    downstream flow sees no difference. `files`, `complexity` and `open_questions` never render;
+    the host keeps them on the card's meta.
+    """
+    fields = packet.parse(task.body)
+    for key in PACKET_SECTIONS:
+        if key not in payload:
+            continue
+        value = payload[key]
+        fields[key] = (
+            [str(item).strip() for item in value if str(item).strip()]
+            if isinstance(value, list)
+            else str(value).strip()
+        )
+    return "\n" + packet.Packet(
+        **fields,
+        complexity=task.meta.get("complexity") or 3,
+        complexity_reason=task.meta.get("complexity_reason") or "",
+    ).render()
 
 
 def fix(id: str) -> tasks.Task:

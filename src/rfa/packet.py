@@ -130,6 +130,91 @@ class Packet(BaseModel):
         return [f.path.strip().strip("`") for f in self.files]
 
 
+NUMBERED = re.compile(r"^\d+\.\s+")
+
+
+def parse(body: str) -> dict:
+    """A rendered packet back into the fields the body carries.
+
+    The inverse of `render()`, for the sections that render: `files`, `complexity` and
+    `open_questions` never appear in the body, so they are not in the result -- the host keeps
+    them on the card's meta and puts them back when it re-renders. A body that is not a rendered
+    packet has no sections to read back, and says so.
+    """
+    fields: dict = {
+        "title": "",
+        "goal": "",
+        "current_behavior": "",
+        "required_behavior": [],
+        "constraints": [],
+        "areas": [],
+        "acceptance_criteria": [],
+        "verification": {"commands": [], "manual": []},
+        "non_goals": [],
+    }
+    sections: dict[str, list[str]] = {}
+    current = None
+    title = None
+    for line in body.splitlines():
+        if line.startswith("## "):
+            current = line[3:].strip()
+            sections[current] = []
+        elif current is None and title is None:
+            # `# Task` is the header; the title is the first line under it.
+            if line.strip() and not line.startswith("#"):
+                title = line.strip()
+        elif current is not None:
+            sections[current].append(line)
+    fields["title"] = title or ""
+
+    def items(name: str, marker: str) -> list[str]:
+        out: list[str] = []
+        for line in sections.get(name, []):
+            if line.startswith(marker):
+                out.append(line[len(marker):].strip())
+            elif line[:1] in (" ", "\t") and out:
+                # An indented line is the item above it -- a nested bullet, not a new one.
+                out[-1] += "\n" + line
+        return out
+
+    def numbered_items(name: str) -> list[str]:
+        out: list[str] = []
+        for line in sections.get(name, []):
+            if (match := NUMBERED.match(line)):
+                out.append(line[match.end():].strip())
+            elif line[:1] in (" ", "\t") and out:
+                out[-1] += "\n" + line
+        return out
+
+    fields["goal"] = "\n".join(sections.get("Goal", [])).strip()
+    fields["current_behavior"] = "\n".join(sections.get("Current behavior", [])).strip()
+    fields["required_behavior"] = items("Required behavior", "- ")
+    fields["constraints"] = items("Constraints", "- ")
+    fields["areas"] = items("Relevant areas", "- ")
+    fields["acceptance_criteria"] = numbered_items("Acceptance criteria")
+    fields["non_goals"] = items("Non-goals", "- ")
+
+    commands: list[str] = []
+    manual: list[str] = []
+    in_block = False
+    for line in sections.get("Verification", []):
+        stripped = line.strip()
+        if in_block:
+            if stripped == "```":
+                in_block = False
+            else:
+                commands.append(stripped)
+        elif stripped == "```bash":
+            in_block = True
+        elif stripped and stripped != "Manual:":
+            manual.append(NUMBERED.sub("", line).strip())
+    fields["verification"] = {"commands": commands, "manual": manual}
+
+    if not all(fields[key] for key in ("title", "goal", "current_behavior", "required_behavior", "acceptance_criteria")):
+        raise ValueError("not a rendered packet")
+    return fields
+
+
 def normalize_path(path: str) -> str:
     return path.strip().strip("`").lstrip("/").removeprefix("work/repos/")
 

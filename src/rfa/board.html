@@ -465,6 +465,29 @@ button.action:disabled { opacity: .45; cursor: not-allowed; }
 .diffbox .d2h-file-name-wrapper::before { content: "▾"; color: var(--text-3); margin-right: 6px; }
 .diffbox .folded .d2h-file-name-wrapper::before { content: "▸"; }
 .diffbox .folded .d2h-file-diff, .diffbox .folded .d2h-files-diff { display: none; }
+/* The changed files as a tree; a file you folded as checked is ticked off here too. */
+.ftree {
+  border: 1px solid var(--line); border-radius: 10px; padding: 8px 6px; margin: 0 0 14px;
+  font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.ftree ul { list-style: none; margin: 0; padding-left: 14px; }
+.ftree > ul { padding-left: 0; }
+.ftree summary { cursor: pointer; list-style: none; color: var(--text-2); padding: 2px 6px; border-radius: 6px; }
+.ftree summary::-webkit-details-marker { display: none; }
+.ftree summary::before { content: "▾"; display: inline-block; width: 1.2em; color: var(--text-3); }
+.ftree details:not([open]) > summary::before { content: "▸"; }
+.ftree button {
+  display: flex; gap: 8px; align-items: baseline; width: 100%; text-align: left; cursor: pointer;
+  font: inherit; color: var(--text); background: none; border: 0; padding: 2px 6px; border-radius: 6px;
+}
+.ftree summary:hover, .ftree button:hover { background: var(--surface-2); }
+.ftree .st { flex: none; width: 1.2em; font-weight: 700; }
+.ftree .st.A { color: var(--green); } .ftree .st.M { color: var(--amber); }
+.ftree .st.D { color: var(--red); } .ftree .st.R { color: var(--accent); }
+.ftree .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ftree .add { color: var(--green); } .ftree .del { color: var(--red); min-width: 3.5ch; }
+.ftree .done { opacity: .5; }
+.ftree .done .nm::after { content: " ✓"; color: var(--green); }
 /* diff2html pins line numbers with `position: absolute`; without a positioned parent they pin to the panel and slide off their rows as it scrolls. */
 .diffbox .d2h-code-wrapper { position: relative; }
 .diffbox tr.commentable td.d2h-code-linenumber { cursor: pointer; }
@@ -1217,30 +1240,76 @@ async function drawFullDiff(t) {
 
 // Files you folded, per card and per diff, so a redraw leaves what you have checked folded.
 const folded = new Set();
-const foldKey = (box, file) => `${openId}/${box.id}/${file.querySelector(".d2h-file-name")?.textContent.trim()}`;
+const foldKey = (box, repo, path) => `${openId}/${box.id}/${repo}/${path}`;
+const keyOf = file => foldKey(file.closest(".diffbox"), file.dataset.repo, file.dataset.path);
 
-function fold(file) {
-  const key = foldKey(file.closest(".diffbox"), file);
-  folded.has(key) ? folded.delete(key) : folded.add(key);
-  file.classList.toggle("folded", folded.has(key));
+/** Fold a file to its header or open it again, and tick it off in the tree while it is folded. */
+function fold(file, open = folded.has(keyOf(file))) {
+  const key = keyOf(file);
+  open ? folded.delete(key) : folded.add(key);
+  file.classList.toggle("folded", !open);
+  [...file.closest(".diffbox").querySelectorAll(".ftree [data-goto]")].find(b => b.dataset.goto === key)?.classList.toggle("done", !open);
   // Folding a file you had scrolled into leaves you at its header, not somewhere in the next file.
   const top = document.querySelector(".tabs")?.getBoundingClientRect().bottom ?? 0;
   if (file.getBoundingClientRect().top < top) file.scrollIntoView({ block: "start" });
 }
 
+/** Jump to a file from the tree, opening it if you had folded it away. */
+function goto(box, key) {
+  const file = [...box.querySelectorAll(".d2h-file-wrapper")].find(f => keyOf(f) === key);
+  if (!file) return;
+  if (folded.has(key)) fold(file, true);
+  file.scrollIntoView({ block: "start" });
+}
+
+/** Each file a patch touches: its path, what happened to it, and the lines it gained and lost. */
+function patchFiles(patch) {
+  return String(patch).split(/^(?=diff --git )/m).filter(c => c.startsWith("diff --git ")).map(c => ({
+    path: c.match(/^diff --git a\/.+? b\/(.+)$/m)?.[1] || "",
+    status: /^new file mode/m.test(c) ? "A" : /^deleted file mode/m.test(c) ? "D" : /^rename from/m.test(c) ? "R" : "M",
+    add: (c.match(/^\+(?!\+\+ )/gm) || []).length,
+    del: (c.match(/^-(?!-- )/gm) || []).length,
+  }));
+}
+
+/** The changed files as folders, a folder with only one folder in it merged into it the way GitHub does. */
+function fileTree(box, found) {
+  const root = { dirs: new Map(), files: [] };
+  for (const repo of found.repos)
+    for (const f of patchFiles(repo.patch)) {
+      const parts = [...(found.repos.length > 1 ? [repo.repo] : []), ...f.path.split("/")];
+      let node = root;
+      for (const dir of parts.slice(0, -1)) {
+        if (!node.dirs.has(dir)) node.dirs.set(dir, { dirs: new Map(), files: [] });
+        node = node.dirs.get(dir);
+      }
+      node.files.push({ ...f, name: parts.at(-1), key: foldKey(box, repo.repo, f.path) });
+    }
+  const draw = node => `<ul>${[...node.dirs].map(([name, dir]) => {
+      while (dir.dirs.size === 1 && !dir.files.length) { const [[next, inner]] = dir.dirs; name += `/${next}`; dir = inner; }
+      return `<li><details open><summary>${esc(name)}/</summary>${draw(dir)}</details></li>`;
+    }).join("")}${node.files.map(f => `<li><button data-goto="${esc(f.key)}"${folded.has(f.key) ? ` class="done"` : ""} title="${esc(f.path)}">`
+      + `<span class="st ${f.status}">${f.status}</span><span class="nm">${esc(f.name)}</span>`
+      + `<span class="add">+${f.add}</span><span class="del">−${f.del}</span></button></li>`).join("")}</ul>`;
+  return `<nav class="ftree">${draw(root)}</nav>`;
+}
+
 function paint(box, found, t, commentable, empty) {
   box.innerHTML = found.repos.length ? "" : `<div class="hint">${empty}</div>`;
+  if (found.repos.flatMap(r => patchFiles(r.patch)).length > 1) box.insertAdjacentHTML("beforeend", fileTree(box, found));
   for (const repo of found.repos) {
     const el = document.createElement("div");
     if (found.repos.length > 1) box.insertAdjacentHTML("beforeend", `<div class="repo-name">${esc(repo.repo)}</div>`);
     if (repo.error) box.insertAdjacentHTML("beforeend", `<div class="note bad">${esc(repo.error)}</div>`);
     box.append(el);
-    const ui = new Diff2HtmlUI(el, repo.patch, { drawFileList: repo.patch.split("\ndiff --git").length > 3, outputFormat: "line-by-line", matching: "lines", colorScheme: "auto", fileContentToggle: false });
+    const ui = new Diff2HtmlUI(el, repo.patch, { drawFileList: false, outputFormat: "line-by-line", matching: "lines", colorScheme: "auto", fileContentToggle: false });
     ui.draw();
     ui.highlightCode();
     decorate(el, t, repo, commentable);
-    for (const file of el.querySelectorAll(".d2h-file-wrapper"))
-      file.classList.toggle("folded", folded.has(foldKey(box, file)));
+    for (const file of el.querySelectorAll(".d2h-file-wrapper")) {
+      Object.assign(file.dataset, { repo: repo.repo, path: (file.querySelector(".d2h-file-name")?.textContent || "").split(" → ").pop().trim() });
+      file.classList.toggle("folded", folded.has(keyOf(file)));
+    }
   }
 }
 
@@ -1671,6 +1740,8 @@ document.getElementById("d-body").addEventListener("click", e => {
   // A click on a line, not a drag to select some of it: selecting code to copy is not a comment.
   const line = e.target.closest("tr.commentable");
   if (line && !String(getSelection()).trim()) return openCommentForm(line);
+  const jump = e.target.closest(".ftree [data-goto]");
+  if (jump) return goto(jump.closest(".diffbox"), jump.dataset.goto);
   const header = e.target.closest(".diffbox .d2h-file-header");
   if (header && !e.target.closest("a") && !String(getSelection()).trim()) return fold(header.closest(".d2h-file-wrapper"));
   const pick = e.target.closest("button[data-tab]");

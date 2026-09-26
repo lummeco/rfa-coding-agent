@@ -131,8 +131,13 @@ def planned_packet(task: tasks.Task) -> dict | None:
 
 
 def tail(message: dict) -> str:
-    """As much of an observation as is worth showing: the end, where the answer usually is."""
-    return str(message.get("content") or "")[-1500:]
+    """As much of an observation as is worth showing: the end, where the answer usually is.
+
+    Without the tags the model reads it in: the return code is on the step already, and `<output>`
+    around every block is noise to a person.
+    """
+    text = re.sub(r"<returncode>.*?</returncode>|</?output>", "", str(message.get("content") or ""), flags=re.S)
+    return text.strip()[-1500:]
 
 
 def progress(id: str, of: str = "") -> dict:
@@ -165,7 +170,9 @@ def progress(id: str, of: str = "") -> dict:
             steps.append({"commands": ran, "returncode": extra.get("returncode"), "output": tail(message)})
             ran = None
         elif message.get("role") == "exit":
+            # The command that ended the run gets no observation of its own: the exit is its answer.
             steps.append({"commands": [], "returncode": 0, "output": tail(message), "exit": True})
+            ran = None
     # The last one has no observation yet: that command is what the run is doing right now.
     return {"steps": steps, "now": ran or []}
 

@@ -391,17 +391,22 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   background: none; border: 0; padding: 0; font: inherit; font-size: 13px;
   color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
 }
-.run { margin-top: 10px; display: grid; gap: 8px; }
-.run .step {
-  border-left: 2px solid var(--line); padding-left: 10px;
-  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-}
+/* One line per step; a failure and the end open themselves, the rest open on a click. */
+.run { margin-top: 10px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.run .step { border-left: 2px solid var(--line); padding: 2px 0 2px 10px; }
 .run .step.bad { border-left-color: var(--red); }
 .run .step.now { border-left-color: var(--accent); }
-.run .cmd { color: var(--text); white-space: pre-wrap; word-break: break-word; }
+.run summary { display: flex; gap: 8px; cursor: pointer; list-style: none; color: var(--text); }
+.run summary::-webkit-details-marker { display: none; }
+.run .mark { flex: none; min-width: 3ch; color: var(--green); }
+.run .bad .mark { color: var(--red); }
+.run .now .mark { color: var(--accent); animation: pulse 1.8s ease-in-out infinite; }
+.run .cmd { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run pre { margin: 4px 0 8px; white-space: pre-wrap; word-break: break-word; font: inherit; }
+.run .full { color: var(--text); }
 .run .out {
-  color: var(--text-2); white-space: pre-wrap; word-break: break-word;
-  max-height: 150px; overflow: auto; margin-top: 3px;
+  color: var(--text-2); background: var(--surface-2); border-radius: 8px; padding: 6px 10px;
+  max-height: 260px; overflow: auto;
 }
 
 /* A done card: its rounds, newest first, each with what it was asked and what it did. */
@@ -1002,6 +1007,21 @@ function gallery(t) {
 
 let watching = null;   // the card id whose steps are open; null = nobody asked
 
+// Every command runs from `cd <its checkout> && ...`; the path is the same on every line, so it is
+// left in the tooltip.
+const shortCmd = c => c.replace(/^cd \S+ && /, "");
+
+function runStep(s, cls) {
+  const cmds = s.commands.map(shortCmd);
+  const mark = cls === "now" ? "…" : s.returncode && !s.exit ? `✗${s.returncode}` : "✓";
+  const open = cls === "bad" || s.exit;
+  return `<details class="step ${cls}"${open ? " open" : ""}>
+    <summary title="${esc(s.commands.join("\n"))}"><span class="mark">${esc(mark)}</span><span class="cmd">${esc(cmds.join(" ; ") || "finished")}</span></summary>
+    ${cmds.length ? `<pre class="full">${esc(cmds.join("\n"))}</pre>` : ""}
+    ${s.output ? `<pre class="out">${esc(s.output)}</pre>` : ""}
+  </details>`;
+}
+
 async function drawRun(id) {
   const box = document.getElementById("run");
   if (!box || watching !== id) return;
@@ -1012,16 +1032,19 @@ async function drawRun(id) {
   const of = (state.tasks.find(t => t.id === id) || {}).stage === "review" ? "review" : "";
   const res = await api(`/api/run?id=${encodeURIComponent(id)}&of=${of}`);
   if (!res.ok) return;
-  const { steps, now } = await res.json();
-  if (watching !== id) return;   // the panel moved on while we were waiting
-  const step = (s, cls) => `<div class="step ${cls}">
-      <div class="cmd">${s.commands.map(c => `$ ${esc(c)}`).join("\n") || "done"}</div>
-      ${s.output ? `<div class="out">${esc(s.output)}</div>` : ""}
-    </div>`;
-  const live = now.length ? step({ commands: now, output: "" }, "now") : "";
-  box.innerHTML = steps.length || live
-    ? steps.map(s => step(s, s.returncode ? "bad" : "")).join("") + live
-    : `<div class="hint">Nothing yet — the first step lands when the model answers.</div>`;
+  const { steps, now, again } = await res.json();
+  if (watching !== id || again) return;   // the panel moved on, or the file was caught mid-write
+  // A finished step never changes, so the log only grows: what is on screen stays put, open steps,
+  // scrolled outputs and all. It starts over only when the panel was redrawn or a new round began.
+  let shown = Number(box.dataset.shown || 0);
+  if (steps.length < shown) shown = 0, box.innerHTML = "";
+  if (steps.length === shown && box.dataset.now === JSON.stringify(now)) return;
+  box.querySelector(".now, .hint")?.remove();
+  box.insertAdjacentHTML("beforeend", steps.slice(shown).map(s => runStep(s, s.returncode && !s.exit ? "bad" : "")).join("")
+    + (now?.length ? runStep({ commands: now }, "now") : ""));
+  if (!box.children.length) box.innerHTML = `<div class="hint">Nothing yet — the first step lands when the model answers.</div>`;
+  box.dataset.shown = steps.length;
+  box.dataset.now = JSON.stringify(now);
   if (atBottom) body.scrollTop = body.scrollHeight;
 }
 
@@ -1641,8 +1664,9 @@ document.addEventListener("keydown", e => {
 });
 
 live();
-// Faster than the board, because this is the one thing you sit and watch.
-setInterval(() => watching && drawRun(watching), 1500);
+// Faster than the board, because this is the one thing you sit and watch -- and only while there is
+// something to watch: a finished run is read once, when the panel opens.
+setInterval(() => watching && LIVE.has(state.tasks.find(t => t.id === watching)?.status) && drawRun(watching), 1500);
 </script>
 </body>
 </html>

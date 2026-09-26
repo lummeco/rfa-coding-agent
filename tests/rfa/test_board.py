@@ -93,7 +93,7 @@ def test_a_run_reports_every_command_and_what_is_happening_now(tmp_path, monkeyp
         '{"messages": ['
         '{"role": "system"}, {"role": "user"},'
         '{"role": "assistant", "extra": {"actions": [{"command": "ls src"}]}},'
-        '{"role": "tool", "content": "<output>a.js</output>", "extra": {"returncode": 0}},'
+        '{"role": "tool", "content": "<returncode>0</returncode>\\n<output>\\na.js\\n</output>", "extra": {"returncode": 0}},'
         '{"role": "assistant", "extra": {"actions": [{"command": "npm test"}]}},'
         '{"role": "tool", "content": "1 failing", "extra": {"returncode": 1}},'
         '{"role": "assistant", "extra": {"actions": [{"command": "npm test -- --fix"}]}}'
@@ -102,8 +102,26 @@ def test_a_run_reports_every_command_and_what_is_happening_now(tmp_path, monkeyp
     found = board.progress("20260921-120000-a-task")
     assert [s["commands"] for s in found["steps"]] == [["ls src"], ["npm test"]]
     assert [s["returncode"] for s in found["steps"]] == [0, 1]
+    assert [s["output"] for s in found["steps"]] == ["a.js", "1 failing"], "what came back, not the tags around it"
     # The last command has no observation yet: that is what the run is doing this second.
     assert found["now"] == ["npm test -- --fix"]
+
+
+def test_a_finished_run_is_not_still_doing_its_last_command(tmp_path, monkeypatch):
+    """The command that submits has no observation; the exit after it is its answer, not a wait."""
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    run = tmp_path / "var" / "runs" / "20260921-120000-a-task"
+    run.mkdir(parents=True)
+    (run / "trajectory.json").write_text(
+        '{"messages": ['
+        '{"role": "assistant", "extra": {"actions": [{"command": "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"}]}},'
+        '{"role": "exit", "content": "all done"}'
+        "]}"
+    )
+    assert board.progress("20260921-120000-a-task") == {
+        "steps": [{"commands": [], "returncode": 0, "output": "all done", "exit": True}],
+        "now": [],
+    }
 
 
 def test_a_half_written_trajectory_is_not_ready_rather_than_broken(tmp_path, monkeypatch):

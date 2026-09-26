@@ -1,8 +1,7 @@
 """The execution packet: the engineering ticket the planner writes and the coder works from.
 
 It is deliberately a specification rather than an implementation plan. It says what the behavior
-must become and how that will be judged, and leaves the how to the coder -- `areas` are named as
-hints precisely so the coder inspects the repository instead of trusting them.
+must become and how that will be judged, and leaves the how to the coder.
 
 `files` and `complexity` are the exception: they never reach the coder's prompt. The host uses
 `files` to reject a packet whose paths it cannot find (a hallucinated area otherwise costs a whole
@@ -33,11 +32,6 @@ PACKET_TEMPLATE = """\
 
 ## Current behavior
 {{ p.current_behavior }}
-
-## Required behavior
-{% for item in p.required_behavior %}
-- {{ item }}
-{% endfor %}
 {% if p.constraints %}
 
 ## Constraints
@@ -45,44 +39,11 @@ PACKET_TEMPLATE = """\
 - {{ item }}
 {% endfor %}
 {% endif %}
-{% if p.areas %}
-
-## Relevant areas
-Likely relevant:
-{% for area in p.areas %}
-- {{ area }}
-{% endfor %}
-
-These are hints. Inspect the repository before deciding what needs changing.
-{% endif %}
 
 ## Acceptance criteria
 {% for item in p.acceptance_criteria %}
 {{ loop.index }}. {{ item }}
 {% endfor %}
-{% if p.verification.commands or p.verification.manual %}
-
-## Verification
-{% if p.verification.commands %}
-```bash
-{% for command in p.verification.commands %}
-{{ command }}
-{% endfor %}
-```
-{% endif %}
-{% if p.verification.manual %}
-{% if p.verification.commands %}
-Manual:
-{% endif %}
-{% for step in p.verification.manual %}
-{% if p.verification.manual | length > 1 or p.verification.commands %}
-{{ loop.index }}. {{ step }}
-{% else %}
-{{ step }}
-{% endif %}
-{% endfor %}
-{% endif %}
-{% endif %}
 {% if p.non_goals %}
 
 ## Non-goals
@@ -99,22 +60,14 @@ class PacketFile(BaseModel):
     why: str
 
 
-class Verification(BaseModel):
-    commands: list[str] = []
-    manual: list[str] = []
-
-
 class Packet(BaseModel):
     """What the planner returns. The coder sees `render()`; the rest is the host's."""
 
     title: str
     goal: str
     current_behavior: str
-    required_behavior: list[str]
     constraints: list[str] = []
-    areas: list[str] = []
     acceptance_criteria: list[str]
-    verification: Verification = Verification()
     non_goals: list[str] = []
     files: list[PacketFile] = []
     open_questions: list[str] = []
@@ -130,9 +83,6 @@ class Packet(BaseModel):
         return [f.path.strip().strip("`") for f in self.files]
 
 
-NUMBERED = re.compile(r"^\d+\.\s+")
-
-
 def parse(body: str) -> dict:
     """A rendered packet back into the fields the body carries.
 
@@ -141,17 +91,6 @@ def parse(body: str) -> dict:
     them on the card's meta and puts them back when it re-renders. A body that is not a rendered
     packet has no sections to read back, and says so.
     """
-    fields: dict = {
-        "title": "",
-        "goal": "",
-        "current_behavior": "",
-        "required_behavior": [],
-        "constraints": [],
-        "areas": [],
-        "acceptance_criteria": [],
-        "verification": {"commands": [], "manual": []},
-        "non_goals": [],
-    }
     sections: dict[str, list[str]] = {}
     current = None
     title = None
@@ -165,52 +104,26 @@ def parse(body: str) -> dict:
                 title = line.strip()
         elif current is not None:
             sections[current].append(line)
-    fields["title"] = title or ""
 
-    def items(name: str, marker: str) -> list[str]:
+    def items(name: str, pattern: str) -> list[str]:
         out: list[str] = []
         for line in sections.get(name, []):
-            if line.startswith(marker):
-                out.append(line[len(marker):].strip())
+            if match := re.match(pattern, line):
+                out.append(line[match.end() :].strip())
             elif line[:1] in (" ", "\t") and out:
                 # An indented line is the item above it -- a nested bullet, not a new one.
                 out[-1] += "\n" + line
         return out
 
-    def numbered_items(name: str) -> list[str]:
-        out: list[str] = []
-        for line in sections.get(name, []):
-            if (match := NUMBERED.match(line)):
-                out.append(line[match.end():].strip())
-            elif line[:1] in (" ", "\t") and out:
-                out[-1] += "\n" + line
-        return out
-
-    fields["goal"] = "\n".join(sections.get("Goal", [])).strip()
-    fields["current_behavior"] = "\n".join(sections.get("Current behavior", [])).strip()
-    fields["required_behavior"] = items("Required behavior", "- ")
-    fields["constraints"] = items("Constraints", "- ")
-    fields["areas"] = items("Relevant areas", "- ")
-    fields["acceptance_criteria"] = numbered_items("Acceptance criteria")
-    fields["non_goals"] = items("Non-goals", "- ")
-
-    commands: list[str] = []
-    manual: list[str] = []
-    in_block = False
-    for line in sections.get("Verification", []):
-        stripped = line.strip()
-        if in_block:
-            if stripped == "```":
-                in_block = False
-            else:
-                commands.append(stripped)
-        elif stripped == "```bash":
-            in_block = True
-        elif stripped and stripped != "Manual:":
-            manual.append(NUMBERED.sub("", line).strip())
-    fields["verification"] = {"commands": commands, "manual": manual}
-
-    if not all(fields[key] for key in ("title", "goal", "current_behavior", "required_behavior", "acceptance_criteria")):
+    fields = {
+        "title": title or "",
+        "goal": "\n".join(sections.get("Goal", [])).strip(),
+        "current_behavior": "\n".join(sections.get("Current behavior", [])).strip(),
+        "constraints": items("Constraints", r"- "),
+        "acceptance_criteria": items("Acceptance criteria", r"\d+\.\s+"),
+        "non_goals": items("Non-goals", r"- "),
+    }
+    if not all(fields[key] for key in ("title", "goal", "current_behavior", "acceptance_criteria")):
         raise ValueError("not a rendered packet")
     return fields
 
@@ -240,10 +153,4 @@ def problems(packet: Packet, repo_files: dict[str, set[str]], tool_calls: int, m
             )
         elif rel not in repo_files[name] and rel.rpartition("/")[0] not in folders[name]:
             found.append(f"`{path}` does not exist, and neither does its folder.")
-    for command in packet.verification.commands:
-        if re.search(r"\b(docker|docker-compose|podman)\b", command):
-            found.append(
-                f"`{command}`: checks run in a plain container at the repository root, where there is no "
-                f"docker. Unwrap it: `docker compose exec app pytest tests/x` is `cd app && pytest tests/x`."
-            )
     return found

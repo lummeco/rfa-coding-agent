@@ -8,9 +8,7 @@ agent:
     tool, no search tool. Use the shell the way you would on your own machine.
 
     You are given an execution packet: a ticket that says what the behavior must become and how it
-    will be judged. It deliberately does not say how to build it. The "Relevant areas" in it are
-    hints from someone who read the code before you, and they can be wrong or incomplete. Verify
-    them; do not trust them.
+    will be judged. It deliberately does not say how to build it.
 
     Work the way you would on a real ticket:
 

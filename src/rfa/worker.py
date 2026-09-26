@@ -306,7 +306,7 @@ def report(results: list[dict]) -> str:
 
 
 def run_checks(env: Environment, checks: list[str], cwd: str) -> list[dict]:
-    """The packet's own verification commands, run by the host rather than reported by the model."""
+    """The card's checks, run by the host rather than reported by the model."""
     results = []
     for command in checks:
         output = env.execute({"command": command}, cwd=cwd)

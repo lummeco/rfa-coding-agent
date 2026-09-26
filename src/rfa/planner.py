@@ -309,6 +309,5 @@ def plan_task(task: Task, config: dict, model: str = "", reasoning: str = "") ->
         complexity=agent.packet.complexity,
         packet_files=agent.packet.paths(),
         open_questions=agent.packet.open_questions,
-        checks=agent.packet.verification.commands,
         error=None,
     )

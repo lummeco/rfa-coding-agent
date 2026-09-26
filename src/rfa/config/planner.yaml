@@ -80,32 +80,13 @@ agent:
     - `goal` -- one or two sentences: what behavior changes, from the user's point of view.
     - `current_behavior` -- what the code does today, from what you actually read. This is where you
       put the surprise that contradicts the obvious approach. A few sentences.
-    - `required_behavior` -- what must be true afterwards, as observable behavior. Each item is a
-      behavior, never a code change: "Insert the copy immediately below the original", not "add a
-      duplicateLine() helper". Use a nested list (two-space indent) when one item covers several
-      fields or cases.
     - `constraints` -- boundaries the coder must respect: existing architecture to preserve, shapes
       not to change, patterns to follow, refactoring to avoid. Only real ones, from the idea or from
       what you read. Never generic advice.
-    - `areas` -- where the work likely lands, in the words a colleague would use: "invoice editor",
-      "invoice line row component", "invoice locking rules". Not paths. These are printed as hints
-      the coder is told to verify, so they cost nothing if slightly off and save a lot when right.
     - `acceptance_criteria` -- observable proof the work is done, each one distinguishing a correct
       implementation from a plausible wrong one. When persisted state changes, one criterion shows it
       survives a reload. Never "tests pass" on its own, and never "existing functionality works" on
       its own -- say which functionality.
-    - `verification.commands` -- the repository's own lint / typecheck / test commands for what
-      changed, as found in its README, Makefile, package.json or pyproject.toml. Empty if you found
-      none. Never invent one. They run in a plain container at the repository root with the
-      dependencies installed, so unwrap anything the repository runs through docker compose or a
-      container: `docker compose exec app pytest tests/x` is `cd app && pytest tests/x`. A command
-      that starts with `docker` cannot run there and fails before the coder starts.
-      A check the repository already fails is never held against the coder, and if every check
-      fails before the coder starts the run does not start at all. So lint only the files and
-      packages the work touches (`ruff check src/orders`, not `ruff check src`), and keep tests
-      that do not exist yet out of the command that runs the existing ones: `pytest tests/new`
-      and `pytest tests/old` are two commands, because pytest given one missing path runs nothing.
-    - `verification.manual` -- short steps a person would take to see it work.
     - `non_goals` -- what this task explicitly does not do. Only real ones; empty is fine.
     - `open_questions` -- prefer none. Only a genuine product decision with materially different
       outcomes and no safe narrow reading. Never ask what the repository already answers.
@@ -134,9 +115,7 @@ agent:
     ```bash
     cat <<'PACKET_EOF' > {{packet_path}}
     {% raw %}{ "title": "...", "goal": "...", "current_behavior": "...",
-      "required_behavior": ["..."], "constraints": ["..."], "areas": ["..."],
-      "acceptance_criteria": ["..."],
-      "verification": { "commands": ["..."], "manual": ["..."] },
+      "constraints": ["..."], "acceptance_criteria": ["..."],
       "non_goals": ["..."], "files": [{ "path": "<repo>/<path>", "why": "..." }],
       "open_questions": [], "complexity": 2, "complexity_reason": "..." }{% endraw %}
     PACKET_EOF

@@ -14,7 +14,7 @@ from email.message import Message
 import pytest
 
 from rfa import board, tasks
-from rfa.packet import Packet, Verification
+from rfa.packet import Packet
 
 TOKEN = "s3cret-token"
 ORIGIN = "http://127.0.0.1:4380"
@@ -308,10 +308,8 @@ def planned_ready(tmp_path, monkeypatch) -> tasks.Task:
         title="Add duplicate invoice line functionality.",
         goal="Allow a user to duplicate an existing invoice line.",
         current_behavior="Lines can be added, edited and deleted, but not duplicated.",
-        required_behavior=["Add a duplicate action.", "Copy:\n  - product\n  - VAT"],
-        areas=["invoice editor"],
+        constraints=["Keep it local.", "Leave:\n  - product\n  - VAT"],
         acceptance_criteria=["Clicking Duplicate creates exactly one new line."],
-        verification=Verification(commands=["pnpm test"], manual=["Open it."]),
         non_goals=["Bulk duplication."],
         complexity=2,
         complexity_reason="A normal feature following an existing pattern.",
@@ -329,7 +327,7 @@ def test_the_snapshot_exposes_a_ready_packets_sections(tmp_path, monkeypatch):
     card = board.snapshot()["tasks"][0]
     assert card["packet"]["goal"] == "Allow a user to duplicate an existing invoice line."
     assert card["packet"]["acceptance_criteria"] == ["Clicking Duplicate creates exactly one new line."]
-    assert card["packet"]["constraints"] == []
+    assert card["packet"]["constraints"] == ["Keep it local.", "Leave:\n  - product\n  - VAT"]
     assert card["open_questions"] == ["Which line to copy from?"]
 
 
@@ -356,9 +354,7 @@ def test_editing_a_packets_sections_rewrites_the_body_and_keeps_the_rest(tmp_pat
     body = tasks.read(edited.path).body
     assert "## Goal\nAllow a user to duplicate an invoice line, with or without its VAT." in body
     assert "## Acceptance criteria\n1. Clicking Duplicate creates exactly one new line.\n2. The copy is editable." in body
-    assert "## Required behavior\n- Add a duplicate action.\n- Copy:\n  - product\n  - VAT" in body
-    assert "## Relevant areas\nLikely relevant:\n- invoice editor" in body
-    assert "## Verification\n```bash\npnpm test\n```\nManual:\n1. Open it." in body
+    assert "## Constraints\n- Keep it local.\n- Leave:\n  - product\n  - VAT" in body
     assert "## Non-goals\n- Bulk duplication." in body
     # open_questions stays on the meta, not in the body.
     assert tasks.read(edited.path).meta["open_questions"] == ["Which line to copy from?", "And why?"]

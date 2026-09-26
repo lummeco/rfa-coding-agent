@@ -1,6 +1,6 @@
 import pytest
 
-from rfa.packet import Packet, PacketFile, Verification, parse, problems
+from rfa.packet import Packet, PacketFile, parse, problems
 
 REPO_FILES = {"invoicing": {"src/editor/InvoiceEditor.tsx", "src/editor/LineRow.tsx", "tests/editor.test.ts"}}
 
@@ -11,8 +11,10 @@ def packet(**overrides) -> Packet:
             "title": "Add duplicate invoice line functionality.",
             "goal": "Allow a user to duplicate an existing invoice line.",
             "current_behavior": "Lines can be added, edited and deleted, but not duplicated.",
-            "required_behavior": ["Add a duplicate action.", "Copy:\n  - product\n  - VAT"],
-            "acceptance_criteria": ["Clicking Duplicate creates exactly one new line."],
+            "acceptance_criteria": [
+                "Clicking Duplicate creates exactly one new line.",
+                "It copies:\n  - product\n  - VAT",
+            ],
             "complexity": 2,
             "complexity_reason": "A normal feature following an existing pattern.",
             **overrides,
@@ -20,70 +22,35 @@ def packet(**overrides) -> Packet:
     )
 
 
-def test_render_omits_empty_sections_and_keeps_nested_bullets():
-    body = packet().render()
-    assert "## Constraints" not in body and "## Relevant areas" not in body and "## Verification" not in body
-    assert "- Copy:\n  - product\n  - VAT" in body
-    assert body.endswith("new line.\n") and "\n\n\n" not in body
-
-
-def test_render_marks_areas_as_hints_and_never_leaks_the_grounded_paths():
+def test_render_omits_empty_sections_and_never_leaks_the_grounded_paths():
     """`files` is the host's: it validates and scopes with it, but the coder must inspect the repo itself."""
-    body = packet(
-        areas=["invoice editor"], files=[PacketFile(path="invoicing/src/editor/LineRow.tsx", why="the row")]
-    ).render()
-    assert "## Relevant areas\nLikely relevant:\n- invoice editor" in body
-    assert "These are hints. Inspect the repository before deciding what needs changing." in body
-    assert "LineRow.tsx" not in body
-
-
-@pytest.mark.parametrize(
-    ("verification", "expected"),
-    [
-        (Verification(manual=["Run the tests."]), "## Verification\nRun the tests.\n"),
-        (Verification(manual=["Open it.", "Click it."]), "## Verification\n1. Open it.\n2. Click it.\n"),
-        (Verification(commands=["pnpm test"]), "## Verification\n```bash\npnpm test\n```\n"),
-        (
-            Verification(commands=["pnpm test"], manual=["Open it."]),
-            "## Verification\n```bash\npnpm test\n```\nManual:\n1. Open it.\n",
-        ),
-    ],
-)
-def test_render_numbers_manual_steps_only_when_they_are_a_sequence(verification, expected):
-    assert expected in packet(verification=verification).render()
+    body = packet(files=[PacketFile(path="invoicing/src/editor/LineRow.tsx", why="the row")]).render()
+    assert "## Constraints" not in body and "## Non-goals" not in body and "LineRow.tsx" not in body
+    assert "2. It copies:\n  - product\n  - VAT" in body
+    assert body.endswith("  - VAT\n") and "\n\n\n" not in body
 
 
 def test_parse_reads_a_rendered_packet_back_into_its_fields():
-    p = packet(
-        constraints=["Keep it local."],
-        areas=["invoice editor"],
-        verification=Verification(commands=["pnpm test"], manual=["Open it.", "Click it."]),
-        non_goals=["Bulk duplication."],
-    )
+    p = packet(constraints=["Keep it local."], non_goals=["Bulk duplication."])
     fields = parse("\n" + p.render())
     assert fields["title"] == p.title
     assert fields["goal"] == p.goal
     assert fields["current_behavior"] == p.current_behavior
-    assert fields["required_behavior"] == p.required_behavior
     assert fields["constraints"] == p.constraints
-    assert fields["areas"] == p.areas
     assert fields["acceptance_criteria"] == p.acceptance_criteria
-    assert fields["verification"] == {"commands": ["pnpm test"], "manual": ["Open it.", "Click it."]}
     assert fields["non_goals"] == p.non_goals
 
 
 def test_parse_keeps_nested_bullets_with_their_item():
     fields = parse(packet().render())
-    assert fields["required_behavior"] == ["Add a duplicate action.", "Copy:\n  - product\n  - VAT"]
+    assert fields["acceptance_criteria"] == [
+        "Clicking Duplicate creates exactly one new line.",
+        "It copies:\n  - product\n  - VAT",
+    ]
 
 
 def test_parse_render_is_a_round_trip():
-    p = packet(
-        constraints=["Keep it local."],
-        areas=["invoice editor"],
-        verification=Verification(commands=["pnpm test"], manual=["Open it.", "Click it."]),
-        non_goals=["Bulk duplication."],
-    )
+    p = packet(constraints=["Keep it local."], non_goals=["Bulk duplication."])
     again = Packet(**parse(p.render()), complexity=p.complexity, complexity_reason=p.complexity_reason)
     assert again.render() == p.render()
 
@@ -113,17 +80,3 @@ def test_problems_grounds_every_path_against_the_repository(path, complaint):
 
 def test_problems_rejects_a_packet_written_without_reading_the_code():
     assert "at least 3 tool calls" in problems(packet(), REPO_FILES, tool_calls=0, min_tool_calls=3)[0]
-
-
-@pytest.mark.parametrize(
-    ("command", "rejected"),
-    [
-        ("docker compose -f docker-compose.dev.yml exec app pytest tests/x", True),
-        ("docker-compose exec app ruff check src", True),
-        ("cd app && pytest tests/x", False),
-        ("pytest tests/test_dockerfile.py", False),
-    ],
-)
-def test_problems_rejects_checks_that_need_docker(command, rejected):
-    found = problems(packet(verification=Verification(commands=[command])), REPO_FILES, tool_calls=5, min_tool_calls=3)
-    assert bool(found) == rejected and all("cd app && pytest tests/x" in f for f in found)

@@ -601,8 +601,8 @@ function card(t) {
   const dots = t.complexity
     ? `<span class="cx" title="complexity ${t.complexity}/5">${[1,2,3,4,5].map(n => `<i class="${n <= t.complexity ? "on" : ""}"></i>`).join("")}</span>`
     : "";
-  const draggable = !t.archived && (t.stage === "planning" || t.stage === "todo") ? " draggable" : "";
-  return `<div class="card-wrap${t.archived ? " archived" : ""}${draggable}" data-drag-id="${esc(t.id)}">
+  const draggable = !t.archived && (t.stage === "planning" || t.stage === "todo") ? ` draggable="true"` : "";
+  return `<div class="card-wrap${t.archived ? " archived" : ""}"${draggable} data-drag-id="${esc(t.id)}">
     <button class="card ${t.status === "failed" ? "failed" : ""}" data-id="${esc(t.id)}">
       <div class="title">${esc(t.title)}</div>
       <div class="meta">

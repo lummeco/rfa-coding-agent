@@ -459,7 +459,12 @@ button.action:disabled { opacity: .45; cursor: not-allowed; }
 .diffbox:empty { display: none; }
 .diffbox .repo-name { font: 600 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-2); margin: 10px 0 6px; }
 .diffbox .d2h-wrapper { text-align: left; }
-.diffbox .d2h-file-header { position: static; }
+/* A file's header stays under the tabs while you read it, and a click on it folds the file away. */
+#detail .diffbox .d2h-file-header { position: sticky; top: var(--under-tabs, 0); z-index: 2; cursor: pointer; user-select: none; }
+.diffbox .d2h-file-wrapper { scroll-margin-top: calc(var(--under-tabs, 0px) + 20px); }
+.diffbox .d2h-file-name-wrapper::before { content: "▾"; color: var(--text-3); margin-right: 6px; }
+.diffbox .folded .d2h-file-name-wrapper::before { content: "▸"; }
+.diffbox .folded .d2h-file-diff, .diffbox .folded .d2h-files-diff { display: none; }
 /* diff2html pins line numbers with `position: absolute`; without a positioned parent they pin to the panel and slide off their rows as it scrolls. */
 .diffbox .d2h-code-wrapper { position: relative; }
 .diffbox tr.commentable td.d2h-code-linenumber { cursor: pointer; }
@@ -1204,6 +1209,23 @@ async function drawFullDiff(t) {
   } catch (e) { box.innerHTML = `<div class="note bad">${esc(e.message)}</div>`; return; }
   if (document.getElementById("diff-full") !== box) return;
   paint(box, diffs.get(key), t, false, "Nothing landed, so there is nothing to compare.");
+  const patches = diffs.get(key).repos.map(r => r.patch).join("\n");
+  const count = re => (patches.match(re) || []).length, files = count(/^diff --git /gm);
+  document.getElementById("full-sum").textContent = `${files} file${files === 1 ? "" : "s"} changed · `
+    + `+${count(/^\+(?!\+\+ )/gm)} −${count(/^-(?!-- )/gm)} · from where the first round started to the latest round.`;
+}
+
+// Files you folded, per card and per diff, so a redraw leaves what you have checked folded.
+const folded = new Set();
+const foldKey = (box, file) => `${openId}/${box.id}/${file.querySelector(".d2h-file-name")?.textContent.trim()}`;
+
+function fold(file) {
+  const key = foldKey(file.closest(".diffbox"), file);
+  folded.has(key) ? folded.delete(key) : folded.add(key);
+  file.classList.toggle("folded", folded.has(key));
+  // Folding a file you had scrolled into leaves you at its header, not somewhere in the next file.
+  const top = document.querySelector(".tabs")?.getBoundingClientRect().bottom ?? 0;
+  if (file.getBoundingClientRect().top < top) file.scrollIntoView({ block: "start" });
 }
 
 function paint(box, found, t, commentable, empty) {
@@ -1217,6 +1239,8 @@ function paint(box, found, t, commentable, empty) {
     ui.draw();
     ui.highlightCode();
     decorate(el, t, repo, commentable);
+    for (const file of el.querySelectorAll(".d2h-file-wrapper"))
+      file.classList.toggle("folded", folded.has(foldKey(box, file)));
   }
 }
 
@@ -1403,7 +1427,7 @@ function showDetail(id) {
     ];
     const content = {
       runs: () => linksRow(t) + roundsView(t),
-      full: () => `<p class="tests">From where the first round started to the latest round, all rounds together.</p><div class="diffbox" id="diff-full"></div>`,
+      full: () => `<p class="tests" id="full-sum">From where the first round started to the latest round.</p><div class="diffbox" id="diff-full"></div>`,
       shots: () => shotsGrid(t) || `<div class="hint">loading the screenshots…</div>`,
       history: () => history.replace("<h2>History</h2>", "") || `<div class="hint">Nothing recorded yet.</div>`,
       log: () => `<div class="run" id="run"></div>`,
@@ -1420,6 +1444,9 @@ function showDetail(id) {
   if (detailId !== id || editing || drawnFrom !== lastBody) {
     panel.innerHTML = html;
     lastBody = drawnFrom;
+    // Sticky offsets count from inside the panel's 20px padding, which the tabs bar reaches up into.
+    const tabs = panel.querySelector(".tabs");
+    panel.style.setProperty("--under-tabs", `${tabs ? tabs.offsetHeight - 20 : 0}px`);
     if (rounded && tab === "runs") drawDiffs(t);
     if (rounded && tab === "full") drawFullDiff(t);
   }
@@ -1644,6 +1671,8 @@ document.getElementById("d-body").addEventListener("click", e => {
   // A click on a line, not a drag to select some of it: selecting code to copy is not a comment.
   const line = e.target.closest("tr.commentable");
   if (line && !String(getSelection()).trim()) return openCommentForm(line);
+  const header = e.target.closest(".diffbox .d2h-file-header");
+  if (header && !e.target.closest("a") && !String(getSelection()).trim()) return fold(header.closest(".d2h-file-wrapper"));
   const pick = e.target.closest("button[data-tab]");
   if (pick) {
     tab = pick.dataset.tab;

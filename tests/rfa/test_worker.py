@@ -15,6 +15,7 @@ from rfa.worker import (
     changed_note,
     environment,
     free_branch,
+    kept,
     land,
     landable,
     outside,
@@ -122,6 +123,19 @@ def test_every_check_runs_so_the_coder_sees_all_the_damage_at_once(tmp_path):
 )
 def test_the_card_says_why_a_run_failed(patches, checks, expected, tmp_path):
     assert expected in summarize(run_coder([submit()], tmp_path, checks, rounds=1), patches)
+
+
+def test_a_fix_round_told_to_change_nothing_keeps_the_branch(tmp_path):
+    """A comment saying "just return the current diff" is one a fix round can obey; that is not a failure."""
+    agent = run_coder([submit()], tmp_path, ["true"])
+    assert kept(agent, {}, {"web": "rfa/t"})
+    assert not kept(agent, {}, {})  # a first round with no diff has nothing to keep
+    assert not kept(agent, {"web": "diff"}, {"web": "rfa/t"})  # a diff is landable's call
+
+
+def test_a_fix_round_that_changed_nothing_but_broke_a_check_still_fails(tmp_path):
+    agent = run_coder([submit()], tmp_path, ["false"], baseline={"false": True}, rounds=1)
+    assert not kept(agent, {}, {"web": "rfa/t"})
 
 
 def test_a_full_window_ends_the_run_instead_of_spending_it_on_the_same_wall(tmp_path):

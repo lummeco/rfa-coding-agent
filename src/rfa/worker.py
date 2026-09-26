@@ -573,6 +573,7 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         (output / "tests.json").write_text(json.dumps(tests, indent=2))
 
     shipped = landable(agent, patches)
+    settled = shipped or kept(agent, patches, before)
     # `landed`, not `branches`: the card's own `branches:` is where its work started from, and
     # these are where it ended up. One name for both would quietly overwrite the first with the second.
     landed, commits = dict(before), {}
@@ -601,9 +602,9 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
             "outside": outside(comments, patches),
             "commits": commits,
             "tests": {k: tests[k] for k in ("ok", "counts", "attempts", "command")} if tests else None,
-            "error": None if shipped else summarize(agent, patches),
+            "error": None if settled else summarize(agent, patches),
         },
-        answered=[c["id"] for c in comments] if shipped else [],
+        answered=[c["id"] for c in comments] if settled else [],
         earlier=state["rounds"],
     )
     tasks.log(
@@ -616,7 +617,10 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         exit=agent.exit_status(),
         round=n,
     )
-    task.body += changed_note(agent, landed, repos, output) if shipped else failure_note(agent, patches, output)
+    if shipped:
+        task.body += changed_note(agent, landed, repos, output)
+    else:
+        task.body += KEPT_NOTE if settled else failure_note(agent, patches, output)
     task.body += dropped_note(dropped)
     # Work that landed in a repository somebody wrote an `apps:` block for is not done until the
     # reviewer has driven it. Everywhere else there is no app to start, so `done` is the truth.
@@ -626,11 +630,11 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         task,
         "done",
         actor="worker",
-        status="built" if shipped else "failed",
+        status="built" if settled else "failed",
         finished_at=tasks.now(),
         run=str(output),
         landed=landed or None,
-        error=None if shipped else summarize(agent, patches),
+        error=None if settled else summarize(agent, patches),
     )
 
 
@@ -675,6 +679,21 @@ def landable(agent: CoderAgent, patches: dict[str, str]) -> bool:
     checked -- but a diff that was checked and passed is the same diff whoever pressed submit.
     """
     return bool(patches) and not agent.regressions() and agent.submitted()
+
+
+def kept(agent: CoderAgent, patches: dict[str, str], before: dict[str, str]) -> bool:
+    """Is this a fix round that answered its comments by changing nothing?
+
+    "Leave it as it is" is a comment a fix round can be given. A submit with no diff and the checks
+    green is then the round doing what it was asked: the branch the last round landed stands. A first
+    round with no diff has nothing that stands, so that one still fails.
+    """
+    return bool(before) and not patches and agent.submitted() and not agent.regressions()
+
+
+KEPT_NOTE = (
+    "\n## Result\n\nThe coder changed nothing and the checks passed, so the branch stays as the last round landed it.\n"
+)
 
 
 def summarize(agent: CoderAgent, patches: dict[str, str]) -> str:

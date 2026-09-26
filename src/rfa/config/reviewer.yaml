@@ -49,7 +49,7 @@ agent:
     sys.path.insert(0, "/work")
     from drive import page, sketch
 
-    with page("{{url}}", "board-loaded") as tab:
+    with page("{{url}}", "before - board loaded") as tab:
         print(sketch(tab))
         tab.click("text=Plan it")
         tab.wait_for_timeout(500)
@@ -69,6 +69,11 @@ agent:
 
     Take a screenshot of every criterion you judge. They are what the owner looks at, and a review
     with no screenshots is rejected.
+
+    Name each screenshot so the owner can tell what it shows without opening it: `before - <what it
+    shows>` for a shot taken before you act, `after - <what it shows>` for one taken after. The
+    description names the state or the criterion being shown, not a token or a step number --
+    `before - empty board`, `after - card created`, never `check1`.
 
     ## The verdict
 

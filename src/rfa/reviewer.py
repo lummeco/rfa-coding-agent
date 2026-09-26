@@ -29,6 +29,7 @@ from minisweagent.agents.default import AgentConfig, DefaultAgent
 from minisweagent.environments import get_environment
 from minisweagent.exceptions import InterruptAgentFlow, Submitted
 from minisweagent.models import get_model
+from minisweagent.utils.serialize import recursive_merge
 from rfa import settings, tasks
 from rfa.planner import REPOS_DIR, _errors, seed
 from rfa.rounds import packet_only
@@ -261,7 +262,10 @@ def review_task(task: Task, config: dict, model: str = "", reasoning: str = "") 
     if not (expected := criteria(task.body)):
         raise ValueError(f"{task.id} has no acceptance criteria to judge")
 
-    repos = settings.repo_paths(config, task.meta.get("repos") or [], settings.start_branches(task.meta))
+    spec = specs[under_test]
+    # `with:` is what the app cannot run without -- its backend -- seeded beside it at its pinned ref.
+    names = list(dict.fromkeys([*(task.meta.get("repos") or []), *(spec.get("with") or [])]))
+    repos = settings.repo_paths(config, names, settings.start_branches(task.meta))
     output = tasks.home() / "var" / "runs" / task.id / "review"
     shutil.rmtree(output, ignore_errors=True)
     output.mkdir(parents=True, exist_ok=True)
@@ -269,9 +273,11 @@ def review_task(task: Task, config: dict, model: str = "", reasoning: str = "") 
     tasks.save(task, status="reviewing", model=chosen, reasoning=level or None)
     tasks.log(type="review_started", id=task.id, repo=under_test, model=chosen)
 
-    env, spec = None, specs[under_test]
+    env = None
     try:
-        env = get_environment(config.get("environment", {}), default_type="docker")
+        env = get_environment(
+            recursive_merge(config.get("environment", {}), {"env": spec.get("env") or {}}), default_type="docker"
+        )
         # The branch, not the base: what is reviewed is what the coder actually landed.
         seed(env, {name: (path, landed.get(name) or ref) for name, (path, ref) in repos.items()})
         install_drive(env)
@@ -290,6 +296,7 @@ def review_task(task: Task, config: dict, model: str = "", reasoning: str = "") 
             url=url(spec),
             repo=under_test,
             serve_log=SERVE_LOG,
+            notes=spec.get("notes", ""),
             shots=agent.config.shots_path,
         )
         shots = collect(env, output, agent.config.shots_path)

@@ -1,6 +1,7 @@
 """The reviewer: the verdict the host will accept, and what a card carries back when it fails."""
 
 import pytest
+from jinja2 import StrictUndefined, Template
 
 from minisweagent.environments.local import LocalEnvironment
 from minisweagent.models.test_models import DeterministicModel, make_output
@@ -228,3 +229,13 @@ def test_a_review_cannot_write_over_the_run_it_is_judging(workspace):
     (run / "review" / "trajectory.json").write_text('{"messages": [{"role": "exit", "content": "the reviewer"}]}')
     assert board.progress(task.id)["steps"][0]["output"] == "the coder"
     assert board.progress(task.id, "review")["steps"][0]["output"] == "the reviewer"
+
+
+@pytest.mark.parametrize(("notes", "shown"), [("sign in with `login(tab)` first", True), ("", False)])
+def test_an_apps_notes_reach_the_reviewer_only_when_written(notes, shown):
+    """How to sign in is the app's to say; an app that says nothing gets no empty section."""
+    template = settings.load("reviewer")["agent"]["instance_template"]
+    rendered = Template(template, undefined=StrictUndefined).render(
+        task="t", criteria=["c"], url="u", repo="r", serve_log="l", shots="s", step_limit=1, notes=notes
+    )
+    assert ("## Using this app" in rendered) is shown and (notes in rendered) and "## Driving the browser" in rendered

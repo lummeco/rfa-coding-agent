@@ -38,6 +38,12 @@ agent:
 
     It is running at **{{url}}**, served out of `/work/repos/{{repo}}`. If it prints an address, a
     token or a port of its own, that is in `{{serve_log}}`.
+    {% if notes %}
+
+    ## Using this app
+
+    {{notes}}
+    {% endif %}
 
     ## Driving the browser
 

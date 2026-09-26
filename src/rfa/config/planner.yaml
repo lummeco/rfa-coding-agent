@@ -100,6 +100,11 @@ agent:
       dependencies installed, so unwrap anything the repository runs through docker compose or a
       container: `docker compose exec app pytest tests/x` is `cd app && pytest tests/x`. A command
       that starts with `docker` cannot run there and fails before the coder starts.
+      A check the repository already fails is never held against the coder, and if every check
+      fails before the coder starts the run does not start at all. So lint only the files and
+      packages the work touches (`ruff check src/orders`, not `ruff check src`), and keep tests
+      that do not exist yet out of the command that runs the existing ones: `pytest tests/new`
+      and `pytest tests/old` are two commands, because pytest given one missing path runs nothing.
     - `verification.manual` -- short steps a person would take to see it work.
     - `non_goals` -- what this task explicitly does not do. Only real ones; empty is fine.
     - `open_questions` -- prefer none. Only a genuine product decision with materially different

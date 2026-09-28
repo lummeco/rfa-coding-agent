@@ -171,6 +171,20 @@ class AppFailed(Exception):
     """The app under review would not start. The card's problem, not the machine's."""
 
 
+class AppKilled(RuntimeError):
+    """The kernel killed the app's setup or server: the container ran out of memory. The machine's
+    problem, not the card's, so it leaves the card in `review` rather than costing it an attempt."""
+
+
+KILLED_RE = re.compile(r"^Killed\b", re.MULTILINE)
+
+
+def killed(returncode: int, output: str) -> bool:
+    """SIGKILL, which in a memory-capped container is the OOM killer. A wrapped command's own exit
+    code is often lost (`|| exit 1`), so the shell's `Killed` line counts as well."""
+    return returncode == 137 or bool(KILLED_RE.search(output))
+
+
 def playwright_pin(image: str) -> str:
     """The playwright `drive.py` imports, read off the image tag it has to match.
 
@@ -207,10 +221,13 @@ def start_app(env: Environment, repo: str, spec: dict) -> None:
     A start that never comes up is the coder's failure, not the machine's: the app is at the branch
     the coder wrote, and an app that will not boot is exactly what this stage is for. The serve log
     goes back as the problem, so `apps:` being wrong reads the same way -- on the first card, once.
+    The exception is the OOM killer: no code change fixes a container too small for the build.
     """
     for command in spec.get("setup") or []:
         result = env.execute({"command": command}, cwd=f"{REPOS_DIR}/{repo}", timeout=spec.get("setup_timeout", 900))
         if result["returncode"] != 0:
+            if killed(result["returncode"], result["output"]):
+                raise AppKilled(f"`{command}` was killed, out of memory:\n\n{result['output'][-3000:]}")
             raise AppFailed(f"`{command}` failed:\n\n{result['output'][-3000:]}")
     env.execute(
         {"command": f"mkdir -p {Path(SERVE_LOG).parent} && nohup {spec['serve']} > {SERVE_LOG} 2>&1 & echo started"},
@@ -222,6 +239,8 @@ def start_app(env: Environment, repo: str, spec: dict) -> None:
     )
     if env.execute({"command": ready}, timeout=spec.get("ready", 120) + 30)["returncode"] != 0:
         log = env.execute({"command": f"cat {SERVE_LOG}"})["output"][-3000:]
+        if killed(0, log):
+            raise AppKilled(f"`{spec['serve']}` was killed, out of memory:\n\n{log}")
         raise AppFailed(f"`{spec['serve']}` never answered on port {spec['port']}:\n\n{log}")
 
 

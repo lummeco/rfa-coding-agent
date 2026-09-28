@@ -120,7 +120,7 @@ environment:
   image: mcr.microsoft.com/playwright/python:v1.55.0-noble
   cwd: /work
   timeout: 300
-  run_args: ["--rm", "--memory", "8g", "--cpus", "4", "--pids-limit", "2048", "--shm-size", "1g"]
+  run_args: ["--rm", "--memory", "12g", "--cpus", "4", "--pids-limit", "2048", "--shm-size", "1g"]
 
 model:
   model_kwargs:

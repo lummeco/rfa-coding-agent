@@ -11,6 +11,7 @@ from rfa.reviewer import (
     Review,
     ReviewerAgent,
     criteria,
+    killed,
     packet_only,
     playwright_pin,
     problems,
@@ -70,6 +71,19 @@ def test_criteria_are_read_off_the_packet_and_stop_at_the_next_heading():
 def test_the_playwright_installed_is_the_one_the_image_baked_browsers_for(image, expected):
     """A package newer than the image expects its own browser build, which is not the one in there."""
     assert playwright_pin(image) == expected
+
+
+@pytest.mark.parametrize(
+    ("returncode", "output", "expected"),
+    [
+        (137, "", True),
+        (1, "Creating an optimized production build ...\nKilled\n", True),  # `|| exit 1` hid the 137
+        (1, "Type error: 'Killed' is not assignable\nFailed to compile.", False),
+        (1, "Failed to compile.", False),
+    ],
+)
+def test_an_oom_kill_is_the_machines_problem_not_the_coders(returncode, output, expected):
+    assert killed(returncode, output) == expected
 
 
 def test_previous_rounds_are_cut_off_before_the_card_goes_back():

@@ -18,7 +18,7 @@ from minisweagent.environments import get_environment
 from minisweagent.exceptions import FormatError, LimitsExceeded, Submitted
 from minisweagent.models import get_model
 from minisweagent.utils.serialize import recursive_merge
-from rfa import junit, lint, rounds, settings, tasks
+from rfa import junit, lint, prepare, rounds, settings, tasks
 from rfa.packet import FORBIDDEN_PATHS
 from rfa.planner import REPOS_DIR, git, pin, seed
 from rfa.tasks import Task
@@ -516,7 +516,6 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
     cwd = f"{REPOS_DIR}/{names[0]}"
     env = None
     try:
-        env = get_environment(environment(config, spec), default_type="docker")
         # Pinned here rather than before the move: a fetch needs the network, and a card that fails
         # on it belongs back in the queue with the rest of the infrastructure failures.
         # A fix round starts from the commit the last round landed, in this checkout: that branch
@@ -527,9 +526,12 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
             if name in before
         }
         reference = pin(settings.reference_paths(config, task.meta))
+        container = environment(config, spec)
+        container["image"] = prepare.image(container, spec, repos, names[0])
+        env = get_environment(container, default_type="docker")
         seed(env, repos, reference)
-        # Before the base commit, so whatever the setup leaves in the checkout is not the coder's diff.
-        setup(env, spec, cwd)
+        # Before the base commit, so whatever the services write into the checkout is not the coder's diff.
+        prepare.run(env, spec.get("start") or [], cwd, spec.get("setup_timeout", 900))
         make_git_repos(env, names)
         suggested = task.meta.get("checks") or []
         test, lint_command = spec.get("test") or "", spec.get("lint") or ""
@@ -683,16 +685,6 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
 def environment(config: dict, spec: dict) -> dict:
     """The coder's container, with the repository's own image and variables over the workspace's."""
     return recursive_merge(config.get("environment", {}), {k: spec[k] for k in ("image", "env") if k in spec})
-
-
-def setup(env: Environment, spec: dict, cwd: str) -> None:
-    """The `containers:` block's setup: the dependencies and services the checks need, put there by
-    the host. A coder that has to build its own test environment spends its budget on pip and apt,
-    and a check that needs a database nobody started is a check that was red before it began."""
-    for command in spec.get("setup") or []:
-        result = env.execute({"command": command}, cwd=cwd, timeout=spec.get("setup_timeout", 900))
-        if result["returncode"] != 0:
-            raise RuntimeError(f"`{command}` failed setting up the container:\n\n{result['output'][-3000:]}")
 
 
 def changed_files(patches: dict[str, str]) -> str:

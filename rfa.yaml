@@ -256,7 +256,11 @@ coder:
 # checks were red before it started, which now stops the run at step 0 rather than at step 240.
 #
 #   image:  the coder's image for this repository; default is `coder.environment.image`.
-#   setup:  commands run once in the repository root. 900s each; a failure puts the card back in todo.
+#   setup:  commands run in the repository root. 900s each; a failure puts the card back in todo.
+#           Run once, not every run: the result is kept as a local image (`rfa-setup/<repo>`) and
+#           reused until the base image, setup, env or a lockfile changes -- which is also what lets
+#           a run start with no network. Only files survive, so stop any service setup started.
+#   start:  commands run at the top of every run, after the image: the services setup installed.
 #   env:    variables set on every command, the coder's and the checks'.
 #   test:   the repository's own test suite, run by the host -- never the coder -- before the coder
 #           starts and on every submit. It must write a JUnit report to `$RFA_JUNIT`, e.g.
@@ -272,13 +276,14 @@ containers:
   lummeco/base:
     image: python:3.11-bookworm
     setup:
-      # Postgres with PostGIS, in the container, started once: a service started in one command is
-      # still running in the next. `tests/conftest.py` connects as test/test to `test` on 127.0.0.1.
+      # Postgres with PostGIS. `tests/conftest.py` connects as test/test to `test` on 127.0.0.1.
+      # Stopped again once the user exists, so the saved image holds a cleanly shut down database.
       - apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends postgresql postgresql-15-postgis-3 > /dev/null
-      - service postgresql start
-      - su postgres -c "psql -qc \"CREATE USER test WITH PASSWORD 'test' SUPERUSER\"" && su postgres -c "psql -qc 'CREATE DATABASE test OWNER test'"
+      - service postgresql start && su postgres -c "psql -qc \"CREATE USER test WITH PASSWORD 'test' SUPERUSER\"" && su postgres -c "psql -qc 'CREATE DATABASE test OWNER test'" && service postgresql stop
       # What lummeco-base/Dockerfile does for the dev image: the locked dependency set, dev group included.
       - cd lummeco-base && pip install --quiet poetry poetry-plugin-export && poetry export --without-hashes --with dev -o /tmp/requirements.txt && pip install --quiet -r /tmp/requirements.txt && pip install --quiet --force-reinstall --no-deps jwt==1.3.1
+    start:
+      - service postgresql start
     # `make lint` without the docker compose around it.
     lint: cd lummeco-base && ruff check --output-format json src
     # `make test` without the docker compose around it or the coverage: the whole suite, from the

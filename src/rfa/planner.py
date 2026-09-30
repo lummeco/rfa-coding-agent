@@ -9,7 +9,9 @@ The model call is made from the host, so the container never needs egress.
 """
 
 import json
+import os
 import subprocess
+import time
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -142,6 +144,34 @@ def commit(repo: Path, ref: str) -> str:
         if found.returncode == 0:
             return found.stdout.strip()
     raise KeyError(f"{repo.name}: no branch `{ref}`, here or on origin")
+
+
+def refresh(repos: dict[str, tuple[Path, str]], timeout: int = 60) -> list[str]:
+    """Fetch every repository from origin at once, all branches; the names that could not be.
+
+    What `commit` falls back to offline is the last fetch, so the daemon keeps that recent while the
+    network is there. One deadline for all of them: offline each fails at once, but a network that
+    only half works would otherwise hold the daemon for a minute per repository.
+    """
+    fetches = {
+        name: subprocess.Popen(
+            ["git", "-C", str(path), "fetch", "--quiet", "origin"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            # A credential prompt nobody will ever answer is a fetch that never ends.
+            env=os.environ | {"GIT_TERMINAL_PROMPT": "0"},
+        )
+        for name, (path, _) in repos.items()
+    }
+    deadline = time.monotonic() + timeout
+    for fetch in fetches.values():
+        try:
+            fetch.wait(max(0.0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            fetch.kill()
+            fetch.wait()
+    return [name for name, fetch in fetches.items() if fetch.returncode != 0]
 
 
 def branches(repo: Path, default: str = "") -> list[str]:

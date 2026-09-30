@@ -337,3 +337,6 @@ daemon:
   plan_ahead: 2
   max_attempts: 3
   error_backoff: 300
+  # Every repository under `repos:` is fetched this often, all branches, so a run started with no
+  # network begins from a recent origin rather than from whenever you last planned something.
+  fetch_interval: 600

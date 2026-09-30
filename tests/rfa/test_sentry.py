@@ -149,7 +149,7 @@ def test_what_sentry_refuses_is_an_error_with_the_status_in_it():
 def test_the_daemon_asks_once_per_interval_and_outlives_a_look_that_failed():
     """No token in the Keychain: the daemon says so, goes on to the board as usual, and does not ask
     again until the interval has passed -- an expired token every fifteen seconds helps nobody."""
-    daemon = Daemon(config=DaemonConfig())
+    daemon = Daemon(config=DaemonConfig(fetch_interval=0))
     daemon.tick()
     assert [e["type"] for e in tasks.events()] == ["sentry_error"]
     assert "rfa-sentry-token-that-does-not-exist" in tasks.events()[0]["error"]

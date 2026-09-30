@@ -25,7 +25,7 @@ import signal
 import time
 from dataclasses import dataclass, field
 
-from rfa import gates, sentry, service, settings, tasks
+from rfa import gates, planner, sentry, service, settings, tasks
 from rfa.tasks import Task
 
 
@@ -50,6 +50,9 @@ class DaemonConfig:
     error_backoff: int = 300
     """After a run fails on something underneath it -- Docker gone, the model unreachable -- wait
     this long before starting another. Hitting a broken machine every 15 seconds helps nobody."""
+    fetch_interval: int = 600
+    """Seconds between fetching every repository under `repos:`, so an offline run starts from a
+    recent origin rather than from whenever a card last happened to be planned. 0 turns it off."""
     plan: bool = True
     work: bool = True
     review: bool = True
@@ -203,6 +206,7 @@ class Daemon:
     config: DaemonConfig = field(default_factory=DaemonConfig.load)
     paused_until: float = 0.0
     sentry_due: float = 0.0
+    fetch_due: float = 0.0
     said: str = ""
 
     def say(self, line: str) -> None:
@@ -226,9 +230,21 @@ class Daemon:
             tasks.log(type="sentry_error", error=str(e))
             print(f"{tasks.now()}  sentry: {e}", flush=True)
 
+    def fetch(self) -> None:
+        """Every repository from origin, once `fetch_interval` has passed. Offline is not an error:
+        the runs fall back to the last fetch, and this only says which repositories it could not reach."""
+        if not self.config.fetch_interval or time.monotonic() < self.fetch_due:
+            return
+        self.fetch_due = time.monotonic() + self.config.fetch_interval
+        config = settings.load()
+        if failed := planner.refresh(settings.repo_paths(config, list(config.get("repos") or {}))):
+            tasks.log(type="fetch_failed", repos=failed)
+            print(f"{tasks.now()}  could not fetch {', '.join(failed)}; runs start from the last fetch", flush=True)
+
     def tick(self) -> None:
         """One look at the board. Runs at most one card, and only with every gate open."""
         self.poll()
+        self.fetch()
         if (left := self.paused_until - time.monotonic()) > 0:
             return self.say(f"paused for {left / 60:.0f} more min after the last error")
         if (job := next_job(self.config)) is None:

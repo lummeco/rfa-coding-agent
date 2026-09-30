@@ -1,6 +1,9 @@
 """The daemon: what it takes next, what stops it taking anything, and what it finds left behind."""
 
+import subprocess
+
 import pytest
+import yaml
 
 from rfa import board, settings, tasks
 from rfa.daemon import Daemon, DaemonConfig, next_job, reclaim, report, running
@@ -153,3 +156,36 @@ def test_an_archived_planning_card_is_never_planned_or_counted_as_waiting():
     assert next_job(DaemonConfig(plan_ahead=2)) == ("plan", tasks.find(queued.id))
     tasks.save(tasks.find(archived.id), archived=None)
     assert next_job(DaemonConfig(plan_ahead=2))[0] == "work"
+
+
+def test_the_daemon_keeps_every_repository_fetched_and_names_the_ones_it_cannot_reach(workspace):
+    """What an offline run starts from is the last fetch, so the daemon keeps it recent -- all branches,
+    since a card may start from any -- and one unreachable repository does not stop the rest."""
+
+    def git(at, *args):
+        subprocess.run(
+            ["git", "-C", str(at), "-c", "user.email=t@t", "-c", "user.name=t", *args], check=True, capture_output=True
+        )
+
+    origin, clone = workspace / "origin", workspace / "clone"
+    git(workspace, "init", "-qb", "main", str(origin))
+    git(origin, "commit", "-qm", "one", "--allow-empty")
+    git(workspace, "clone", "-q", str(origin), str(clone))
+    git(origin, "commit", "-qm", "two", "--allow-empty")
+    git(origin, "branch", "feature")
+    (workspace / "rfa.yaml").write_text(
+        yaml.safe_dump({"repos": {"a/web": f"{clone}@main", "a/ghost": str(workspace / "nowhere")}})
+    )
+    daemon = Daemon(config=DaemonConfig())
+    daemon.tick()
+
+    def head(at, ref):
+        return subprocess.run(["git", "-C", str(at), "rev-parse", ref], capture_output=True, text=True).stdout
+
+    assert head(clone, "origin/main") == head(origin, "main") == head(clone, "origin/feature")
+    assert [(e["type"], e["repos"]) for e in tasks.events() if e["type"] == "fetch_failed"] == [
+        ("fetch_failed", ["ghost"])
+    ]
+    assert daemon.said == "nothing to do" and daemon.fetch_due > 0
+    daemon.tick()
+    assert len([e for e in tasks.events() if e["type"] == "fetch_failed"]) == 1

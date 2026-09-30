@@ -719,11 +719,13 @@ function actionsFor(t) {
   if (t.stage === "planning" && t.status === "ready") return `<button class="action" id="edit">Edit</button>` + move("todo", "Approve", "primary") + archive;
   if (t.stage === "planning" && t.status === "failed") return archive;
   if (t.stage === "planning") return pause + archive;
-  // Back to planned keeps the plan and waits for your approval again, instead of throwing it away.
-  if (t.stage === "todo") return pause + (t.planned ? move("planning", "Back to planned", "quiet", "ready") : "") + archive;
-  // The reviewer takes the pass/send-back edges on its own; this is only the run control, and a
-  // failed review is left with Archive alone.
-  if (t.stage === "review") return (t.status === "failed" ? "" : pause) + archive;
+  // The daemon gives up on a card after its last attempt; Retry hands the attempts back. Back to
+  // planned keeps the plan and waits for your approval again, instead of throwing it away.
+  if (t.stage === "todo") return (t.attempts || t.error ? `<button class="action primary" id="retry">Retry</button>` : "") + pause
+    + (t.planned ? move("planning", "Back to planned", "quiet", "ready") : "") + archive;
+  // The reviewer takes the pass/send-back edges on its own; this is only the run control. A review
+  // that could not run at all says nothing about the code, so it is only ever run again.
+  if (t.stage === "review") return (t.status === "failed" ? `<button class="action primary" id="rereview">Review again</button>` : pause) + archive;
   if (t.stage === "done") {
     // Your verdict on built code comes first; everything that sends the card round again is under
     // Next actions. Fix comments needs comments on the latest round; with nothing landed there is
@@ -736,10 +738,13 @@ function actionsFor(t) {
     return judge + `<div class="menu${menuOpen ? " open" : ""}"><button class="action" id="next">Next actions ▾</button><div class="list">`
       + `<button id="fix"${waiting ? "" : " disabled"}>Fix comments${waiting ? ` (${waiting})` : ""}`
       + `<small>${waiting ? "Back to To do; the coder fixes only these" : "Comment on a line in the latest diff, or on the whole round"}</small></button>`
-      + (landed ? "" : `<button data-to="todo">Run again fresh</button>`)
+      + (landed ? `<button id="rereview">Review again<small>Back to Review; the same build, judged again</small></button>`
+        : `<button data-to="todo">Run again fresh</button>`)
       + `</div></div><span class="spacer"></span>` + archive;
   }
-  if (t.stage === "under-work") return pause + move("todo", "Back to queue", "quiet") + archive;
+  // Pause run is the way back to To do: the coder stops and hands the card back itself. Moving it
+  // out from under a live run would leave the daemon on work the board no longer shows.
+  if (t.stage === "under-work") return pause + archive;
   return archive;
 }
 
@@ -1626,6 +1631,17 @@ async function retry(id) {
   await refresh();
 }
 
+async function rereview(id) {
+  const res = await api("/api/rereview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+  if (!res.ok) { alert((await res.json()).error); return; }
+  closeDetail();
+  await refresh();
+}
+
 async function setPaused(id, paused) {
   const res = await api("/api/pause", {
     method: "POST",
@@ -1706,6 +1722,7 @@ document.getElementById("d-actions").addEventListener("click", e => {
   }
   if (e.target.closest("#fix") && openId) return fixComments(openId);
   if (e.target.closest("#retry") && openId) return retry(openId);
+  if (e.target.closest("#rereview") && openId) return rereview(openId);
   if (e.target.closest("#save")) return saveIdea();
   if (e.target.closest("#cancel-draft")) { const id = drafting; drafting = null; return showDetail(id); }
   if (e.target.closest("#edit-draft")) return showCapture(state.tasks.find(x => x.id === openId));

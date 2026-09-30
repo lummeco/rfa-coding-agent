@@ -476,3 +476,26 @@ def test_a_card_the_daemon_gave_up_on_is_retried_or_sent_back_to_planned(tmp_pat
     assert "error" not in planned.meta
     with pytest.raises(ValueError, match="only a to-do card"):
         board.retry(task.id)
+
+
+def test_landed_work_goes_back_to_the_reviewer_without_being_coded_again(tmp_path, monkeypatch):
+    """A review that broke on the machine says nothing about the build; the build is judged again."""
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    tasks.init()
+    (tmp_path / "rfa.yaml").write_text("apps:\n  lummeco/web:\n    serve: run\n    port: 1\n")
+    task = tasks.move(tasks.move(tasks.create("an idea", ["lummeco/web"]), "todo"), "under-work", actor="worker")
+    task = tasks.move(task, "done", actor="worker", landed={"web": "rfa/an-idea"}, verdict="trashed")
+    task.body += "\n## Review\n\n**pass**\n"
+    tasks.save(task)
+    again = tasks.find(board.rereview(task.id).id)
+    assert (again.stage, again.status, again.meta["landed"]) == ("review", "queued", {"web": "rfa/an-idea"})
+    assert "verdict" not in again.meta and "## Review" not in again.body
+    tasks.save(again, status="failed", error="Killed", paused=True)
+    queued = tasks.find(board.rereview(task.id).id)
+    assert (queued.stage, queued.status, queued.paused) == ("review", "queued", False)
+    assert "error" not in queued.meta
+    tasks.save(queued, landed={"api": "rfa/an-idea"})
+    with pytest.raises(ValueError, match="nothing to review"):
+        board.rereview(task.id)
+    with pytest.raises(ValueError, match="only a done card or a review"):
+        board.rereview(tasks.move(tasks.create("another"), "planning").id)

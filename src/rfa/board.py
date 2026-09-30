@@ -388,6 +388,23 @@ def retry(id: str) -> tasks.Task:
     return tasks.save(task, status="todo", attempts=None, error=None, paused=None)
 
 
+def rereview(id: str) -> tasks.Task:
+    """Put the landed work in front of the reviewer again: a done card, or a review that failed to run.
+
+    Coding it again would throw away a build that may be fine; the review is what went wrong.
+    """
+    task = tasks.find(id)
+    if task.stage not in ("done", "review"):
+        raise ValueError(f"{id} is in {task.stage}; only a done card or a review is reviewed again")
+    if not daemon.reviewable(task):
+        raise ValueError(f"{id} landed nothing in a repository with an `apps:` block, so there is nothing to review")
+    task.body = rounds.packet_only(task.body)
+    tasks.log(type="rereview", id=task.id)
+    if task.stage == "done":
+        return tasks.move(task, "review", actor="human")
+    return tasks.save(task, status="queued", error=None, paused=None)
+
+
 def reorder(payload: dict) -> tasks.Task:
     """Move a card to a new position in its own column.
 
@@ -555,6 +572,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/archive",
             "/api/pause",
             "/api/retry",
+            "/api/rereview",
             "/api/verdict",
             "/api/comment",
             "/api/fix",
@@ -611,7 +629,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json(400, {"error": result["message"]})
             return
-        if self.path in ("/api/edit", "/api/pause", "/api/retry", "/api/verdict", "/api/reorder"):
+        if self.path in ("/api/edit", "/api/pause", "/api/retry", "/api/rereview", "/api/verdict", "/api/reorder"):
             try:
                 if self.path == "/api/edit":
                     task = edit(payload)
@@ -619,6 +637,8 @@ class Handler(BaseHTTPRequestHandler):
                     task = pause(payload["id"], bool(payload.get("paused")))
                 elif self.path == "/api/retry":
                     task = retry(payload["id"])
+                elif self.path == "/api/rereview":
+                    task = rereview(payload["id"])
                 elif self.path == "/api/reorder":
                     task = reorder(payload)
                 else:

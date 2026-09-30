@@ -2,7 +2,7 @@
 
 Setup is where a run needs the network -- npm, pip, apt -- and it does the same thing every time
 until the lockfiles change. So the host runs it once in a throwaway container and saves the result
-as an image named after everything that went into it. Every run after that starts from the image:
+as an image, `rfa-<stage>/<repo>`, named after everything that went into it. Every run after that starts from the image:
 minutes faster online, and able to start at all offline.
 
 The image holds what setup produced and none of the repository itself. The tracked files are
@@ -64,8 +64,8 @@ def key(config: dict, spec: dict, repos: dict[str, tuple[Path, str]]) -> str:
     return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()[:16]
 
 
-def image(config: dict, spec: dict, repos: dict[str, tuple[Path, str]], name: str) -> str:
-    """The image a run of `name` starts from, built first if nothing has been built for these inputs.
+def image(config: dict, spec: dict, repos: dict[str, tuple[Path, str]], name: str, stage: str) -> str:
+    """The image a `stage` run of `name` starts from, built first if nothing has been built for these inputs.
 
     `repos` are the run's work repositories, pinned: setup may read a neighbour, so all of them are
     seeded and all of their lockfiles count.
@@ -73,7 +73,7 @@ def image(config: dict, spec: dict, repos: dict[str, tuple[Path, str]], name: st
     if not spec.get("setup"):
         return config["image"]
     executable = DockerEnvironmentConfig(**config).executable
-    tag = f"rfa-setup/{name.lower()}:{key(config, spec, repos)}"
+    tag = f"rfa-{stage}/{name.lower()}:{key(config, spec, repos)}"
     if subprocess.run([executable, "image", "inspect", tag], capture_output=True).returncode == 0:
         return tag
     env = get_environment(config, default_type="docker")

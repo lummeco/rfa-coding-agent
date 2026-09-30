@@ -40,7 +40,7 @@ def test_only_what_setup_reads_builds_a_new_image(repo):
     assert key(base) != key(base, {"setup": ["pip install -r lummeco-base/requirements.txt", "true"]})
     assert key(base) != key(base, config=CONFIG | {"image": "python:3.12-bookworm"})
     assert key(base) != key(base, config=CONFIG | {"env": {"PIP_INDEX_URL": "http://mirror"}})
-    assert prepare.image(CONFIG, {}, {"base": (repo, base)}, "base") == CONFIG["image"]
+    assert prepare.image(CONFIG, {}, {"base": (repo, base)}, "base", "coder") == CONFIG["image"]
 
 
 def docker() -> bool:
@@ -53,7 +53,7 @@ def test_the_image_keeps_what_setup_made_and_none_of_the_tree(repo):
     config = {"environment_class": "docker", "image": "debian:bookworm-slim", "cwd": "/work/repos"}
     spec = {"setup": ["mkdir -p deps && cat requirements.txt > deps/installed && echo touched >> gone.txt"]}
     first = commit(repo, **{"requirements.txt": "one\n", "gone.txt": "old\n"})
-    tag = prepare.image(config, spec, {"web": (repo, first)}, "Web")
+    tag = prepare.image(config, spec, {"web": (repo, first)}, "Web", "coder")
     try:
         listed = subprocess.run(
             [
@@ -70,7 +70,9 @@ def test_the_image_keeps_what_setup_made_and_none_of_the_tree(repo):
             check=True,
         )
         assert listed.stdout.split() == ["./deps/installed", "one"]
-        assert tag.startswith("rfa-setup/web:")
-        assert prepare.image(config, spec, {"web": (repo, commit(repo, **{"gone.txt": "new\n"}))}, "Web") == tag
+        assert tag.startswith("rfa-coder/web:")
+        assert (
+            prepare.image(config, spec, {"web": (repo, commit(repo, **{"gone.txt": "new\n"}))}, "Web", "coder") == tag
+        )
     finally:
         subprocess.run(["docker", "rmi", tag], capture_output=True)

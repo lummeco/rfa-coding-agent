@@ -527,7 +527,7 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         }
         reference = pin(settings.reference_paths(config, task.meta))
         container = environment(config, spec)
-        container["image"] = prepare.image(container, spec, repos, names[0])
+        container["image"] = prepare.image(container, spec, repos, names[0], "coder")
         env = get_environment(container, default_type="docker")
         seed(env, repos, reference)
         # Before the base commit, so whatever the services write into the checkout is not the coder's diff.

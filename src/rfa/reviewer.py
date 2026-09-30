@@ -30,7 +30,7 @@ from minisweagent.environments import get_environment
 from minisweagent.exceptions import InterruptAgentFlow, Submitted
 from minisweagent.models import get_model
 from minisweagent.utils.serialize import recursive_merge
-from rfa import settings, tasks
+from rfa import prepare, settings, tasks
 from rfa.planner import REPOS_DIR, _errors, seed
 from rfa.rounds import packet_only
 from rfa.tasks import Task
@@ -212,17 +212,18 @@ def playwright_pin(image: str) -> str:
     return m.group(1) if (m := re.search(r":v(\d[\w.]*?)(-|$)", image)) else ""
 
 
+def install_playwright(image: str) -> str:
+    """The setup command for the playwright `rfa.drive` imports: the first thing in the saved image."""
+    return f"pip install --quiet playwright{f'=={pin}' if (pin := playwright_pin(image)) else ''}"
+
+
 def install_drive(env: Environment) -> None:
-    """Put `rfa.drive`, and the playwright it imports, in the container. The host never imports it."""
+    """Put `rfa.drive` in the container. The host never imports it."""
     subprocess.run(
         [env.config.executable, "cp", str(Path(__file__).parent / "drive.py"), f"{env.container_id}:{DRIVE}"],
         check=True,
         capture_output=True,
     )
-    pin = playwright_pin(env.config.image)
-    result = env.execute({"command": f"pip install --quiet playwright{f'=={pin}' if pin else ''}"}, timeout=600)
-    if result["returncode"] != 0:
-        raise RuntimeError(f"playwright would not install in the review container:\n\n{result['output'][-2000:]}")
 
 
 def url(spec: dict) -> str:
@@ -230,7 +231,8 @@ def url(spec: dict) -> str:
 
 
 def start_app(env: Environment, repo: str, spec: dict) -> None:
-    """Run the `apps:` block: install what the app needs, leave it serving, wait for the port.
+    """Run the `apps:` block's `start:`, leave the app serving, wait for the port. Its `setup:` is
+    already in the image (see `rfa.prepare`).
 
     Deliberately the host's job rather than the agent's. An agent that has to work out how to start
     the app spends its steps on that and reviews nothing, and it fails a different way every run.
@@ -240,7 +242,7 @@ def start_app(env: Environment, repo: str, spec: dict) -> None:
     goes back as the problem, so `apps:` being wrong reads the same way -- on the first card, once.
     The exception is the OOM killer: no code change fixes a container too small for the build.
     """
-    for command in spec.get("setup") or []:
+    for command in spec.get("start") or []:
         result = env.execute({"command": command}, cwd=f"{REPOS_DIR}/{repo}", timeout=spec.get("setup_timeout", 900))
         if result["returncode"] != 0:
             if killed(result["returncode"], result["output"]):
@@ -316,11 +318,15 @@ def review_task(task: Task, config: dict, model: str = "", reasoning: str = "") 
 
     env = None
     try:
-        env = get_environment(
-            recursive_merge(config.get("environment", {}), {"env": spec.get("env") or {}}), default_type="docker"
-        )
+        container = recursive_merge(config.get("environment", {}), {"env": spec.get("env") or {}})
         # The branch, not the base: what is reviewed is what the coder actually landed.
-        seed(env, {name: (path, landed.get(name) or ref) for name, (path, ref) in repos.items()})
+        repos = {name: (path, landed.get(name) or ref) for name, (path, ref) in repos.items()}
+        # A setup that fails is the machine's -- the network, the registry -- not the coder's, so it
+        # raises like any other infrastructure trouble instead of sending the card back.
+        setup = {"setup": [install_playwright(container["image"]), *(spec.get("setup") or [])]}
+        container["image"] = prepare.image(container, spec | setup, repos, under_test, "reviewer")
+        env = get_environment(container, default_type="docker")
+        seed(env, repos)
         install_drive(env)
         start_app(env, under_test, spec)
         agent = ReviewerAgent(

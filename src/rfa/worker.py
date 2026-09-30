@@ -57,6 +57,7 @@ REASONS = {
     "AutoSubmitted": "it was cut off, and the host submitted what it had",
     "TimeExceeded": "it ran out of time",
     "RepeatedFormatError": "the model stopped answering with commands the harness could run",
+    "Repeating": "it kept sending the same command, and was stopped",
 }
 """Why a run ended, in words. The status on its own tells the person reading the card nothing."""
 
@@ -88,7 +89,7 @@ class CoderConfig(AgentConfig):
     test_timeout: int = 1800
 
 
-class CoderAgent(tasks.Pausable, DefaultAgent):
+class CoderAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
     """mini's agent, with the packet's checks and the repository's tests between submitting and done."""
 
     def __init__(

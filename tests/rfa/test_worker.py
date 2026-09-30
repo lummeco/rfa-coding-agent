@@ -104,6 +104,25 @@ def test_the_run_gives_up_after_the_configured_rounds(tmp_path):
     assert agent.messages[-1]["extra"]["exit_status"] == "Submitted"
 
 
+def test_a_coder_repeating_one_command_is_warned_and_then_stopped(tmp_path):
+    """The loop that ran 647 identical greps: nothing else ends it before an edit starts the budget."""
+    agent = run_coder([act("echo same")] * 10, tmp_path, [])
+    tools = [m["content"] for m in agent.messages[2:-1] if m["role"] == "user"]
+    assert len(tools) == 5 and "exact command" not in tools[1] and "3 times in a row" in tools[2]
+    assert agent.messages[-1]["extra"]["exit_status"] == "Repeating"
+
+
+def test_changing_the_command_resets_the_repeat_count(tmp_path):
+    agent = run_coder([act("echo a"), act("echo a"), act("echo b"), act("echo b"), submit()], tmp_path, [])
+    assert not any("exact command" in m.get("content", "") for m in agent.messages)
+    assert agent.messages[-1]["extra"]["exit_status"] == "Submitted"
+
+
+def test_a_coder_looping_after_an_edit_is_auto_submitted_with_its_work(tmp_path):
+    agent = run_coder([act("touch fixed")] + [act("ls")] * 6, tmp_path, ["test -f fixed"])
+    assert agent.messages[-1]["extra"]["exit_status"] == "AutoSubmitted" and agent.results[0]["ok"]
+
+
 def test_a_packet_with_no_checks_submits_straight_through(tmp_path):
     """The planner found no test command; the host has nothing to run and says so honestly."""
     agent = run_coder([submit()], tmp_path, [])

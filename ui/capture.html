@@ -128,15 +128,16 @@ let setup = { models: [], model: "", reasoning: [], defaultReasoning: "" };
 const role = (pick, i) => (picks.findIndex(p => p.repo === pick.repo) === i ? "start" : "reference");
 const refs = () => picks.filter((p, i) => role(p, i) === "reference");
 
-// The workspace defaults are pre-selected, so a card always carries the model and the level it
-// will run with: what you see is what the run gets, and changing either is a deliberate choice.
+// A blank choice, selected until you pick another, means "whatever the workspace is set to" -- as on
+// the board. Without it the browser selects the first level, `none`, and pins thinking off into the
+// card whenever no level was chosen with `rfa reasoning`, leaving each model's own level unused.
 function drawRun() {
-    const option = (value, label, chosen) =>
-      `<option value="${esc(value)}"${value === chosen ? " selected" : ""}>${esc(label)}</option>`;
+    const option = (value, label) => `<option value="${esc(value)}">${esc(label)}</option>`;
     document.getElementById("model").innerHTML =
-      setup.models.map(m => option(m, m, setup.model)).join("");
+      option("", setup.model ? `${setup.model} (default)` : "default") + setup.models.map(m => option(m, m)).join("");
     document.getElementById("reasoning").innerHTML =
-      setup.reasoning.map(r => option(r, `reasoning: ${r}`, setup.defaultReasoning)).join("");
+      option("", `reasoning: ${setup.defaultReasoning || "default"}`)
+      + setup.reasoning.map(r => option(r, `reasoning: ${r}`)).join("");
 }
 
 function drawRepos() {

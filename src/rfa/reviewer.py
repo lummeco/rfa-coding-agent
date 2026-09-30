@@ -105,7 +105,7 @@ def problems(review: Review, expected: list[str], shots: int) -> list[str]:
     return found
 
 
-class ReviewerAgent(tasks.Pausable, DefaultAgent):
+class ReviewerAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
     """mini's agent, with the host's reading of the verdict standing between submitting and done."""
 
     def __init__(self, model: Model, env: Environment, *, expected: list[str], **kwargs):
@@ -185,6 +185,23 @@ def killed(returncode: int, output: str) -> bool:
     return returncode == 137 or bool(KILLED_RE.search(output))
 
 
+def vm_note(total: int) -> str:
+    """Docker Desktop runs every container in one VM, and the VM's memory is the real ceiling: a
+    container's `--memory` above it is never reached. Said on the card, because an OOM kill with
+    free memory on the Mac otherwise looks like it cannot be happening."""
+    if not total:
+        return ""
+    return (
+        f"\n\nDocker's VM has {total / 2**30:.1f} GiB in all, shared by every container, whatever "
+        "`--memory` in reviewer.yaml says. Raise it in Docker Desktop: Settings > Resources > Memory."
+    )
+
+
+def docker_memory(executable: str) -> int:
+    found = subprocess.run([executable, "info", "--format", "{{.MemTotal}}"], capture_output=True, text=True)
+    return int(found.stdout.strip()) if found.stdout.strip().isdigit() else 0
+
+
 def playwright_pin(image: str) -> str:
     """The playwright `drive.py` imports, read off the image tag it has to match.
 
@@ -227,7 +244,10 @@ def start_app(env: Environment, repo: str, spec: dict) -> None:
         result = env.execute({"command": command}, cwd=f"{REPOS_DIR}/{repo}", timeout=spec.get("setup_timeout", 900))
         if result["returncode"] != 0:
             if killed(result["returncode"], result["output"]):
-                raise AppKilled(f"`{command}` was killed, out of memory:\n\n{result['output'][-3000:]}")
+                raise AppKilled(
+                    f"`{command}` was killed, out of memory:\n\n{result['output'][-3000:]}"
+                    + vm_note(docker_memory(env.config.executable))
+                )
             raise AppFailed(f"`{command}` failed:\n\n{result['output'][-3000:]}")
     env.execute(
         {"command": f"mkdir -p {Path(SERVE_LOG).parent} && nohup {spec['serve']} > {SERVE_LOG} 2>&1 & echo started"},
@@ -240,7 +260,9 @@ def start_app(env: Environment, repo: str, spec: dict) -> None:
     if env.execute({"command": ready}, timeout=spec.get("ready", 120) + 30)["returncode"] != 0:
         log = env.execute({"command": f"cat {SERVE_LOG}"})["output"][-3000:]
         if killed(0, log):
-            raise AppKilled(f"`{spec['serve']}` was killed, out of memory:\n\n{log}")
+            raise AppKilled(
+                f"`{spec['serve']}` was killed, out of memory:\n\n{log}" + vm_note(docker_memory(env.config.executable))
+            )
         raise AppFailed(f"`{spec['serve']}` never answered on port {spec['port']}:\n\n{log}")
 
 

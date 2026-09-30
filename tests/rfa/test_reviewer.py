@@ -17,6 +17,7 @@ from rfa.reviewer import (
     problems,
     review_note,
     send_back,
+    vm_note,
 )
 
 PACKET = """
@@ -84,6 +85,12 @@ def test_the_playwright_installed_is_the_one_the_image_baked_browsers_for(image,
 )
 def test_an_oom_kill_is_the_machines_problem_not_the_coders(returncode, output, expected):
     assert killed(returncode, output) == expected
+
+
+def test_an_oom_kill_names_dockers_vm_size_as_the_ceiling():
+    """12g of `--memory` in a 5.5 GiB VM: the note must say where the real limit is set."""
+    assert "5.5 GiB" in vm_note(5632 * 2**20) and "Settings > Resources > Memory" in vm_note(5632 * 2**20)
+    assert vm_note(0) == ""
 
 
 def test_previous_rounds_are_cut_off_before_the_card_goes_back():

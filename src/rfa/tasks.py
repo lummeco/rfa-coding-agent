@@ -18,6 +18,8 @@ from pathlib import Path
 
 import yaml
 
+from minisweagent.exceptions import LimitsExceeded
+
 STAGES = ("draft", "planning", "todo", "under-work", "review", "done")
 
 # Who may take each step. The one that matters is that no agent can approve its own packet into
@@ -99,6 +101,47 @@ class Pausable:
         if self.task_id and find(self.task_id).paused:
             raise Paused(self.task_id)
         return super().query()
+
+
+REPEATING = (
+    "\n\n[You have now run this exact command {n} times in a row, and it gives the same answer every "
+    "time. Running it again will not change that. Do something different: act on what it told you, "
+    "or finish. After {stop} repeats the run is stopped.]"
+)
+
+
+class Unlooping:
+    """An agent that notices when the model sends the same command over and over, and stops it.
+
+    A local model with thinking off can fall into answering its own output with the command it just
+    ran, hundreds of times. Nothing else ends that: the coder's step budget only starts at its first
+    edit, so the loop runs until the window overflows, Ollama drops the packet off the front of the
+    prompt, and the run dies of `no user query found in messages` an hour later. After
+    `repeat_limit` repeats every observation says so; after twice that the run ends as `Repeating`.
+    """
+
+    def __init__(self, *args, repeat_limit: int = 3, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.repeat_limit = repeat_limit
+        self.last_commands: list = []
+        self.repeats = 0
+
+    def execute_actions(self, message: dict) -> list[dict]:
+        commands = [a.get("command") for a in message.get("extra", {}).get("actions", [])]
+        self.repeats = self.repeats + 1 if commands and commands == self.last_commands else 1
+        self.last_commands = commands
+        if 0 < self.repeat_limit and 2 * self.repeat_limit <= self.repeats:
+            raise LimitsExceeded(
+                {
+                    "role": "exit",
+                    "content": f"Repeating: the model sent the same command {self.repeats} times in a row",
+                    "extra": {"exit_status": "Repeating", "submission": ""},
+                }
+            )
+        observations = super().execute_actions(message)
+        if 0 < self.repeat_limit <= self.repeats and observations and isinstance(observations[-1].get("content"), str):
+            observations[-1]["content"] += REPEATING.format(n=self.repeats, stop=2 * self.repeat_limit)
+        return observations
 
 
 @dataclass

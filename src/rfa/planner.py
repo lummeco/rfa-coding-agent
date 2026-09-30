@@ -40,7 +40,7 @@ class PlannerConfig(AgentConfig):
     """Where in the container the planner leaves the packet. The only thing that leaves it."""
 
 
-class PlannerAgent(tasks.Pausable, DefaultAgent):
+class PlannerAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
     """Submitting is a proposal, not the end: an unusable packet resumes the same session."""
 
     def __init__(self, model: Model, env: Environment, *, repo_files: dict[str, set[str]], **kwargs):

@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -118,24 +119,21 @@ def tracked_files(repo: Path, ref: str) -> set[str]:
 
 
 def pin(repos: dict[str, tuple[Path, str]]) -> dict[str, tuple[Path, str]]:
-    """Turn each ref into the commit it means right now, fetching it from origin first.
+    """Turn each ref into the commit it means right now, as of the last fetch -- `fetched` first.
 
-    Two reasons. The branch list you picked from is the remote's, so a branch this checkout has
-    never seen is the ordinary case rather than an error. And a run lasts half an hour: a branch
-    name, or `FETCH_HEAD`, would not mean the same commit when the diff lands as it did when the
-    files went in, while a sha means one thing forever.
+    A run lasts half an hour: a branch name would not mean the same commit when the diff lands as it
+    did when the files went in, while a sha means one thing forever.
     """
     return {name: (path, commit(path, ref)) for name, (path, ref) in repos.items()}
 
 
 def commit(repo: Path, ref: str) -> str:
-    """The sha `ref` names: from origin when the fetch works, from this checkout when it does not."""
-    fetched = subprocess.run(
-        ["git", "-C", str(repo), "fetch", "--quiet", "origin", ref], capture_output=True, timeout=180
-    )
-    # FETCH_HEAD only means this ref if the fetch that would have written it actually ran: a stale
-    # one from some earlier fetch points at something else entirely.
-    for candidate in ["FETCH_HEAD"] if fetched.returncode == 0 else [f"refs/remotes/origin/{ref}", ref]:
+    """The sha `ref` names: origin's as last fetched, then this checkout's own.
+
+    Origin's first, because the branch list you picked from is the remote's -- a branch this
+    checkout has never checked out is the ordinary case rather than an error.
+    """
+    for candidate in [f"refs/remotes/origin/{ref}", ref]:
         found = subprocess.run(
             ["git", "-C", str(repo), "rev-parse", "--verify", "-q", f"{candidate}^{{commit}}"],
             capture_output=True,
@@ -146,16 +144,25 @@ def commit(repo: Path, ref: str) -> str:
     raise KeyError(f"{repo.name}: no branch `{ref}`, here or on origin")
 
 
-def refresh(repos: dict[str, tuple[Path, str]], timeout: int = 60) -> list[str]:
-    """Fetch every repository from origin at once, all branches; the names that could not be.
+def stamp(repo: Path) -> Path:
+    """Touched after every fetch that worked. Git's own FETCH_HEAD is no clock: a failed fetch
+    rewrites it too."""
+    found = subprocess.run(["git", "-C", str(repo), "rev-parse", "--absolute-git-dir"], capture_output=True, text=True)
+    return Path(found.stdout.strip() or repo) / "rfa-fetched"
 
-    What `commit` falls back to offline is the last fetch, so the daemon keeps that recent while the
-    network is there. One deadline for all of them: offline each fails at once, but a network that
-    only half works would otherwise hold the daemon for a minute per repository.
+
+def refresh(repos: dict[str, tuple[Path, str]], timeout: int = 60) -> list[str]:
+    """Fetch every branch of every repository from origin at once; the names that could not be.
+
+    What `pin` resolves is the last fetch, so the daemon keeps that recent while the network is
+    there, and every run tries once more before it starts. One deadline for all of them: offline
+    each fails at once, but a network that only half works would otherwise hold the run for a
+    minute per repository. The refspec is spelled out because a single-branch clone fetches only
+    its one branch, and a card may start from any.
     """
     fetches = {
         name: subprocess.Popen(
-            ["git", "-C", str(path), "fetch", "--quiet", "origin"],
+            ["git", "-C", str(path), "fetch", "--quiet", "origin", "+refs/heads/*:refs/remotes/origin/*"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -171,7 +178,32 @@ def refresh(repos: dict[str, tuple[Path, str]], timeout: int = 60) -> list[str]:
         except subprocess.TimeoutExpired:
             fetch.kill()
             fetch.wait()
+    for name, fetch in fetches.items():
+        if fetch.returncode == 0:
+            stamp(repos[name][0]).touch()
     return [name for name, fetch in fetches.items() if fetch.returncode != 0]
+
+
+def fetched(*repos: dict[str, tuple[Path, str]]) -> str | None:
+    """Fetch a run's repositories before `pin`; what the card should say if any could not be.
+
+    Nothing stops for it: an offline run starts from the last fetch. But a run that quietly starts
+    from last week's `main` reads like one that started from today's, so the card says which.
+    """
+    # One fetch per checkout: a reference branch is usually a second name for a work repository.
+    unique: dict[Path, str] = {}
+    for group in repos:
+        for name, (path, _) in group.items():
+            unique.setdefault(path, name)
+    failed = refresh({name: (path, "") for path, name in unique.items()})
+    ages = [
+        f"{name} as of {datetime.fromtimestamp(found.stat().st_mtime):%-d %b %H:%M}"
+        if (found := stamp(path)).exists()
+        else f"{name} as last fetched outside rfa"
+        for path, name in unique.items()
+        if name in failed
+    ]
+    return f"Could not reach origin, so this started from {', '.join(ages)}." if ages else None
 
 
 def branches(repo: Path, default: str = "") -> list[str]:
@@ -300,11 +332,13 @@ def plan_task(task: Task, config: dict, model: str = "", reasoning: str = "") ->
     """
     if task.stage != "planning":
         raise ValueError(f"{task.id} is in `{task.stage}`; move it to `planning` first (rfa mv {task.id} planning)")
-    repos = pin(settings.repo_paths(config, task.meta.get("repos") or [], settings.start_branches(task.meta)))
-    reference = pin(settings.reference_paths(config, task.meta))
+    repos = settings.repo_paths(config, task.meta.get("repos") or [], settings.start_branches(task.meta))
+    reference = settings.reference_paths(config, task.meta)
+    offline = fetched(repos, reference)
+    repos, reference = pin(repos), pin(reference)
     # The card's own `plan_model:` is what the board and `rfa new -M` set; the command still wins.
     chosen, level = settings.for_task(config, task.meta, model, reasoning, prefix="plan_")
-    tasks.save(task, status="planning", plan_model=chosen, plan_reasoning=level or None)
+    tasks.save(task, status="planning", plan_model=chosen, plan_reasoning=level or None, offline=offline)
     env = get_environment(config.get("environment", {}), default_type="docker")
     try:
         agent = plan(

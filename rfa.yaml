@@ -253,8 +253,6 @@ model:
     keep_alive: 20m
 
 coder:
-  # What a new card's "Code with" starts on; planning starts on `default_model` above.
-  default_model: qwen3.6
   environment:
     image: node:22-bookworm
 

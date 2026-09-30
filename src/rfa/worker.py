@@ -20,7 +20,7 @@ from minisweagent.models import get_model
 from minisweagent.utils.serialize import recursive_merge
 from rfa import junit, lint, prepare, rounds, settings, tasks
 from rfa.packet import FORBIDDEN_PATHS
-from rfa.planner import REPOS_DIR, git, pin, seed
+from rfa.planner import REPOS_DIR, fetched, git, pin, seed
 from rfa.tasks import Task
 
 JUNIT = "/tmp/rfa-junit.xml"
@@ -516,16 +516,18 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
     cwd = f"{REPOS_DIR}/{names[0]}"
     env = None
     try:
-        # Pinned here rather than before the move: a fetch needs the network, and a card that fails
-        # on it belongs back in the queue with the rest of the infrastructure failures.
+        # Pinned here rather than before the move: a branch that is not there even as last fetched
+        # puts the card back in the queue with the rest of the infrastructure failures.
         # A fix round starts from the commit the last round landed, in this checkout: that branch
         # is local, and whatever origin has under the same name is not what the comments were on.
-        repos = pin({k: v for k, v in repos.items() if k not in before}) | {
+        fresh, reference = {k: v for k, v in repos.items() if k not in before}, settings.reference_paths(config, task.meta)
+        task = tasks.save(task, offline=fetched(fresh, reference))
+        repos = pin(fresh) | {
             name: (path, git(path, "rev-parse", f"{before[name]}^{{commit}}").strip())
             for name, (path, _) in repos.items()
             if name in before
         }
-        reference = pin(settings.reference_paths(config, task.meta))
+        reference = pin(reference)
         container = environment(config, spec)
         container["image"] = prepare.image(container, spec, repos, names[0], "coder")
         env = get_environment(container, default_type="docker")

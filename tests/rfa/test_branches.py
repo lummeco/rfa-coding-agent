@@ -1,9 +1,11 @@
 """Branch selection: where the work starts, and what gets read beside it."""
 
+import subprocess
+
 import pytest
 import yaml
 
-from rfa import settings, tasks
+from rfa import planner, settings, tasks
 
 WORKSPACE = {
     "repos": {
@@ -80,3 +82,37 @@ def test_where_the_work_started_and_where_it_landed_stay_separate():
     would overwrite where the work started, and running the card again would begin somewhere else."""
     meta = {"branches": ["lummeco/web@feature-x"], "landed": {"web": "rfa/20260921-153000-thing"}}
     assert settings.start_branches(meta) == {"lummeco/web": "feature-x"}
+
+
+def test_a_run_offline_starts_from_the_last_fetch_and_the_card_says_how_old_it_is(tmp_path):
+    """Nothing stops for a missing network. But last week's `main` must not pass for today's."""
+
+    def git(at, *args) -> str:
+        return subprocess.run(
+            ["git", "-C", str(at), "-c", "user.email=t@t", "-c", "user.name=t", *args],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    origin, web, base = tmp_path / "origin", tmp_path / "web", tmp_path / "base"
+    git(tmp_path, "init", "-qb", "main", str(origin))
+    git(origin, "commit", "-qm", "one", "--allow-empty")
+    git(tmp_path, "clone", "-q", "--single-branch", str(origin), str(web))
+    git(tmp_path, "clone", "-q", str(origin), str(base))
+    git(origin, "commit", "-qm", "two", "--allow-empty")
+    git(origin, "branch", "feature")
+    repos = {"web": (web, "feature"), "base": (base, "main")}
+    # `feature` did not exist when `web` was cloned, single-branch: only the spelled-out refspec finds it.
+    assert planner.fetched(repos) is None and planner.stamp(web).exists()
+    assert planner.pin(repos) == {
+        "web": (web, git(origin, "rev-parse", "feature")),
+        "base": (base, git(origin, "rev-parse", "main")),
+    }
+
+    planner.stamp(base).unlink()
+    origin.rename(tmp_path / "gone")
+    note = planner.fetched(repos, {"web@main": (web, "main")})
+    assert note.startswith("Could not reach origin, so this started from web as of ")
+    assert note.endswith(", base as last fetched outside rfa.") and note.count("web") == 1
+    assert planner.pin(repos)["base"][1] == git(tmp_path / "gone", "rev-parse", "main")

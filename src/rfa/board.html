@@ -1437,6 +1437,7 @@ function showDetail(id) {
 
   let head = "";
   if (t.error) head += `<div class="note bad">${esc(t.error)}</div>`;
+  if (t.offline) head += `<div class="note">${esc(t.offline)}</div>`;
   if (prNote?.id === id)
     head += `<div class="note${prNote.bad ? " bad" : ""}">${esc(prNote.text)}</div>`;
   if (from || reading)
@@ -1496,6 +1497,7 @@ function showDetail(id) {
     html = head + (t.packet ? packetEdit(t) : `<textarea id="edit-body">${esc(fullBody)}</textarea>`);
   } else if (rounded) {
     const top = (t.error ? `<div class="note bad">${esc(t.error)}</div>` : "")
+      + (t.offline ? `<div class="note">${esc(t.offline)}</div>` : "")
       + (prNote?.id === id ? `<div class="note${prNote.bad ? " bad" : ""}">${esc(prNote.text)}</div>` : "")
       + (t.paused ? `<div class="note">${LIVE.has(t.status) ? "Pausing — the run stops before its next model call." : "Paused until you <strong>Resume</strong>."}</div>` : "");
     const tabs = [

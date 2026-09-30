@@ -167,14 +167,27 @@ def pick(config: dict, name: str = "") -> str:
     return picked
 
 
-def for_task(config: dict, meta: dict, model: str = "", reasoning: str = "") -> tuple[str, str]:
+def for_task(config: dict, meta: dict, model: str = "", reasoning: str = "", prefix: str = "") -> tuple[str, str]:
     """The model and the reasoning level this card runs with.
 
-    What the command said wins, then what the card says. The preset's own level is left out on
-    purpose: it is applied later, by `model_config`, so a card only ever carries a level somebody
-    actually chose for it -- otherwise every card would freeze today's default into itself.
+    What the command said wins, then what the card says. `prefix="plan_"` reads the card's planning
+    choice; a card from before planning had its own falls back to the one it has.
     """
-    return pick(config, model or str(meta.get("model") or "")), reasoning or str(meta.get("reasoning") or "")
+    return (
+        pick(config, model or str(meta.get(f"{prefix}model") or meta.get("model") or "")),
+        reasoning or str(meta.get(f"{prefix}reasoning") or meta.get("reasoning") or ""),
+    )
+
+
+def run_with() -> dict:
+    """What a new card's dropdowns start on: each stage's own `default_model`, and each model's own
+    level -- so choosing another model in the form moves the level along with it."""
+    workspace = load()
+    return {
+        "planning": load("planner").get("default_model") or "",
+        "coding": load("coder").get("default_model") or "",
+        "levels": {name: str(p.get("reasoning") or "medium") for name, p in presets(workspace).items()},
+    }
 
 
 def validate(config: dict, model: str = "", reasoning: str = "") -> None:

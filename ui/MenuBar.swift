@@ -32,12 +32,14 @@ struct Status: Decodable {
     struct Gate: Decodable { let name: String; let ok: Bool; let detail: String }
     struct Card: Decodable { let id: String; let title: String; let status: String }
     struct Job: Decodable { let job: String; let id: String; let title: String }
+    struct RunWith: Decodable { let planning: String; let coding: String; let levels: [String: String] }
 
     let home: String
     let model: String
     let models: [String]
     let reasoning: [String]
     let defaultReasoning: String
+    let runWith: RunWith?
     let repos: [String]
     let boardUrl: String
     let services: [String: Int]  // 0 when that one is not running
@@ -217,13 +219,16 @@ final class Overlay: NSObject, WKScriptMessageHandlerWithReply {
         case "setup":
             // One call: the box needs the repositories, the models and the levels before it can draw.
             background({ Rfa.status() }) { status in
-                replyHandler([
+                let levels: [String: String] = status?.runWith?.levels ?? [:]
+                let reply: [String: Any] = [
                     "repos": status?.repos ?? [],
                     "models": status?.models ?? [],
-                    "model": status?.model ?? "",
                     "reasoning": status?.reasoning ?? [],
-                    "defaultReasoning": status?.defaultReasoning ?? "",
-                ], nil)
+                    "planning": status?.runWith?.planning ?? "",
+                    "coding": status?.runWith?.coding ?? "",
+                    "levels": levels,
+                ]
+                replyHandler(reply, nil)
             }
         case "branches":
             let repos = (body["repos"] as? [String] ?? []).filter(Rfa.isRepoId)
@@ -243,6 +248,8 @@ final class Overlay: NSObject, WKScriptMessageHandlerWithReply {
             // Blank means the workspace default; `rfa new` refuses anything it does not know.
             if let model = body["model"] as? String, !model.isEmpty { args += ["-m", model] }
             if let level = body["reasoning"] as? String, !level.isEmpty { args += ["-R", level] }
+            if let model = body["plan_model"] as? String, !model.isEmpty { args += ["-M", model] }
+            if let level = body["plan_reasoning"] as? String, !level.isEmpty { args += ["--plan-reasoning", level] }
             background({ Rfa.run(args) }) { result in
                 replyHandler(result.ok ? ["ok": true] : ["error": String(result.output.suffix(300))], nil)
             }

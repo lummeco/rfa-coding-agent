@@ -121,6 +121,30 @@ def test_a_card_carries_its_own_model_and_level_until_a_command_says_otherwise(m
     assert settings.for_task(settings.load("planner"), meta, model, reasoning) == expected
 
 
+@pytest.mark.parametrize(
+    ("meta", "expected"),
+    [
+        (
+            {"plan_model": "qwen3.8", "plan_reasoning": "low", "model": "qwen3.6", "reasoning": "high"},
+            ("qwen3.8", "low"),
+        ),
+        ({"model": "qwen3.8", "reasoning": "none"}, ("qwen3.8", "none")),  # a card from before the split
+        ({}, ("qwen3.6", "")),
+    ],
+)
+def test_planning_reads_the_cards_planning_choice(meta, expected):
+    assert settings.for_task(settings.load("planner"), meta, prefix="plan_") == expected
+    assert settings.for_task(settings.load("coder"), meta)[0] == meta.get("model", "qwen3.8")
+
+
+def test_a_new_card_starts_on_each_stages_model_at_that_models_own_level():
+    assert settings.run_with() == {
+        "planning": "qwen3.6",
+        "coding": "qwen3.8",
+        "levels": {"qwen3.6": "high", "qwen3.8": "none"},
+    }
+
+
 def test_an_empty_level_leaves_the_preset_to_decide():
     """`for_task` never invents a level, so a card only pins one somebody chose for it. The preset's
     level is applied later, where changing rfa.yaml still changes what old cards run with."""

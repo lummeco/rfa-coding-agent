@@ -127,6 +127,11 @@ def test_the_report_names_the_model_each_run_uses():
     assert report()["next"]["model"] == "qwen3.6"
 
 
+def test_a_card_waiting_to_be_planned_shows_its_planning_model():
+    card("planning", "seed demo users", plan_model="qwen3.8", model="qwen3.6")
+    assert report()["next"]["model"] == "qwen3.8"
+
+
 def test_a_paused_card_is_left_alone_and_is_not_counted_as_work_waiting():
     planned = card("planning", "add a duplicate button", status="queued")
     held = [card("todo", "rename the invoice column", paused=True), card("todo", "cache the price list", paused=True)]

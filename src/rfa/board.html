@@ -760,7 +760,8 @@ function showCapture(t = null) {
   openId = null;
   drafting = t?.id || null;
   seed = t
-    ? { idea: t.body, title: t.given_title || "", checks: (t.checks || []).join("\n"), model: t.model || "", reasoning: t.reasoning || "" }
+    ? { idea: t.body, title: t.given_title || "", checks: (t.checks || []).join("\n"), plan_model: t.plan_model || "",
+        plan_reasoning: t.plan_reasoning || "", model: t.model || "", reasoning: t.reasoning || "" }
     : {};
   picked = new Set(t?.repos || []);
   options = { branches: [], errors: [] };
@@ -835,12 +836,18 @@ function drawCapture() {
   const idea = keep("idea", "idea");
   const models = state.system?.models || [];
   const levels = state.system?.reasoning || [];
-  // A blank choice means "whatever the workspace is set to". A card should only pin a model or a
-  // level when you picked one, or it would freeze today's default into itself forever.
-  const pick = (id, blank, values) => {
-    const chosen = keep(id, id.slice(4));
-    return `<select id="${id}"><option value="">${blank}</option>${values.map(v =>
-      `<option value="${esc(v)}"${v === chosen ? " selected" : ""}>${esc(v)}</option>`).join("")}</select>`;
+  const run = state.system?.run_with || {};
+  // Every card says what it plans and codes with: each stage starts on its own model, at that
+  // model's own level, and choosing another model moves the level to the new model's.
+  const pick = (id, values, fallback, label = v => v) => {
+    const chosen = keep(id, id.slice(4)) || fallback;
+    return `<select id="${id}">${values.map(v =>
+      `<option value="${esc(v)}"${v === chosen ? " selected" : ""}>${esc(label(v))}</option>`).join("")}</select>`;
+  };
+  const runWith = (prefix, stage) => {
+    const model = keep(`cap-${prefix}model`, `${prefix}model`) || run[stage] || models[0] || "";
+    return `<div class="with">${pick(`cap-${prefix}model`, models, model)}`
+      + `${pick(`cap-${prefix}reasoning`, levels, run.levels?.[model] || "medium", v => `reasoning: ${v}`)}</div>`;
   };
 
   body.innerHTML =
@@ -851,9 +858,11 @@ function drawCapture() {
     + `<div class="pick">${(state.repos || []).map(r =>
         `<button data-repo="${esc(r)}" aria-pressed="${picked.has(r)}">${esc(r.split("/").pop())}</button>`).join("")}</div>`
     + (picked.size ? heading("Branches") + drawBranches() : "")
-    + heading("Run with")
-    + `<div class="with">${pick("cap-model", state.system?.model ? `${esc(state.system.model)} (default)` : "default", models)}`
-    + `${pick("cap-reasoning", "reasoning: default", levels)}</div>`;
+    + heading("Plan with") + runWith("plan_", "planning")
+    + heading("Code with") + runWith("", "coding");
+  for (const prefix of ["plan_", ""])
+    document.getElementById(`cap-${prefix}model`).onchange = e =>
+      document.getElementById(`cap-${prefix}reasoning`).value = run.levels?.[e.target.value] || "medium";
 }
 
 function drawBranches() {
@@ -909,6 +918,8 @@ async function saveIdea() {
       repos: [...picked],
       branches: [...picked].filter(r => start[r]).map(r => `${r}@${start[r]}`),
       context_branches: refs.map(r => `${r.repo}@${r.branch}`),
+      plan_model: document.getElementById("cap-plan_model")?.value || "",
+      plan_reasoning: document.getElementById("cap-plan_reasoning")?.value || "",
       model: document.getElementById("cap-model")?.value || "",
       reasoning: document.getElementById("cap-reasoning")?.value || "",
     }),
@@ -1419,7 +1430,8 @@ function showDetail(id) {
   document.getElementById("d-title").textContent = t.title;
   document.getElementById("d-sub").textContent =
     `${LABEL[t.stage] || t.stage} · ${t.status}${t.paused ? " (paused)" : ""}${t.attempts ? ` · ${t.attempts} retries` : ""}`
-    + `${t.model ? ` · ${t.model}` : ""}${t.reasoning ? ` (${t.reasoning})` : ""} · ${when(t.created)}`;
+    + `${t.plan_model ? ` · plan ${t.plan_model}` : ""}${t.plan_reasoning ? ` (${t.plan_reasoning})` : ""}`
+    + `${t.model ? ` · code ${t.model}` : ""}${t.reasoning ? ` (${t.reasoning})` : ""} · ${when(t.created)}`;
   const from = (t.branches || []).map(b => b.split("@")[1]).join(", ");
   const reading = (t.context_branches || []).map(b => b.split("/").pop()).join(", ");
 

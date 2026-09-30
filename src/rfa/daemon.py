@@ -160,8 +160,10 @@ def report() -> dict:
     model = settings.chosen() or workspace.get("default_model") or ""
 
     def task_model(t: Task) -> str:
-        # A run uses the card's own model when it named one, and the daemon's otherwise.
-        return str(t.meta.get("model") or "") or model
+        # A run uses the card's own model when it named one, and the daemon's otherwise. A card
+        # still to be planned runs with its planning model.
+        planning = t.stage in ("draft", "planning")
+        return str((planning and t.meta.get("plan_model")) or t.meta.get("model") or "") or model
 
     return {
         "home": str(tasks.home()),
@@ -169,6 +171,7 @@ def report() -> dict:
         "models": sorted(settings.presets(workspace)),
         "reasoning": list(settings.REASONING),
         "default_reasoning": settings.chosen_reasoning(),
+        "run_with": settings.run_with(),
         "repos": sorted(workspace.get("repos") or {}),
         "board_url": service.url(),
         # 0 rather than null: not running is a state, not missing information.

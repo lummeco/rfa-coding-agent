@@ -162,16 +162,21 @@ def new(
     repo: list[str] = typer.Option([], "-r", "--repo", help="Repository this touches, as in rfa.yaml"),
     branch: list[str] = typer.Option([], "-b", "--branch", help="owner/name@branch the work starts from"),
     context: list[str] = typer.Option([], "-c", "--context", help="owner/name@branch to read beside it"),
-    model: str = typer.Option("", "-m", "--model", help="Run this card with a particular model"),
-    reasoning: str = typer.Option("", "-R", "--reasoning", help="none | low | medium | high"),
+    model: str = typer.Option("", "-m", "--model", help="Code this card with a particular model"),
+    reasoning: str = typer.Option("", "-R", "--reasoning", help="none | low | medium | high, for coding"),
+    plan_model: str = typer.Option("", "-M", "--plan-model", help="Plan this card with a particular model"),
+    plan_reasoning: str = typer.Option("", "--plan-reasoning", help="none | low | medium | high, for planning"),
 ):
     """Capture an idea as a draft."""
     settings.validate(settings.load(), model, reasoning)
+    settings.validate(settings.load(), plan_model, plan_reasoning)
     task = tasks.create(
         idea,
         list(repo),
         branches=list(branch) or None,
         context_branches=list(context)[: settings.MAX_CONTEXT] or None,
+        plan_model=plan_model or None,
+        plan_reasoning=plan_reasoning or None,
         model=model or None,
         reasoning=reasoning or None,
     )

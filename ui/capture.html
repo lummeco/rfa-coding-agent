@@ -95,9 +95,14 @@
     <ul class="results" id="results" hidden></ul>
   </div>
   <div class="with">
-    run with
-    <select id="model" title="Model"></select>
-    <select id="reasoning" title="Reasoning"></select>
+    plan with
+    <select id="plan_model" title="Planning model"></select>
+    <select id="plan_reasoning" title="Planning reasoning"></select>
+  </div>
+  <div class="with">
+    code with
+    <select id="model" title="Coding model"></select>
+    <select id="reasoning" title="Coding reasoning"></select>
   </div>
   <textarea id="idea" placeholder="What should happen?"></textarea>
   <div class="foot">
@@ -119,7 +124,7 @@ let branches = [];     // [{repo, branch, default}] for the chosen repos
 let picks = [];        // [{repo, branch}] in the order picked: first per repo starts the work
 let cursor = 0;
 let loading = false;
-let setup = { models: [], model: "", reasoning: [], defaultReasoning: "" };
+let setup = { models: [], reasoning: [], planning: "", coding: "", levels: {} };
 
 // --- what has been picked ---------------------------------------------------------------------
 
@@ -128,16 +133,20 @@ let setup = { models: [], model: "", reasoning: [], defaultReasoning: "" };
 const role = (pick, i) => (picks.findIndex(p => p.repo === pick.repo) === i ? "start" : "reference");
 const refs = () => picks.filter((p, i) => role(p, i) === "reference");
 
-// A blank choice, selected until you pick another, means "whatever the workspace is set to" -- as on
-// the board. Without it the browser selects the first level, `none`, and pins thinking off into the
-// card whenever no level was chosen with `rfa reasoning`, leaving each model's own level unused.
+// As on the board: each stage starts on its own model at that model's own level, and choosing
+// another model moves the level to the new model's.
+const levelOf = model => setup.levels[model] || "medium";
+
 function drawRun() {
-    const option = (value, label) => `<option value="${esc(value)}">${esc(label)}</option>`;
-    document.getElementById("model").innerHTML =
-      option("", setup.model ? `${setup.model} (default)` : "default") + setup.models.map(m => option(m, m)).join("");
-    document.getElementById("reasoning").innerHTML =
-      option("", `reasoning: ${setup.defaultReasoning || "default"}`)
-      + setup.reasoning.map(r => option(r, `reasoning: ${r}`)).join("");
+  const option = (value, label, chosen) =>
+    `<option value="${esc(value)}"${value === chosen ? " selected" : ""}>${esc(label)}</option>`;
+  for (const [prefix, model] of [["plan_", setup.planning], ["", setup.coding]]) {
+    document.getElementById(`${prefix}model`).innerHTML = setup.models.map(m => option(m, m, model)).join("");
+    document.getElementById(`${prefix}reasoning`).innerHTML =
+      setup.reasoning.map(r => option(r, `reasoning: ${r}`, levelOf(model))).join("");
+    document.getElementById(`${prefix}model`).onchange = e =>
+      document.getElementById(`${prefix}reasoning`).value = levelOf(e.target.value);
+  }
 }
 
 function drawRepos() {
@@ -222,6 +231,8 @@ async function save() {
     repos: [...chosen],
     branches: picks.filter((p, i) => role(p, i) === "start").map(p => `${p.repo}@${p.branch}`),
     context_branches: refs().map(p => `${p.repo}@${p.branch}`),
+    plan_model: document.getElementById("plan_model").value,
+    plan_reasoning: document.getElementById("plan_reasoning").value,
     model: document.getElementById("model").value,
     reasoning: document.getElementById("reasoning").value,
   }).catch(e => ({ error: String(e) }));
@@ -281,7 +292,13 @@ window.rfa = {
     drawPicks();
     drawResults(false);
     const reply = await call("setup");
-    setup = { models: reply?.models || [], model: reply?.model || "", reasoning: reply?.reasoning || [], defaultReasoning: reply?.defaultReasoning || "" };
+    setup = {
+      models: reply?.models || [],
+      reasoning: reply?.reasoning || [],
+      planning: reply?.planning || "",
+      coding: reply?.coding || "",
+      levels: reply?.levels || {},
+    };
     drawRun();
     repos = reply?.repos || [];
     chosen = new Set([...chosen].filter(r => repos.includes(r)));

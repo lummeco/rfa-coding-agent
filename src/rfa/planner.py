@@ -272,9 +272,9 @@ def plan_task(task: Task, config: dict, model: str = "", reasoning: str = "") ->
         raise ValueError(f"{task.id} is in `{task.stage}`; move it to `planning` first (rfa mv {task.id} planning)")
     repos = pin(settings.repo_paths(config, task.meta.get("repos") or [], settings.start_branches(task.meta)))
     reference = pin(settings.reference_paths(config, task.meta))
-    # The card's own `model:` is what the board and `rfa new -m` set; the command still wins.
-    chosen, level = settings.for_task(config, task.meta, model, reasoning)
-    tasks.save(task, status="planning", model=chosen, reasoning=level or None)
+    # The card's own `plan_model:` is what the board and `rfa new -M` set; the command still wins.
+    chosen, level = settings.for_task(config, task.meta, model, reasoning, prefix="plan_")
+    tasks.save(task, status="planning", plan_model=chosen, plan_reasoning=level or None)
     env = get_environment(config.get("environment", {}), default_type="docker")
     try:
         agent = plan(

@@ -127,6 +127,8 @@ def snapshot() -> dict:
                 "complexity": task.meta.get("complexity"),
                 "branches": task.meta.get("branches") or [],
                 "context_branches": task.meta.get("context_branches") or [],
+                "plan_model": task.meta.get("plan_model"),
+                "plan_reasoning": task.meta.get("plan_reasoning"),
                 "model": task.meta.get("model"),
                 "reasoning": task.meta.get("reasoning"),
                 "created": task.meta.get("created"),
@@ -300,7 +302,17 @@ def analytics(window: str = "all") -> dict:
     return {**total, "rate": total["shipped"] / judged if judged else None}
 
 
-EDITABLE = ("title", "repos", "branches", "context_branches", "model", "reasoning", "checks")
+EDITABLE = (
+    "title",
+    "repos",
+    "branches",
+    "context_branches",
+    "plan_model",
+    "plan_reasoning",
+    "model",
+    "reasoning",
+    "checks",
+)
 PACKET_SECTIONS = ("goal", "current_behavior", "acceptance_criteria", "constraints", "non_goals")
 
 
@@ -319,8 +331,8 @@ def edit(payload: dict) -> tasks.Task:
     fields = {key: payload[key] or None for key in EDITABLE if key in payload}
     if "context_branches" in fields:
         fields["context_branches"] = (fields["context_branches"] or [])[: settings.MAX_CONTEXT] or None
-    if "model" in fields or "reasoning" in fields:
-        settings.validate(settings.load(), fields.get("model") or "", fields.get("reasoning") or "")
+    for prefix in ("plan_", ""):
+        settings.validate(settings.load(), fields.get(f"{prefix}model") or "", fields.get(f"{prefix}reasoning") or "")
     if "open_questions" in payload:
         fields["open_questions"] = [q.strip() for q in (payload["open_questions"] or []) if str(q).strip()] or None
     if any(key in payload for key in PACKET_SECTIONS):
@@ -597,9 +609,10 @@ class Handler(BaseHTTPRequestHandler):
             if not (idea := str(payload.get("idea", "")).strip()):
                 self._json(400, {"error": "an idea needs some words"})
                 return
-            model, reasoning = str(payload.get("model") or ""), str(payload.get("reasoning") or "")
+            run_with = {key: str(payload.get(key) or "") for key in ("plan_model", "plan_reasoning", "model", "reasoning")}
             try:
-                settings.validate(settings.load(), model, reasoning)
+                for prefix in ("plan_", ""):
+                    settings.validate(settings.load(), run_with[f"{prefix}model"], run_with[f"{prefix}reasoning"])
             except (KeyError, ValueError) as e:
                 self._json(400, {"error": str(e).strip("'")})
                 return
@@ -608,8 +621,7 @@ class Handler(BaseHTTPRequestHandler):
                 list(payload.get("repos") or []),
                 branches=list(payload.get("branches") or []) or None,
                 context_branches=list(payload.get("context_branches") or [])[: settings.MAX_CONTEXT] or None,
-                model=model or None,
-                reasoning=reasoning or None,
+                **{key: value or None for key, value in run_with.items()},
             )
             self._json(200, {"id": task.id, "stage": task.stage, "status": task.status})
             return

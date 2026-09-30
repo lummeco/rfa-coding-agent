@@ -386,11 +386,7 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .tok button { border: 0; background: none; color: var(--text-3); cursor: pointer; font: inherit; padding: 0 2px; }
 .tok button:hover { color: var(--red); }
 
-/* The run log: a link until you want it, then the commands as they happen. */
-.watch {
-  background: none; border: 0; padding: 0; font: inherit; font-size: 13px;
-  color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
-}
+/* The run log: the commands as they happen. */
 /* One line per step; a failure and the end open themselves, the rest open on a click. */
 .run { margin-top: 10px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .run .step { border-left: 2px solid var(--line); padding: 2px 0 2px 10px; }
@@ -1471,18 +1467,15 @@ function showDetail(id) {
   const body = fullBody.replace(/^\s*#\s+Task\s*\n+[^\n]*\n/, "");
   // Only where there is a run to look at: a card that never reached the coder has no trajectory.
   const ran = ["under-work", "review", "done"].includes(t.stage);
-  const watch = ran
-    ? `<p><button class="watch" id="watch">${watching === id ? "Hide" : "Watch"} what it did →</button></p>`
-      + `<div class="run" id="run"></div>`
-    : "";
   // Re-rendering the card that is already open must not yank the panel back to the top; a new
   // card, or coming back from editing, starts at the top.
   const panel = document.getElementById("d-body");
   const saved = detailId === id && !editing ? panel.scrollTop : 0;
   panel.classList.toggle("editing", editing);
-  // A done card with rounds is read round by round; the rest is still the packet and its notes.
-  const rounded = t.stage === "done" && (t.rounds || []).length && !editing;
-  if (tab === "shots" && !(t.shots || []).length) tab = "runs";
+  // A card that reached the coder is read round by round; the rest is still the packet and its notes.
+  const rounded = ran && !editing;
+  const rs = t.rounds || [];
+  if ((tab === "shots" && !(t.shots || []).length) || (tab === "full" && latestLanded(t) < 0)) tab = "runs";
   const diffing = tab === "full" || (tab === "runs" && [...openDiffs].some(k => k.startsWith(`${id}/`)));
   document.getElementById("detail").classList.toggle("wide", Boolean(rounded && diffing));
   let html;
@@ -1491,16 +1484,18 @@ function showDetail(id) {
     html = head + (t.packet ? packetEdit(t) : `<textarea id="edit-body">${esc(fullBody)}</textarea>`);
   } else if (rounded) {
     const top = (t.error ? `<div class="note bad">${esc(t.error)}</div>` : "")
-      + (prNote?.id === id ? `<div class="note${prNote.bad ? " bad" : ""}">${esc(prNote.text)}</div>` : "");
+      + (prNote?.id === id ? `<div class="note${prNote.bad ? " bad" : ""}">${esc(prNote.text)}</div>` : "")
+      + (t.paused ? `<div class="note">${LIVE.has(t.status) ? "Pausing — the run stops before its next model call." : "Paused until you <strong>Resume</strong>."}</div>` : "");
     const tabs = [
-      ["runs", "Runs", t.rounds.length],
-      ["full", "Full diff"],
+      ["runs", "Runs", rs.length],
+      ...(latestLanded(t) >= 0 ? [["full", "Full diff"]] : []),
       ...((t.shots || []).length ? [["shots", "Screenshots", t.shots.length]] : []),
       ["history", "History", mine.length],
       ["log", "Run log"],
     ];
     const content = {
-      runs: () => linksRow(t) + roundsView(t),
+      runs: () => rs.length ? linksRow(t) + roundsView(t)
+        : `<p class="tests">No round has finished yet — the <strong>Run log</strong> shows the coder as it works.</p><div class="md">${md(body)}</div>`,
       full: () => `<p class="tests" id="full-sum">From where the first round started to the latest round.</p><div class="diffbox" id="diff-full"></div>`,
       shots: () => shotsGrid(t) || `<div class="hint">loading the screenshots…</div>`,
       history: () => history.replace("<h2>History</h2>", "") || `<div class="hint">Nothing recorded yet.</div>`,
@@ -1510,7 +1505,7 @@ function showDetail(id) {
         `<button role="tab" data-tab="${key}" aria-selected="${tab === key}">${label}${n ? `<span class="n">${n}</span>` : ""}</button>`).join("")}</div>`
       + top + content();
   } else {
-    html = head + `<div class="md">${md(body)}${gallery(t)}${history}</div>` + watch;
+    html = head + `<div class="md">${md(body)}${gallery(t)}${history}</div>`;
   }
   // Redrawing the same thing would close every open diff and the `details` you opened; only a change redraws.
   // Compared by what it is drawn from, not by the html: "3m ago" becoming "4m ago" is no change.
@@ -1764,13 +1759,9 @@ document.getElementById("d-body").addEventListener("click", e => {
   const pick = e.target.closest("button[data-tab]");
   if (pick) {
     tab = pick.dataset.tab;
-    // The log tab is the run log opened: it polls while the run is live, like Watch does.
+    // The log tab is the run log opened: it polls while the run is live, while it is open.
     watching = tab === "log" ? openId : null;
     document.getElementById("d-body").scrollTop = 0;
-    return showDetail(openId);
-  }
-  if (e.target.closest("#watch")) {
-    watching = watching === openId ? null : openId;
     return showDetail(openId);
   }
   const peDel = e.target.closest("button[data-pe-del]");

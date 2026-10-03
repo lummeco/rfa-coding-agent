@@ -311,6 +311,16 @@ button.action.quiet { background: transparent; color: var(--text-2); padding-lef
 }
 .pick button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 .note code { font-size: 12px; }
+/* Open questions answered where they are read: each answer becomes a decision in the packet. */
+.oq { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.oq p { margin: 0 0 6px; color: var(--text); }
+.oq .answer { display: flex; gap: 8px; align-items: flex-start; }
+.oq textarea {
+  flex: 1; min-width: 0; resize: none; overflow: hidden;
+  font: inherit; font-size: 13px; line-height: 1.45; color: var(--text); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 10px; padding: 7px 11px;
+}
+.oq textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
 .copy { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
 .copy code {
   flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap;
@@ -637,7 +647,13 @@ function md(src) {
 }
 /** A list item's textarea is as tall as what it holds, so a nested bullet is never hidden. */
 const grow = el => { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; };
-document.addEventListener("input", e => { if (e.target.matches(".pe-list textarea")) grow(e.target); });
+document.addEventListener("input", e => {
+  if (e.target.matches(".pe-list textarea, .oq textarea")) grow(e.target);
+  if (e.target.matches(".oq textarea")) {
+    const t = state.tasks.find(x => x.id === openId);
+    answers.set(`${t.id}\n${t.open_questions[e.target.dataset.oq]}`, e.target.value);
+  }
+});
 const inline = s => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 
 function when(iso) {
@@ -1121,6 +1137,7 @@ let d2h = null;             // the promise of diff2html, loaded the first time a
 const diffs = new Map();    // `${id}/${n}` -> what /api/diff said
 const openDiffs = new Set();// `${id}/${n}` the user has open
 let menuOpen = false;
+const answers = new Map();  // `${id}\n${question}` -> a half-written answer, so a redraw keeps it
 let commentAt = null;       // the line a comment is being written on; the panel holds still meanwhile
 let lastBody = "";          // what the panel was last drawn from, so a refresh that changes nothing leaves it be
 let boardHtml = "";         // the same, for the columns
@@ -1477,7 +1494,11 @@ function showDetail(id) {
   if (t.stage === "draft") head += `<div class="note">A draft. <strong>Edit</strong> changes any part of it; <strong>Plan it</strong> hands it to the planner${t.planned ? ", or <strong>Approve as is</strong> sends this packet straight to the coder" : ""}.</div>`;
   if (t.status === "queued" && t.stage === "planning" && !t.paused) head += `<div class="note">Waiting for the planner — <code>rfa plan</code></div>`;
   if (t.stage === "planning" && t.open_questions?.length)
-    head += `<div class="note"><strong>Open questions</strong><ul>${t.open_questions.map(q => `<li>${esc(q)}</li>`).join("")}</ul></div>`;
+    head += t.packet
+      ? `<div class="note"><strong>Open questions</strong> — an answer goes into the packet as a decision.<ul class="oq">${t.open_questions.map((q, i) =>
+          `<li><p>${esc(q)}</p><div class="answer"><textarea rows="1" data-oq="${i}" placeholder="Your answer">${esc(answers.get(`${t.id}\n${q}`) || "")}</textarea>`
+          + `<button class="action" data-answer="${i}">Answer</button></div></li>`).join("")}</ul></div>`
+      : `<div class="note"><strong>Open questions</strong><ul>${t.open_questions.map(q => `<li>${esc(q)}</li>`).join("")}</ul></div>`;
 
   const mine = state.events.filter(e => e.id === t.id);
   const history = mine.length
@@ -1555,7 +1576,27 @@ function showDetail(id) {
   }
   openPanel();
   // Measured once the panel shows: hidden, every textarea is zero tall.
-  panel.querySelectorAll(".pe-list textarea").forEach(grow);
+  panel.querySelectorAll(".pe-list textarea, .oq textarea").forEach(grow);
+}
+
+/** The owner's answer joins the decisions and the question leaves the list, so the packet stands on its own. */
+async function answerQuestion(i) {
+  const t = state.tasks.find(x => x.id === openId);
+  const q = t.open_questions[i];
+  const answer = (answers.get(`${t.id}\n${q}`) || "").trim();
+  if (!answer) return document.querySelector(`.oq textarea[data-oq="${i}"]`)?.focus();
+  const res = await api("/api/edit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: t.id,
+      decisions: [...t.packet.decisions, `${answer} -- the owner's answer to: ${q}`],
+      open_questions: t.open_questions.filter((_, j) => j !== i),
+    }),
+  });
+  if (!res.ok) { alert((await res.json()).error); return; }
+  answers.delete(`${t.id}\n${q}`);
+  await refresh();
 }
 
 async function createPR(id) {
@@ -1791,6 +1832,8 @@ document.getElementById("d-body").addEventListener("click", e => {
     document.getElementById("d-body").scrollTop = 0;
     return showDetail(openId);
   }
+  const answer = e.target.closest("button[data-answer]");
+  if (answer) return answerQuestion(Number(answer.dataset.answer));
   const peDel = e.target.closest("button[data-pe-del]");
   if (peDel) { peDel.closest("li").remove(); return; }
   const peAdd = e.target.closest("button[data-pe-add]");
@@ -1851,6 +1894,7 @@ document.addEventListener("keydown", e => {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") return saveComment();
     return;
   }
+  if (e.target.matches(".oq textarea") && (e.metaKey || e.ctrlKey) && e.key === "Enter") return answerQuestion(Number(e.target.dataset.oq));
   if (e.key === "Escape" && menuOpen) { menuOpen = false; return document.querySelector(".menu")?.classList.remove("open"); }
   if (e.key === "Escape") return closeDetail();
   if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && document.getElementById("idea")) return saveIdea();

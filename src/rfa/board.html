@@ -942,10 +942,9 @@ function packetEdit(t) {
   return `<div class="packet-edit">`
     + `<div class="pe-field"><label>Goal</label><textarea id="pe-goal">${esc(p.goal)}</textarea></div>`
     + `<div class="pe-field"><label>Current behavior</label><textarea id="pe-current">${esc(p.current_behavior)}</textarea></div>`
-    + list("acceptance_criteria", "Acceptance criteria", p.acceptance_criteria)
-    + list("constraints", "Constraints", p.constraints)
-    + list("non_goals", "Non-goals", p.non_goals)
     + list("open_questions", "Open questions", t.open_questions)
+    + list("decisions", "Decisions", p.decisions)
+    + list("acceptance_criteria", "Acceptance criteria", p.acceptance_criteria)
     + `</div>`;
 }
 
@@ -959,9 +958,8 @@ async function savePacketEdit() {
       id: openId,
       goal: text("pe-goal"),
       current_behavior: text("pe-current"),
+      decisions: list("decisions"),
       acceptance_criteria: list("acceptance_criteria"),
-      constraints: list("constraints"),
-      non_goals: list("non_goals"),
       open_questions: list("open_questions"),
     }),
   });

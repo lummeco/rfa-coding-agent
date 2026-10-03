@@ -1,7 +1,8 @@
 """The execution packet: the engineering ticket the planner writes and the coder works from.
 
-It is deliberately a specification rather than an implementation plan. It says what the behavior
-must become and how that will be judged, and leaves the how to the coder.
+It is deliberately a short design to review rather than an implementation plan: what the code does
+today, the decisions the planner took (assumptions and constraints included) and how the work will be
+judged -- the expensive choices a human should see before any code exists. The steps are the coder's.
 
 `files` and `complexity` are the exception: they never reach the coder's prompt. The host uses
 `files` to reject a packet whose paths it cannot find (a hallucinated area otherwise costs a whole
@@ -13,6 +14,9 @@ from typing import Literal
 
 from jinja2 import StrictUndefined, Template
 from pydantic import BaseModel
+
+MAX_DECISIONS = 10
+MAX_CRITERIA = 5
 
 # Paths the export gate refuses to carry out of the sandbox, so a packet must never aim at one.
 FORBIDDEN_PATHS = [
@@ -32,10 +36,10 @@ PACKET_TEMPLATE = """\
 
 ## Current behavior
 {{ p.current_behavior }}
-{% if p.constraints %}
+{% if p.decisions %}
 
-## Constraints
-{% for item in p.constraints %}
+## Decisions
+{% for item in p.decisions %}
 - {{ item }}
 {% endfor %}
 {% endif %}
@@ -44,13 +48,6 @@ PACKET_TEMPLATE = """\
 {% for item in p.acceptance_criteria %}
 {{ loop.index }}. {{ item }}
 {% endfor %}
-{% if p.non_goals %}
-
-## Non-goals
-{% for item in p.non_goals %}
-- {{ item }}
-{% endfor %}
-{% endif %}
 """
 
 
@@ -66,9 +63,8 @@ class Packet(BaseModel):
     title: str
     goal: str
     current_behavior: str
-    constraints: list[str] = []
+    decisions: list[str] = []
     acceptance_criteria: list[str]
-    non_goals: list[str] = []
     files: list[PacketFile] = []
     open_questions: list[str] = []
     complexity: Literal[1, 2, 3, 4, 5]
@@ -119,9 +115,11 @@ def parse(body: str) -> dict:
         "title": title or "",
         "goal": "\n".join(sections.get("Goal", [])).strip(),
         "current_behavior": "\n".join(sections.get("Current behavior", [])).strip(),
-        "constraints": items("Constraints", r"- "),
+        # Packets planned before decisions existed kept constraints and non-goals; they are decisions now.
+        "decisions": items("Decisions", r"- ")
+        + items("Constraints", r"- ")
+        + [f"Not in scope: {item}" for item in items("Non-goals", r"- ")],
         "acceptance_criteria": items("Acceptance criteria", r"\d+\.\s+"),
-        "non_goals": items("Non-goals", r"- "),
     }
     if not all(fields[key] for key in ("title", "goal", "current_behavior", "acceptance_criteria")):
         raise ValueError("not a rendered packet")
@@ -140,6 +138,13 @@ def problems(packet: Packet, repo_files: dict[str, set[str]], tool_calls: int, m
         found.append(
             f"You made {tool_calls} tool calls; read the code you are writing the packet about "
             f"(at least {min_tool_calls} tool calls) instead of writing it from the idea alone."
+        )
+    if len(packet.decisions) > MAX_DECISIONS:
+        found.append(f"{len(packet.decisions)} decisions; keep the {MAX_DECISIONS} the owner most needs to see.")
+    if len(packet.acceptance_criteria) > MAX_CRITERIA:
+        found.append(
+            f"{len(packet.acceptance_criteria)} acceptance criteria; keep the {MAX_CRITERIA} that best tell a "
+            "correct implementation from a plausible wrong one."
         )
     folders = {name: {p.rpartition("/")[0] for p in paths} for name, paths in repo_files.items()}
     for path in packet.paths():

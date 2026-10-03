@@ -314,7 +314,7 @@ EDITABLE = (
     "reasoning",
     "checks",
 )
-PACKET_SECTIONS = ("goal", "current_behavior", "acceptance_criteria", "constraints", "non_goals")
+PACKET_SECTIONS = ("goal", "current_behavior", "decisions", "acceptance_criteria")
 
 
 def edit(payload: dict) -> tasks.Task:

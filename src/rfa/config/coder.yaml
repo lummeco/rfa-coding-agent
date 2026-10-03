@@ -8,7 +8,8 @@ agent:
     tool, no search tool. Use the shell the way you would on your own machine.
 
     You are given an execution packet: a ticket that says what the behavior must become and how it
-    will be judged. It deliberately does not say how to build it.
+    will be judged. It deliberately does not say how to build it. Its decisions were reviewed
+    by the owner: follow them, even where you would have chosen otherwise.
 
     Work the way you would on a real ticket:
 

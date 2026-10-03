@@ -391,9 +391,8 @@ def planned_ready(tmp_path, monkeypatch) -> tasks.Task:
         title="Add duplicate invoice line functionality.",
         goal="Allow a user to duplicate an existing invoice line.",
         current_behavior="Lines can be added, edited and deleted, but not duplicated.",
-        constraints=["Keep it local.", "Leave:\n  - product\n  - VAT"],
+        decisions=["Keep it local.", "Leave:\n  - product\n  - VAT"],
         acceptance_criteria=["Clicking Duplicate creates exactly one new line."],
-        non_goals=["Bulk duplication."],
         complexity=2,
         complexity_reason="A normal feature following an existing pattern.",
     )
@@ -410,7 +409,7 @@ def test_the_snapshot_exposes_a_ready_packets_sections(tmp_path, monkeypatch):
     card = board.snapshot()["tasks"][0]
     assert card["packet"]["goal"] == "Allow a user to duplicate an existing invoice line."
     assert card["packet"]["acceptance_criteria"] == ["Clicking Duplicate creates exactly one new line."]
-    assert card["packet"]["constraints"] == ["Keep it local.", "Leave:\n  - product\n  - VAT"]
+    assert card["packet"]["decisions"] == ["Keep it local.", "Leave:\n  - product\n  - VAT"]
     assert card["open_questions"] == ["Which line to copy from?"]
 
 
@@ -437,8 +436,7 @@ def test_editing_a_packets_sections_rewrites_the_body_and_keeps_the_rest(tmp_pat
     body = tasks.read(edited.path).body
     assert "## Goal\nAllow a user to duplicate an invoice line, with or without its VAT." in body
     assert "## Acceptance criteria\n1. Clicking Duplicate creates exactly one new line.\n2. The copy is editable." in body
-    assert "## Constraints\n- Keep it local.\n- Leave:\n  - product\n  - VAT" in body
-    assert "## Non-goals\n- Bulk duplication." in body
+    assert "## Decisions\n- Keep it local.\n- Leave:\n  - product\n  - VAT\n\n## Acceptance criteria" in body
     # open_questions stays on the meta, not in the body.
     assert tasks.read(edited.path).meta["open_questions"] == ["Which line to copy from?", "And why?"]
     assert "Open questions" not in body
@@ -447,11 +445,11 @@ def test_editing_a_packets_sections_rewrites_the_body_and_keeps_the_rest(tmp_pat
 def test_an_edited_packet_survives_a_reload(tmp_path, monkeypatch):
     """The body is the source of truth, so the snapshot reads back whatever the owner saved."""
     task = planned_ready(tmp_path, monkeypatch)
-    board.edit({"id": task.id, "current_behavior": "Lines can be added, but not duplicated.", "non_goals": []})
+    board.edit({"id": task.id, "current_behavior": "Lines can be added, but not duplicated.", "decisions": []})
     card = board.snapshot()["tasks"][0]
     assert card["packet"]["current_behavior"] == "Lines can be added, but not duplicated."
-    assert card["packet"]["non_goals"] == []
-    assert "## Non-goals" not in tasks.read(task.path).body
+    assert card["packet"]["decisions"] == []
+    assert "## Decisions" not in tasks.read(task.path).body
 
 
 def test_a_packet_is_only_edited_on_a_planning_card(tmp_path, monkeypatch):

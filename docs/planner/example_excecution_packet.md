@@ -1,57 +1,28 @@
+> **Open questions** (shown on the board, never sent to the coder)
+> - Should a sent invoice still allow duplicating lines into a credit note, or is duplication simply off once the invoice is locked? Assumed: off.
+
 # Task
 Add duplicate invoice line functionality.
 
 ## Goal
-Allow a user to duplicate an existing invoice line from the invoice editor.
-The new line should appear immediately below the source line.
+Allow a user to duplicate an existing invoice line from the invoice editor. The copy appears
+immediately below the source line.
 
 ## Current behavior
-Invoice lines can be added, edited and deleted, but not duplicated.
+Invoice lines can be added, edited and deleted, but not duplicated. A new line is always appended
+at the end, and line order is only stored when the invoice is saved.
 
-## Required behavior
-- Add a duplicate action to each editable invoice line.
-- Copy:
-  - product
-  - description
-  - quantity
-  - unit
-  - unit price
-  - VAT
-- Insert the copy immediately below the original.
-- Generate a new line ID.
-- Do not allow duplication when the invoice is locked/sent.
-
-## Constraints
-- Preserve the existing invoice editing architecture.
-- Do not introduce a new backend endpoint unless necessary.
-- Follow existing UI component patterns.
-- Do not change existing API response shapes.
-- Avoid unrelated refactoring.
-
-## Relevant areas
-Likely relevant:
-- invoice editor
-- invoice line row component
-- invoice state/update logic
-- invoice locking rules
-
-These are hints. Inspect the repository before deciding what needs changing.
+## Decisions
+- The copy is made through the existing line-create flow -- one validation path, over a client-side clone that skips it.
+- Product, description, quantity, unit, unit price and VAT are copied; the line ID and timestamps are not -- the copy is a new line, over a shallow copy that shares identity.
+- The copy is inserted directly after its source -- what the user expects, over appending at the end like Add does.
+- Duplication is unavailable on locked or sent invoices, using the same lock rule that already disables editing -- over a separate rule that could drift from it.
+- The invoice API's response shapes stay as they are -- other clients read them.
+- The action sits in the line row's existing action menu -- over a new toolbar button.
 
 ## Acceptance criteria
-1. Clicking Duplicate creates exactly one new line.
-2. Copied business fields equal the source line.
-3. New line has its own identity.
-4. New line appears directly after the source.
-5. Locked/sent invoices cannot duplicate lines.
-6. Existing add/edit/delete functionality still works.
-7. Existing tests pass.
-8. Add or update tests covering duplication.
-
-## Verification
-Run the relevant unit/integration tests and the repository's normal
-lint/typecheck/test commands for the affected area.
-
-## Non-goals
-- Redesigning the invoice editor.
-- Changing invoice persistence architecture.
-- Adding bulk duplication.
+1. Clicking Duplicate on a line creates exactly one new line, directly below it.
+2. The new line's product, description, quantity, unit, unit price and VAT equal the source's, and its ID differs.
+3. After saving and reloading the invoice, the copy is still there, in the same position.
+4. On a locked or sent invoice, no Duplicate action is offered and none can be triggered.
+5. Editing the copy does not change the source line.

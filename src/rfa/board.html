@@ -285,13 +285,18 @@ button.action.quiet { background: transparent; color: var(--text-2); padding-lef
 }
 #pe-goal:focus, #pe-current:focus { outline: 2px solid var(--accent); }
 .pe-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.pe-list li { display: flex; gap: 8px; align-items: center; }
-.pe-list input {
-  flex: 1; min-width: 0;
-  font: inherit; font-size: 14px; color: var(--text); background: var(--surface-2);
+.pe-list li { display: flex; gap: 8px; align-items: flex-start; }
+.pe-list textarea {
+  flex: 1; min-width: 0; resize: none; overflow: hidden;
+  font: inherit; font-size: 14px; line-height: 1.45; color: var(--text); background: var(--surface-2);
   border: none; border-radius: 10px; padding: 8px 12px;
 }
-.pe-list input:focus { outline: 2px solid var(--accent); }
+.pe-list textarea:focus { outline: 2px solid var(--accent); }
+#pe-title {
+  width: 100%; font: inherit; font-size: 14px; color: var(--text); background: var(--surface-2);
+  border: none; border-radius: 10px; padding: 8px 12px;
+}
+#pe-title:focus { outline: 2px solid var(--accent); }
 .pe-del {
   flex: none; cursor: pointer; font: inherit; font-size: 12px;
   border: 1px solid var(--line); background: transparent; color: var(--text-3);
@@ -596,8 +601,14 @@ const link = u => `<a href="${esc(u)}" target="_blank" rel="noreferrer">${esc(St
 /** Just enough markdown for a packet: headings, bullets, numbers, fenced code, inline code. */
 function md(src) {
   const lines = String(src || "").split("\n");
-  let html = "", list = null, code = false;
-  const closeList = () => { if (list) { html += `</${list}>`; list = null; } };
+  let html = "", list = null, sub = false, code = false;
+  // Items are left open, so a nested bullet lands inside the item above it and numbering carries on.
+  const closeSub = () => { if (sub) { html += "</ul>"; sub = false; } };
+  const closeList = () => { closeSub(); if (list) { html += `</li></${list}>`; list = null; } };
+  const item = (kind, text) => {
+    if (list === kind) { closeSub(); html += "</li>"; } else { closeList(); html += `<${kind}>`; list = kind; }
+    html += `<li>${inline(text)}`;
+  };
   for (const raw of lines) {
     const line = raw.trimEnd();
     if (line.trim().startsWith("```")) {
@@ -611,22 +622,22 @@ function md(src) {
     if ((m = line.match(/^#\s+(.*)/))) { closeList(); html += `<h1>${inline(m[1])}</h1>`; }
     else if ((m = line.match(/^##\s+(.*)/))) { closeList(); html += `<h2>${inline(m[1])}</h2>`; }
     else if ((m = line.match(/^(\s*)[-*]\s+(.*)/))) {
-      const nested = m[1].length >= 2;
-      if (list !== "ul") { closeList(); html += "<ul>"; list = "ul"; }
-      html += nested ? `<li style="list-style:circle">${inline(m[2])}</li>` : `<li>${inline(m[2])}</li>`;
+      if (m[1].length >= 2 && list) {
+        if (!sub) { html += "<ul>"; sub = true; }
+        html += `<li>${inline(m[2])}</li>`;
+      } else item("ul", m[2]);
     }
-    else if ((m = line.match(/^\d+\.\s+(.*)/))) {
-      if (list !== "ol") { closeList(); html += "<ol>"; list = "ol"; }
-      html += `<li>${inline(m[1])}</li>`;
-    }
+    else if ((m = line.match(/^\d+\.\s+(.*)/))) item("ol", m[1]);
     else if (!line.trim()) { closeList(); }
-    else if (/^These are hints\./.test(line.trim())) { closeList(); html += `<p class="hint">${inline(line)}</p>`; }
     else { closeList(); html += `<p>${inline(line)}</p>`; }
   }
   closeList();
   if (code) html += "</code></pre>";
   return html;
 }
+/** A list item's textarea is as tall as what it holds, so a nested bullet is never hidden. */
+const grow = el => { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; };
+document.addEventListener("input", e => { if (e.target.matches(".pe-list textarea")) grow(e.target); });
 const inline = s => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 
 function when(iso) {
@@ -937,9 +948,10 @@ function packetEdit(t) {
   const list = (field, label, items) =>
     `<div class="pe-field"><label>${label}</label>`
     + `<ul class="pe-list" id="pe-list-${field}">${(items || []).map(v =>
-        `<li><input type="text" value="${esc(v)}"><button class="pe-del" data-pe-del="${field}" title="Remove this item">✕</button></li>`).join("")}</ul>`
+        `<li><textarea rows="1">${esc(v)}</textarea><button class="pe-del" data-pe-del="${field}" title="Remove this item">✕</button></li>`).join("")}</ul>`
     + `<button class="action quiet" data-pe-add="${field}">Add an item</button></div>`;
   return `<div class="packet-edit">`
+    + `<div class="pe-field"><label>Title</label><input type="text" id="pe-title" value="${esc(p.title)}"></div>`
     + `<div class="pe-field"><label>Goal</label><textarea id="pe-goal">${esc(p.goal)}</textarea></div>`
     + `<div class="pe-field"><label>Current behavior</label><textarea id="pe-current">${esc(p.current_behavior)}</textarea></div>`
     + list("open_questions", "Open questions", t.open_questions)
@@ -950,12 +962,13 @@ function packetEdit(t) {
 
 async function savePacketEdit() {
   const text = id => (document.getElementById(id)?.value || "").trim();
-  const list = field => [...document.querySelectorAll(`#pe-list-${field} input`)].map(i => i.value.trim()).filter(Boolean);
+  const list = field => [...document.querySelectorAll(`#pe-list-${field} textarea`)].map(i => i.value.trim()).filter(Boolean);
   const res = await api("/api/edit", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       id: openId,
+      title: text("pe-title"),
       goal: text("pe-goal"),
       current_behavior: text("pe-current"),
       decisions: list("decisions"),
@@ -1463,7 +1476,7 @@ function showDetail(id) {
       : "Paused — the daemon leaves it alone until you <strong>Resume</strong>. A run starts over from the beginning."}</div>`;
   if (t.stage === "draft") head += `<div class="note">A draft. <strong>Edit</strong> changes any part of it; <strong>Plan it</strong> hands it to the planner${t.planned ? ", or <strong>Approve as is</strong> sends this packet straight to the coder" : ""}.</div>`;
   if (t.status === "queued" && t.stage === "planning" && !t.paused) head += `<div class="note">Waiting for the planner — <code>rfa plan</code></div>`;
-  if (t.open_questions?.length)
+  if (t.stage === "planning" && t.open_questions?.length)
     head += `<div class="note"><strong>Open questions</strong><ul>${t.open_questions.map(q => `<li>${esc(q)}</li>`).join("")}</ul></div>`;
 
   const mine = state.events.filter(e => e.id === t.id);
@@ -1541,6 +1554,8 @@ function showDetail(id) {
     document.getElementById("d-actions").innerHTML = actionsFor(t);
   }
   openPanel();
+  // Measured once the panel shows: hidden, every textarea is zero tall.
+  panel.querySelectorAll(".pe-list textarea").forEach(grow);
 }
 
 async function createPR(id) {
@@ -1782,9 +1797,9 @@ document.getElementById("d-body").addEventListener("click", e => {
   if (peAdd) {
     const field = peAdd.dataset.peAdd;
     const li = document.createElement("li");
-    li.innerHTML = `<input type="text" value=""><button class="pe-del" data-pe-del="${field}" title="Remove this item">✕</button>`;
+    li.innerHTML = `<textarea rows="1"></textarea><button class="pe-del" data-pe-del="${field}" title="Remove this item">✕</button>`;
     document.getElementById(`pe-list-${field}`).appendChild(li);
-    li.querySelector("input").focus();
+    li.querySelector("textarea").focus();
     return;
   }
   // The command is read off the page rather than out of the button, so what you copy is what you see.

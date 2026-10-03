@@ -140,8 +140,9 @@ def snapshot() -> dict:
                 "prs": task.meta.get("prs") or {},
                 "link": task.meta.get("link"),
                 "open_questions": task.meta.get("open_questions") or [],
-                "body": task.body,
-                "packet": planned_packet(task),
+                "packet": (plan := planned_packet(task)),
+                # A ready plan reads exactly as the editor will save it, older sections folded in.
+                "body": render_packet(task, plan) if plan else task.body,
             }
             for task in tasks.tasks()
         ],
@@ -314,7 +315,7 @@ EDITABLE = (
     "reasoning",
     "checks",
 )
-PACKET_SECTIONS = ("goal", "current_behavior", "decisions", "acceptance_criteria")
+PACKET_SECTIONS = ("title", "goal", "current_behavior", "decisions", "acceptance_criteria")
 
 
 def edit(payload: dict) -> tasks.Task:
@@ -336,7 +337,9 @@ def edit(payload: dict) -> tasks.Task:
         settings.validate(settings.load(), fields.get(f"{prefix}model") or "", fields.get(f"{prefix}reasoning") or "")
     if "open_questions" in payload:
         fields["open_questions"] = [q.strip() for q in (payload["open_questions"] or []) if str(q).strip()] or None
-    if any(key in payload for key in PACKET_SECTIONS):
+    # A title alone is the card's own on anything but a ready plan, whose body leads with it.
+    sections = [key for key in PACKET_SECTIONS if key in payload and (key != "title" or planned_packet(task))]
+    if sections:
         if task.stage != "planning":
             raise ValueError(f"{task.id} is in `{task.stage}`; the packet is edited on a planning card")
         task.body = rendered_packet(task, payload)
@@ -363,11 +366,15 @@ def rendered_packet(task: tasks.Task, payload: dict) -> str:
             if isinstance(value, list)
             else str(value).strip()
         )
-    return "\n" + packet.Packet(
-        **fields,
-        complexity=task.meta.get("complexity") or 3,
-        complexity_reason=task.meta.get("complexity_reason") or "",
-    ).render()
+    if missing := [key for key in ("title", "goal", "current_behavior", "acceptance_criteria") if not fields[key]]:
+        raise ValueError(f"a plan cannot have an empty {', '.join(missing).replace('_', ' ')}")
+    return render_packet(task, fields)
+
+
+def render_packet(task: tasks.Task, fields: dict) -> str:
+    complexity = task.meta.get("complexity") or 3
+    reason = task.meta.get("complexity_reason") or ""
+    return "\n" + packet.Packet(**fields, complexity=complexity, complexity_reason=reason).render()
 
 
 def fix(id: str) -> tasks.Task:

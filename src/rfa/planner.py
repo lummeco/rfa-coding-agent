@@ -371,6 +371,7 @@ def plan_task(task: Task, config: dict, model: str = "", reasoning: str = "") ->
         title=agent.packet.title,
         planned_at=tasks.now(),
         complexity=agent.packet.complexity,
+        complexity_reason=agent.packet.complexity_reason,
         packet_files=agent.packet.paths(),
         open_questions=agent.packet.open_questions,
         error=None,

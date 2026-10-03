@@ -460,6 +460,35 @@ def test_a_packet_is_only_edited_on_a_planning_card(tmp_path, monkeypatch):
         board.edit({"id": task.id, "goal": "Something else."})
 
 
+def test_an_older_plan_reads_as_the_editor_will_save_it(tmp_path, monkeypatch):
+    """Constraints and non-goals from before decisions existed show as decisions straight away, not after a save."""
+    task = planned_ready(tmp_path, monkeypatch)
+    task.body += "\n## Constraints\n- Keep the API.\n\n## Non-goals\n- Bulk duplication.\n"
+    tasks.save(task)
+    card = board.snapshot()["tasks"][0]
+    assert "## Constraints" not in card["body"] and "## Non-goals" not in card["body"]
+    assert "- Keep the API.\n- Not in scope: Bulk duplication.\n\n## Acceptance criteria" in card["body"]
+    board.edit({"id": task.id, "goal": card["packet"]["goal"]})
+    assert board.snapshot()["tasks"][0]["body"] == card["body"] == tasks.read(task.path).body
+
+
+def test_a_plans_title_is_edited_in_its_body_and_on_the_card(tmp_path, monkeypatch):
+    task = planned_ready(tmp_path, monkeypatch)
+    board.edit({"id": task.id, "title": "Duplicate invoice lines."})
+    card = board.snapshot()["tasks"][0]
+    assert card["title"] == card["packet"]["title"] == "Duplicate invoice lines."
+    assert tasks.read(task.path).body.startswith("\n# Task\nDuplicate invoice lines.\n")
+
+
+def test_a_plan_cannot_be_saved_with_an_empty_required_section(tmp_path, monkeypatch):
+    """An empty title or goal would leave a body that no longer reads back as a plan."""
+    task = planned_ready(tmp_path, monkeypatch)
+    before = tasks.read(task.path).body
+    with pytest.raises(ValueError, match="empty title, goal"):
+        board.edit({"id": task.id, "title": "", "goal": " "})
+    assert tasks.read(task.path).body == before and board.snapshot()["tasks"][0]["title"] == task.title
+
+
 def test_a_card_the_daemon_gave_up_on_is_retried_or_sent_back_to_planned(tmp_path, monkeypatch):
     """Out of attempts, a to-do card sits there for good unless you hand them back or re-approve it."""
     monkeypatch.setenv("RFA_HOME", str(tmp_path))

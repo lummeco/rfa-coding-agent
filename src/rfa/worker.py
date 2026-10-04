@@ -668,9 +668,10 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
     else:
         task.body += KEPT_NOTE if settled else failure_note(agent, patches, output)
     task.body += dropped_note(dropped)
-    # Work that landed in a repository somebody wrote an `apps:` block for is not done until the
-    # reviewer has driven it. Everywhere else there is no app to start, so `done` is the truth.
-    if shipped and set(landed) & set(settings.app_specs(config, task.meta.get("repos") or [])):
+    # Nothing that landed is done until the reviewer has read it -- and, where a repository has an
+    # `apps:` block, driven it. A round that kept the branch as it was is read again too: it answered
+    # the review by changing nothing, and only the reviewer can say whether that answer stands.
+    if settled and landed:
         return tasks.move(task, "review", actor="worker", run=str(output), landed=landed, error=None)
     return tasks.move(
         task,

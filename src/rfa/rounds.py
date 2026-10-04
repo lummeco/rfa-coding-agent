@@ -89,8 +89,17 @@ def comment(id: str, payload: dict) -> dict:
             "line": int(payload["line"]),
             "context": str(payload.get("context") or "")[:2000],
         }
-        state["pending"].append({"id": secrets.token_hex(4), **(where or {}), "text": text[:4000]})
+        by = {"by": str(payload["by"])} if payload.get("by") else {}
+        state["pending"].append({"id": secrets.token_hex(4), **(where or {}), "text": text[:4000], **by})
         return save(id, state)
+
+
+def first_bases(state: dict) -> dict[str, str]:
+    """Where each repository's work began: the base of the earliest round that landed a commit there."""
+    bases = {}
+    for entry in reversed(state.get("rounds") or []):
+        bases |= {name: c["base"] for name, c in (entry.get("commits") or {}).items()}
+    return bases
 
 
 def view(task: tasks.Task) -> dict:

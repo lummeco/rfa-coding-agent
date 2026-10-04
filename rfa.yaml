@@ -17,12 +17,11 @@ repos:
   lummeco/infra-ops: ~/dev/infra-ops@main
   lummeco/rfa-coding-agent: ~/dev/rfa-coding-agent@main
 
-# The apps the reviewer may drive. A repository listed here gets a third stage: once the coder's
-# work lands, a container comes up at that branch with playwright in it, `start:` runs, `serve:` is
-# left running, and the reviewer clicks through the app against the packet's acceptance criteria.
-# Work that does not do what was asked goes back to `todo` on its own, with the reason under it.
-#
-# A repository with no entry here is done when the coder is done -- which is what makes this opt-in.
+# The apps the reviewer may drive. Every card's code is reviewed; a repository listed here also gets
+# its app driven: once the code review passes, a container comes up at that branch with playwright in
+# it, `start:` runs, `serve:` is left running, and the reviewer clicks through the app against the
+# packet's acceptance criteria. Work that does not do what was asked goes back to `todo` on its own,
+# with the reasons waiting as comments on its diff.
 #
 #   setup:   what the app needs installed, run in the repository. 900s each. Kept as a local image
 #            (`rfa-reviewer/<repo>`) with playwright, and reused until the base image, setup, env or
@@ -237,6 +236,10 @@ models:
 # What a run uses when nothing else said. A `planner:`/`coder:` block may set its own; `rfa model
 # <name>` and `-m` on a command override both, and a card's own `model:` overrides the default.
 default_model: qwen3.8
+
+# The model the reviewer judges the work with. Make it a different one from what codes: a model
+# reviewing its own output shares its blind spots. Unset, the reviewer uses the card's coding model.
+# review_model: <a name from models: above>
 
 # Applies to every model above: Ollama models are not in litellm's price registry, and a missing
 # price is not a reason to stop.

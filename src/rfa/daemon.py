@@ -91,13 +91,12 @@ def reclaim() -> list[str]:
 
 
 def reviewable(task: Task) -> bool:
-    """Is there an app on this card the reviewer could actually start?
+    """Is there landed work on this card for the reviewer to read?
 
-    A card can reach `review` without one -- you can move it there by hand -- and the daemon has to
+    A card can reach `review` without any -- you can move it there by hand -- and the daemon has to
     leave that card alone rather than pick it up every fifteen seconds to fail on it again.
     """
-    config = settings.load("reviewer")
-    return bool(set(task.meta.get("landed") or {}) & set(settings.app_specs(config, task.meta.get("repos") or [])))
+    return bool(task.meta.get("landed"))
 
 
 def next_job(config: DaemonConfig) -> tuple[str, Task] | None:

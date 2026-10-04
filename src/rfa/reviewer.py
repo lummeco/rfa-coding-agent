@@ -1,14 +1,23 @@
-"""under-work -> review -> done, or back to todo.
+"""under-work -> review -> done, back to todo, or held for your answer.
 
-The third agent. The coder says it is finished and the checks agree; this one starts the app the
-coder changed, drives it through a browser, and says whether the packet's acceptance criteria are
-actually true of the running thing. Work that fails goes back to `todo` on its own -- the only edge
-in the pipeline an agent may take without you, and the reason the stage exists.
+The third agent, in two passes. The coder says it is finished and the checks agree. First, always,
+the reviewer reads what the card changed against its packet: is every criterion implemented, does
+the code keep to the decisions you approved, does it make an expensive choice nobody approved, is it
+built well enough to keep. Then, for a repository with an `apps:` block and only once the code
+holds, it starts the app the coder changed, drives it through a browser, and says whether the
+acceptance criteria are actually true of the running thing.
 
-The container is the coder's, one stage later: the same seeded copy of the repositories, except at
-the branch the work landed on, out of an image with the browsers baked into it. The app runs in
-there too, so "localhost" means the container and nothing the review does can reach this Mac. What
-comes out is a verdict and a folder of screenshots.
+What it finds goes back to `todo` on its own, as comments on the diff the next coder must answer --
+the only edge in the pipeline an agent may take without you, and the reason the stage exists. A
+choice only you can make holds the card here as a question, and your answer joins the packet.
+
+The reviewer should run on another model than the coder (`review_model:` in rfa.yaml): a model
+reviewing its own work shares its blind spots, and the second look is only worth what it can see
+that the first could not.
+
+Both passes run in containers holding the repositories at the branch the work landed on. The app
+runs in its container too, so "localhost" means the container and nothing the review does can reach
+this Mac. What comes out is a verdict and, from the app, a folder of screenshots.
 
 The reviewer reads pages, not pictures: a local text model cannot look at a screenshot. It drives
 the browser and reads back the DOM, the console and the failed requests (see `rfa.drive`). The
@@ -30,14 +39,15 @@ from minisweagent.environments import get_environment
 from minisweagent.exceptions import InterruptAgentFlow, Submitted
 from minisweagent.models import get_model
 from minisweagent.utils.serialize import recursive_merge
-from rfa import prepare, settings, tasks
-from rfa.planner import REPOS_DIR, _errors, seed
+from rfa import prepare, rounds, settings, tasks
+from rfa.planner import REPOS_DIR, _errors, git, seed
 from rfa.rounds import packet_only
 from rfa.tasks import Task
 
 DRIVE = "/work/drive.py"
 SHOTS = "/out/shots"
 SERVE_LOG = "/out/serve.log"
+DIFFS = "/out/diff"
 RETRY_NOTE = (
     "The host rejected the review you wrote:\n\n{problems}\n\n"
     "Settle these, write the corrected review to {path}, and submit again."
@@ -60,6 +70,26 @@ class Review(BaseModel):
     problems: list[str] = []
     """What is wrong, in words the coder can act on. This is the whole message a failed card carries
     back to `todo`, so a problem nobody could act on costs the card one of its attempts for nothing."""
+    notes: str = ""
+
+
+class Finding(BaseModel):
+    route: Literal["fix", "ask", "note"]
+    """`fix` goes back to the coder, `ask` waits for the owner, `note` is only said on the card."""
+    text: str
+    """For `fix`, what is wrong and what it should be instead; for `ask`, the question the owner answers."""
+    basis: str = ""
+    """The decision or criterion it breaks, or the defect itself. A finding without one is a taste."""
+    repo: str = ""
+    file: str = ""
+    line: int = 0
+    previous: int = 0
+    """After a fix round: the number of the earlier comment this one says was not dealt with."""
+
+
+class CodeReview(BaseModel):
+    judgements: list[Judgement]
+    findings: list[Finding] = []
     notes: str = ""
 
 
@@ -105,13 +135,63 @@ def problems(review: Review, expected: list[str], shots: int) -> list[str]:
     return found
 
 
+def code_problems(
+    review: CodeReview,
+    expected: list[str],
+    files: dict[str, set[str]],
+    latest: dict[str, set[str]] | None = None,
+    previous: int = 0,
+) -> list[str]:
+    """Why the host sends a schema-valid code review back: it judged something other than the packet,
+    left an unmet criterion with nothing to do about it, found something it cannot say why, pointed
+    at nothing -- or, after a fix round, moved the goalposts.
+
+    `latest` is what the fix round under review changed, None after an original round. A second
+    review judges whether the comments were dealt with and what the fix touched; one that reviews the
+    whole branch afresh finds something new every time, and the two agents go round until the
+    attempts run out.
+    """
+    found = []
+    if len(review.judgements) != len(expected):
+        found.append(
+            f"There are {len(expected)} acceptance criteria and you judged {len(review.judgements)}. "
+            f"Judge every one of them, in order."
+        )
+    unmet = [j.criterion for j in review.judgements if not j.met]
+    if unmet and not any(f.route != "note" for f in review.findings):
+        found.append(f"{len(unmet)} criteria are unmet and no `fix` or `ask` says what to do: {'; '.join(unmet[:3])}.")
+    for n, f in enumerate(review.findings, 1):
+        if f.route == "note":
+            continue
+        if not f.basis.strip():
+            found.append(
+                f"Finding {n} has no `basis`. Name the decision or criterion it breaks, or the defect; "
+                "a preference is a `note`."
+            )
+        if f.file and (f.file not in files.get(f.repo, set()) or f.line < 1):
+            found.append(
+                f"Finding {n} points at `{f.repo}/{f.file}` line {f.line}, which is not a file in the branch. "
+                f"`repo` is the folder under {REPOS_DIR}, `file` the path inside it, and lines start at 1."
+            )
+        if not 0 <= f.previous <= previous:
+            found.append(f"Finding {n} repeats earlier comment {f.previous}, but there were {previous}.")
+        elif latest is not None and not f.previous and f.file not in latest.get(f.repo, set()):
+            found.append(
+                f"Finding {n} is new, and not on a file this fix round changed. Judge the earlier comments and "
+                "what the fix touched: give a comment that was not dealt with as `previous`, or make this a `note`."
+            )
+    return found
+
+
 class ReviewerAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
     """mini's agent, with the host's reading of the verdict standing between submitting and done."""
+
+    schema: type[BaseModel] = Review
 
     def __init__(self, model: Model, env: Environment, *, expected: list[str], **kwargs):
         super().__init__(model, env, config_class=ReviewerConfig, **kwargs)
         self.expected = expected
-        self.review: Review | None = None
+        self.review = None
         self.attempt = 0
         env.execute({"command": f"mkdir -p {Path(self.config.review_path).parent} {self.config.shots_path}"})
 
@@ -158,13 +238,38 @@ class ReviewerAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
         except json.JSONDecodeError as e:
             return [f"`{self.config.review_path}` is not valid JSON: {e}."]
         try:
-            self.review = Review.model_validate(data)
+            self.review = self.schema.model_validate(data)
         except ValidationError as e:
             return [f"`{self.config.review_path}` does not match the schema: {_errors(e)}"]
-        return problems(self.review, self.expected, self.shots())
+        return self.judge(self.review)
+
+    def judge(self, review: Review) -> list[str]:
+        return problems(review, self.expected, self.shots())
 
     def shots(self) -> int:
         return len(self.env.execute({"command": f"ls -1 {self.config.shots_path} 2>/dev/null"})["output"].split())
+
+
+class CodeReviewerAgent(ReviewerAgent):
+    """The same loop, reading a diff rather than driving an app."""
+
+    schema = CodeReview
+
+    def __init__(
+        self,
+        model: Model,
+        env: Environment,
+        *,
+        files: dict[str, set[str]],
+        latest: dict[str, set[str]] | None = None,
+        previous: int = 0,
+        **kwargs,
+    ):
+        super().__init__(model, env, **kwargs)
+        self.files, self.latest, self.previous = files, latest, previous
+
+    def judge(self, review: CodeReview) -> list[str]:
+        return code_problems(review, self.expected, self.files, self.latest, self.previous)
 
 
 class AppFailed(Exception):
@@ -217,13 +322,16 @@ def install_playwright(image: str) -> str:
     return f"pip install --quiet playwright{f'=={pin}' if (pin := playwright_pin(image)) else ''}"
 
 
+def put(env: Environment, source: Path, dest: str) -> None:
+    """A file, or a folder that is not there yet, into the container."""
+    subprocess.run(
+        [env.config.executable, "cp", str(source), f"{env.container_id}:{dest}"], check=True, capture_output=True
+    )
+
+
 def install_drive(env: Environment) -> None:
     """Put `rfa.drive` in the container. The host never imports it."""
-    subprocess.run(
-        [env.config.executable, "cp", str(Path(__file__).parent / "drive.py"), f"{env.container_id}:{DRIVE}"],
-        check=True,
-        capture_output=True,
-    )
+    put(env, Path(__file__).parent / "drive.py", DRIVE)
 
 
 def url(spec: dict) -> str:
@@ -277,60 +385,128 @@ def collect(env: Environment, into: Path, shots: str = SHOTS) -> list[str]:
 
 
 def review_note(review: Review, shots: list[str]) -> str:
-    """What the review says, on the card, where you read it."""
-    lines = ["\n## Review\n", f"**{review.verdict}**" + (f" — {review.notes}" if review.notes else "") + "\n"]
+    """What the app review says, on the card, under the code review's note."""
+    lines = ["\n### App\n", f"**{review.verdict}**" + (f" — {review.notes}" if review.notes else "") + "\n"]
     lines += [f"{'✓' if j.met else '✗'} {j.criterion}\n  {j.evidence}" for j in review.judgements]
     if review.problems:
-        lines.append("\n### Problems\n")
+        lines.append("\n#### Problems\n")
         lines += [f"- {p}" for p in review.problems]
     if shots:
         lines.append(f"\nScreenshots: {', '.join(shots)}\n")
     return "\n".join(lines) + "\n"
 
 
-def review_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> Task:
-    """Review one card: the app goes up, the browser goes through it, and the card moves itself on.
+def code_note(review: CodeReview) -> str:
+    """What the code review says, on the card, where you read it."""
+    lines = ["\n## Review\n", "### Code\n"]
+    lines += [f"{'✓' if j.met else '✗'} {j.criterion}\n  {j.evidence}" for j in review.judgements]
+    if notes := [f"- {f.text}" for f in review.findings if f.route == "note"]:
+        lines += ["\n#### Notes\n", *notes]
+    if review.notes:
+        lines.append(f"\n{review.notes}")
+    return "\n".join(lines) + "\n"
 
-    Pass sends it to `done`. Fail sends it back to `todo` as the ticket it was, with the problems
-    under it, and the coder's own `attempts` is what stops the two of them going round forever.
-    A review that cannot be run at all leaves the card here, failed, for you -- the same way an
-    unplannable draft stays in `planning`.
-    """
-    if task.stage != "review":
-        raise ValueError(f"{task.id} is in `{task.stage}`, not `review`")
+
+def comment(f: Finding) -> dict:
+    """A `fix` as a comment on the diff: on its line when it has one, on the whole round otherwise."""
+    again = f"Still not dealt with (comment {f.previous}): " if f.previous else ""
+    return {"repo": f.repo, "file": f.file, "line": f.line, "text": f"{again}{f.text}\n\nBasis: {f.basis}"}
+
+
+def question(f: Finding) -> str:
+    return f"{f.text} — {f.basis}" + (f" (`{f.repo}/{f.file}:{f.line}`)" if f.file else "")
+
+
+def review_model(config: dict, meta: dict, model: str = "", reasoning: str = "") -> tuple[str, str]:
+    """The reviewer's model: what the command said, the card's `review_model`, then `review_model` in
+    rfa.yaml. With none of those it is the card's coding model, as it was before there was a choice."""
+    name = model or meta.get("review_model") or config.get("review_model") or meta.get("model") or ""
+    return settings.pick(config, str(name)), reasoning or str(meta.get("review_reasoning") or "")
+
+
+def landed_repos(config: dict, task: Task, names: list[str]) -> dict[str, tuple[Path, str]]:
+    """The checkouts a review seeds: what the coder landed at its branch, the rest at its start."""
     landed = task.meta.get("landed") or {}
-    specs = settings.app_specs(config, task.meta.get("repos") or [])
-    if not (under_test := next((name for name in landed if name in specs), "")):
-        raise ValueError(f"{task.id} landed nothing in a repository with an `apps:` block")
-    if not (expected := criteria(task.body)):
-        raise ValueError(f"{task.id} has no acceptance criteria to judge")
+    repos = settings.repo_paths(config, names, settings.start_branches(task.meta))
+    return {name: (path, landed.get(name) or ref) for name, (path, ref) in repos.items()}
 
-    spec = specs[under_test]
+
+def write_diffs(task: Task, repos: dict[str, tuple[Path, str]], into: Path) -> None:
+    """Everything the card changed, per repository, from where its first round started: the diff a
+    pull request would show. A card from before rounds were recorded is one commit."""
+    landed, bases = task.meta.get("landed") or {}, rounds.first_bases(rounds.load(task.id))
+    into.mkdir(parents=True, exist_ok=True)
+    for name in (name for name in landed if name in repos):
+        args = ("diff", f"{bases[name]}...{landed[name]}") if name in bases else ("show", "--format=", landed[name])
+        (into / f"{name}.diff").write_bytes(git(repos[name][0], *args, text=False))
+
+
+def last_round(id: str) -> tuple[list[dict], dict[str, set[str]] | None]:
+    """The comments the latest round answered and the files it changed, when it was a fix round.
+    After an original round there is nothing earlier to hold the review to."""
+    entries = rounds.load(id)["rounds"]
+    if not entries or entries[-1].get("kind") != "fix":
+        return [], None
+    patches = rounds.round_dir(id, entries[-1]["n"]).glob("*.patch")
+    return entries[-1].get("comments") or [], {
+        p.stem: set(rounds.files(p.read_text(errors="replace"))) for p in patches
+    }
+
+
+def code_review(task: Task, config: dict, model: dict, expected: list[str], output: Path) -> CodeReviewerAgent:
+    """Read what the card changed against its packet. No app and no browser: the repositories at the
+    landed branch, the diff from where the work began, and bash."""
+    repos = landed_repos(config, task, task.meta.get("repos") or [])
+    write_diffs(task, repos, output / "diff")
+    previous, latest = last_round(task.id)
+    env = get_environment(config.get("environment", {}), default_type="docker")
+    try:
+        files = seed(env, repos)
+        env.execute({"command": f"mkdir -p {Path(DIFFS).parent}"})
+        put(env, output / "diff", DIFFS)
+        agent = CodeReviewerAgent(
+            get_model(config=model),
+            env,
+            expected=expected,
+            files=files,
+            latest=latest,
+            previous=len(previous),
+            output_path=output / "code-trajectory.json",
+            task_id=task.id,
+            **recursive_merge(config.get("agent", {}), config.get("code_agent", {})),
+        )
+        agent.run(
+            packet_only(task.body),
+            criteria=expected,
+            repos=sorted(repos),
+            diffs=DIFFS,
+            previous=previous,
+            latest=None if latest is None else {name: sorted(paths) for name, paths in latest.items()},
+        )
+        return agent
+    finally:
+        env.cleanup()
+
+
+def app_review(
+    task: Task, config: dict, model: dict, expected: list[str], under_test: str, spec: dict, output: Path
+) -> tuple[ReviewerAgent, list[str]]:
+    """Start the app at the landed branch and drive it against the criteria. Returns the screenshots too."""
     # `with:` is what the app cannot run without -- its backend -- seeded beside it at its pinned ref.
     names = list(dict.fromkeys([*(task.meta.get("repos") or []), *(spec.get("with") or [])]))
-    repos = settings.repo_paths(config, names, settings.start_branches(task.meta))
-    output = tasks.home() / "var" / "runs" / task.id / "review"
-    shutil.rmtree(output, ignore_errors=True)
-    output.mkdir(parents=True, exist_ok=True)
-    chosen, level = settings.for_task(config, task.meta, model, reasoning)
-    tasks.save(task, status="reviewing", model=chosen, reasoning=level or None)
-    tasks.log(type="review_started", id=task.id, repo=under_test, model=chosen)
-
-    env = None
+    repos = landed_repos(config, task, names)
+    container = recursive_merge(config.get("environment", {}), {"env": spec.get("env") or {}})
+    # A setup that fails is the machine's -- the network, the registry -- not the coder's, so it
+    # raises like any other infrastructure trouble instead of sending the card back.
+    setup = {"setup": [install_playwright(container["image"]), *(spec.get("setup") or [])]}
+    container["image"] = prepare.image(container, spec | setup, repos, under_test, "reviewer")
+    env = get_environment(container, default_type="docker")
     try:
-        container = recursive_merge(config.get("environment", {}), {"env": spec.get("env") or {}})
-        # The branch, not the base: what is reviewed is what the coder actually landed.
-        repos = {name: (path, landed.get(name) or ref) for name, (path, ref) in repos.items()}
-        # A setup that fails is the machine's -- the network, the registry -- not the coder's, so it
-        # raises like any other infrastructure trouble instead of sending the card back.
-        setup = {"setup": [install_playwright(container["image"]), *(spec.get("setup") or [])]}
-        container["image"] = prepare.image(container, spec | setup, repos, under_test, "reviewer")
-        env = get_environment(container, default_type="docker")
         seed(env, repos)
         install_drive(env)
         start_app(env, under_test, spec)
         agent = ReviewerAgent(
-            get_model(config=settings.model_config(config, chosen, level)),
+            get_model(config=model),
             env,
             expected=expected,
             output_path=output / "trajectory.json",
@@ -346,29 +522,69 @@ def review_task(task: Task, config: dict, model: str = "", reasoning: str = "") 
             notes=spec.get("notes", ""),
             shots=agent.config.shots_path,
         )
-        shots = collect(env, output, agent.config.shots_path)
+        return agent, collect(env, output, agent.config.shots_path)
+    finally:
+        env.cleanup()
+
+
+def review_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> Task:
+    """Review one card: the code always, then the app where there is one, and the card moves itself on.
+
+    Pass sends it to `done`. A `fix`, or an app that does not do what was asked, sends it back to
+    `todo` as the ticket it was, with what was found waiting as comments on its diff, and the coder's
+    own `attempts` is what stops the two of them going round forever. An `ask` holds it here as a
+    question for you. A review that cannot be run at all leaves the card here, failed, for you -- the
+    same way an unplannable draft stays in `planning`.
+    """
+    if task.stage != "review":
+        raise ValueError(f"{task.id} is in `{task.stage}`, not `review`")
+    if not (landed := task.meta.get("landed") or {}):
+        raise ValueError(f"{task.id} landed nothing to review")
+    expected = criteria(task.body)
+    specs = settings.app_specs(config, task.meta.get("repos") or [])
+    under_test = next((name for name in landed if name in specs), "")
+    output = tasks.home() / "var" / "runs" / task.id / "review"
+    shutil.rmtree(output, ignore_errors=True)
+    output.mkdir(parents=True, exist_ok=True)
+    chosen, level = review_model(config, task.meta, model, reasoning)
+    # Not `model`: that is the coder's, and the next fix round would otherwise run on the reviewer's.
+    tasks.save(task, status="reviewing", reviewed_with=chosen, open_questions=None)
+    tasks.log(type="review_started", id=task.id, repo=under_test or None, model=chosen)
+    app, shots = None, []
+    try:
+        model_config = settings.model_config(config, chosen, level)
+        code = code_review(task, config, model_config, expected, output)
+        # Driving an app whose code is about to change again would judge a build nobody will ship.
+        holds = code.review is not None and all(f.route == "note" for f in code.review.findings)
+        if holds and under_test and expected:
+            app, shots = app_review(task, config, model_config, expected, under_test, specs[under_test], output)
     except AppFailed as e:
         tasks.log(type="review_failed", id=task.id, error=str(e))
-        return send_back(task, [str(e)], output)
+        return send_back(task, [{"text": str(e)}], output)
     except tasks.Paused:
         tasks.log(type="review_paused", id=task.id)
         return tasks.save(task, status="queued", paused=True)
     except Exception as e:
         tasks.log(type="review_error", id=task.id, error=str(e))
         return tasks.save(task, status="failed", error=str(e))
-    finally:
-        if env is not None:
-            env.cleanup()
 
-    if agent.review is None:
-        note = agent.messages[-1].get("content", "the reviewer gave up")
+    if gave_up := next((a for a in (code, app) if a is not None and a.review is None), None):
+        note = gave_up.messages[-1].get("content", "the reviewer gave up")
         tasks.log(type="review_error", id=task.id, error=note)
         return tasks.save(task, status="failed", error=str(note))
-    (output / "review.json").write_text(json.dumps(agent.review.model_dump(), indent=2))
-    tasks.log(type="reviewed", id=task.id, verdict=agent.review.verdict, shots=len(shots))
-    if agent.review.verdict == "fail":
-        return send_back(task, agent.review.problems, output, review_note(agent.review, shots))
-    task.body += review_note(agent.review, shots)
+    verdict = {"code": code.review.model_dump(), "app": app.review.model_dump() if app else None}
+    (output / "review.json").write_text(json.dumps(verdict, indent=2))
+    findings = code.review.findings
+    tasks.log(type="reviewed", id=task.id, findings=len(findings), app=app and app.review.verdict, shots=len(shots))
+    if asks := [f for f in findings if f.route == "ask"]:
+        # Before any `fix`: the answer may change what the fix should be.
+        tasks.log(type="review_asked", id=task.id, questions=len(asks))
+        return tasks.save(task, status="question", open_questions=[question(f) for f in asks], review=str(output))
+    if fixes := [f for f in findings if f.route == "fix"]:
+        return send_back(task, [comment(f) for f in fixes], output)
+    if app and app.review.verdict == "fail":
+        return send_back(task, [{"text": p} for p in app.review.problems], output)
+    task.body += code_note(code.review) + (review_note(app.review, shots) if app else "")
     return tasks.move(
         task,
         "done",
@@ -381,14 +597,20 @@ def review_task(task: Task, config: dict, model: str = "", reasoning: str = "") 
     )
 
 
-def send_back(task: Task, found: list[str], output: Path, note: str = "") -> Task:
-    """To `todo`, as the ticket it was, with what the reviewer found under it for the next coder.
+def send_back(task: Task, found: list[dict], output: Path) -> Task:
+    """To `todo`, as the ticket it was, with what the review found waiting as comments on its diff.
+
+    Comments rather than a note under the ticket: the coder answers each one by number, the board
+    shows what it said, and the next review holds the fix to exactly those.
 
     `landed` is left alone on purpose: that branch really is in your checkout, and saying otherwise
     because the work was rejected would hide it. The next coding round lands beside it.
     """
-    task.body = packet_only(task.body) + (note or "\n## Review\n\n**fail**\n\n" + "".join(f"- {p}\n" for p in found))
-    tasks.log(type="sent_back", id=task.id, problems=found[:5])
+    for item in found:
+        rounds.comment(task.id, {**item, "by": "reviewer"})
+    task.body = packet_only(task.body)
+    texts = [item["text"] for item in found]
+    tasks.log(type="sent_back", id=task.id, problems=texts[:5])
     return tasks.move(
         task,
         "todo",
@@ -396,5 +618,5 @@ def send_back(task: Task, found: list[str], output: Path, note: str = "") -> Tas
         status="todo",
         review=str(output),
         shots=sorted(p.name for p in output.glob("*.png")) or None,
-        error="; ".join(found)[:500],
+        error="; ".join(texts)[:500],
     )

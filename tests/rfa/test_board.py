@@ -14,7 +14,7 @@ from email.message import Message
 
 import pytest
 
-from rfa import board, rounds, settings, tasks
+from rfa import board, packet, rounds, settings, tasks
 from rfa.packet import Packet
 
 TOKEN = "s3cret-token"
@@ -521,8 +521,37 @@ def test_landed_work_goes_back_to_the_reviewer_without_being_coded_again(tmp_pat
     queued = tasks.find(board.rereview(task.id).id)
     assert (queued.stage, queued.status, queued.paused) == ("review", "queued", False)
     assert "error" not in queued.meta
-    tasks.save(queued, landed={"api": "rfa/an-idea"})
+    tasks.save(queued, landed=None)
     with pytest.raises(ValueError, match="nothing to review"):
         board.rereview(task.id)
     with pytest.raises(ValueError, match="only a done card or a review"):
         board.rereview(tasks.move(tasks.create("another"), "planning").id)
+
+
+def test_an_answer_to_the_reviewer_becomes_a_decision_and_the_last_one_sends_it_back(tmp_path, monkeypatch):
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    tasks.init()
+    task = tasks.move(tasks.move(tasks.create("an idea"), "todo"), "under-work", actor="worker")
+    task.body = (
+        "# Task\nT\n\n## Goal\nG\n\n## Current behavior\nC\n\n## Decisions\n- Keep it local.\n\n"
+        "## Acceptance criteria\n1. It works.\n\n## Result\n\nlanded\n"
+    )
+    task = tasks.move(task, "review", actor="worker", landed={"web": "rfa/an-idea"})
+    tasks.save(task, status="question", open_questions=["Add a dependency?", "A new env var?"])
+    with pytest.raises(ValueError, match="needs some words"):
+        board.answer(task.id, 0, "  ")
+    with pytest.raises(ValueError, match="no question 2"):
+        board.answer(task.id, 2, "yes")
+
+    once = board.answer(task.id, 1, "No, read it from the config")
+    assert (once.status, once.meta["open_questions"]) == ("question", ["Add a dependency?"])
+    assert "## Result" not in once.body
+    assert packet.parse(once.body)["decisions"] == [
+        "Keep it local.",
+        "No, read it from the config -- the owner's answer to: A new env var?",
+    ]
+    done = tasks.find(board.answer(task.id, 0, "Yes").id)
+    assert (done.stage, done.status, done.meta.get("open_questions")) == ("review", "queued", None)
+    assert len(packet.parse(done.body)["decisions"]) == 3
+    with pytest.raises(ValueError, match="no question 0"):
+        board.answer(task.id, 0, "again")

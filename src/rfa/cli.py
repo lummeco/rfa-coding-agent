@@ -14,7 +14,7 @@ rfa show <id>               one task, in full
 rfa plan [id ...]           write packets for cards waiting in planning
 rfa approve <id>            you read the packet; it becomes work
 rfa work [id]               code the next approved task (default: the oldest)
-rfa review [id]             drive the app the coder changed and judge it
+rfa review [id]             read the landed code, drive the app, and judge it
 rfa branches [repo ...]     the branches you can start work from
 rfa models                  the models you can run with
 rfa model [name]            which one new runs use
@@ -283,7 +283,7 @@ def review(
     model: str = typer.Option("", "-m", "--model", help="A name from `models:` in rfa.yaml"),
     reasoning: str = typer.Option("", "-R", "--reasoning", help="none | low | medium | high"),
 ):
-    """Start the app the coder changed, drive it through a browser, and judge the packet."""
+    """Read the code the coder landed, drive the app where there is one, and judge the packet."""
     from rfa.reviewer import review_task
 
     queue = [t for t in tasks.tasks("review") if t.status == "queued"]
@@ -297,6 +297,10 @@ def review(
         console.print(f"[bold green]Passed[/] — screenshots in [bold]{judged.meta['review']}[/]")
     elif judged.stage == "todo":
         console.print(f"[bold yellow]Sent back[/] — {judged.meta.get('error', '')}")
+    elif judged.status == "question":
+        console.print("[bold yellow]Waiting for you[/] — answer on the board:")
+        for asked in judged.meta["open_questions"]:
+            console.print(f"  • {asked}")
     else:
         console.print(f"[bold red]Could not review[/] — {judged.meta.get('error', '')}")
 

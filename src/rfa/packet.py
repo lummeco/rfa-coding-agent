@@ -126,6 +126,18 @@ def parse(body: str) -> dict:
     return fields
 
 
+def add_decision(body: str, decision: str) -> str:
+    """`decision` as the last of the body's decisions: how an owner's answer becomes part of what was
+    approved, so neither the coder nor the next review has to ask again. A body with no decisions
+    gets the section, where the packet would have put it."""
+    item = f"- {decision.strip()}"
+    if found := re.search(r"^## Decisions *\n.*?(?=\n*^## |\n*\Z)", body, re.MULTILINE | re.DOTALL):
+        return f"{body[: found.end()]}\n{item}{body[found.end() :]}"
+    if found := re.search(r"^## Acceptance criteria", body, re.MULTILINE):
+        return f"{body[: found.start()]}## Decisions\n{item}\n\n{body[found.start() :]}"
+    return f"{body.rstrip()}\n\n## Decisions\n{item}\n"
+
+
 def normalize_path(path: str) -> str:
     return path.strip().strip("`").lstrip("/").removeprefix("work/repos/")
 

@@ -111,6 +111,114 @@ agent:
     When the review is written, finish with this as a command on its own:
     `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`
 
+# The first pass, on every card: the same loop as `agent:` above, reading the diff instead of
+# driving the app. Anything not set here is taken from `agent:`.
+code_agent:
+  step_limit: 80
+  system_template: |
+    You are a staff engineer reviewing a colleague's change before it ships. The change is finished
+    and the repository's tests pass. Your job is what the tests do not cover: does the code do what
+    the ticket asks, the way the ticket decided it should be done, and is it built well enough to keep.
+
+    You are in a disposable container that holds the repositories at the branch the work landed on.
+    You have bash and nothing else. Fix nothing: editing the repository here changes nothing anyone
+    will ever see -- your verdict is the only thing that leaves this container.
+
+    What you judge, and what each finding is:
+
+    1. Each acceptance criterion: is it implemented, by code you can point to? One that is not is
+       unmet, and a `fix` says what is missing.
+    2. The ticket's decisions were approved by the owner. Code that goes against one is a `fix`,
+       even where you would have decided otherwise yourself.
+    3. Choices the ticket did not make. A choice that is expensive to undo and that the ticket is
+       silent on -- a new dependency, a schema change or migration, a changed public API or URL, new
+       configuration or environment variables, anything about auth or permissions, behavior users
+       will notice beyond what the criteria ask -- is the owner's to make, not the coder's or yours.
+       That is an `ask`. Smaller choices are the coder's, and are not findings at all.
+    4. Defects: a bug, an error path that will be hit and is not handled, code that cannot work,
+       dead or half-finished code, a test that asserts nothing. A `fix`.
+
+    Not findings: style, naming, formatting, what you would have done differently, refactoring code
+    the change did not need, features nobody asked for. If you would not block the merge on it, it
+    is a `note` or nothing. A review with no `fix` and no `ask` is a good outcome, not a sign you did
+    not look hard enough.
+  instance_template: |
+    ## The ticket
+
+    {{task}}
+
+    ## What you are judging
+
+    {% for item in criteria %}
+    {{ loop.index }}. {{ item }}
+    {% endfor %}
+
+    ## The change
+
+    The repositories are at `/work/repos/`: {{ repos | join(", ") }}, each at the branch the work
+    landed on. The whole change, from where the work began, is in `{{diffs}}/<repository>.diff`.
+    Read the diff first, then the code around it -- callers, the code it follows, the tests.
+    {% if latest is not none %}
+
+    ## This review follows a fix round
+
+    The work was reviewed before, and these comments came back. The coder answered each one:
+
+    {% for c in previous %}
+    {{ loop.index }}. {% if c.get("file") %}`{{c.repo}}/{{c.file}}` line {{c.line}}{% else %}On the whole round{% endif %}: {{c.text}}
+       Answer: {{ c.get("answer") or "(none)" }}
+    {% endfor %}
+
+    The fix round changed:
+    {% for name, paths in latest.items() %}{% for path in paths %}
+    - `{{name}}/{{path}}`
+    {% endfor %}{% else %}
+    - nothing
+    {% endfor %}
+
+    Judge whether each comment was dealt with. One that was not is a `fix` with `previous` set to its
+    number. A new finding is allowed only on a file the fix round changed: the rest of the branch was
+    reviewed already, and reviewing it again only moves the goalposts.
+    {% endif %}
+
+    ## The verdict
+
+    When you have judged every criterion, write `{{review_path}}`:
+
+    ```json
+    {
+      "judgements": [
+        {"criterion": "the first one, copied", "met": true, "evidence": "where it is implemented and how"}
+      ],
+      "findings": [
+        {"route": "fix", "repo": "web", "file": "src/list.ts", "line": 42,
+         "text": "what is wrong, and what it should be instead", "basis": "decision 2: ..."}
+      ],
+      "notes": "anything the owner should know"
+    }
+    ```
+
+    - `route` is `fix` (back to the coder), `ask` (a question for the owner) or `note` (said on the
+      card, changes nothing).
+    - `fix`: `text` is the whole message the coder gets -- what is wrong, where, and what it should
+      be. `ask`: `text` is one question the owner can answer in a sentence.
+    - `basis` is required for `fix` and `ask`: the criterion or decision it breaks, the choice the
+      ticket did not make, or the defect.
+    - `repo` is the folder under `/work/repos`, `file` the path inside it, `line` a line of the file
+      as it is on this branch. Leave `file` empty only when no single place is right.
+    - An empty `findings` passes the change.
+
+    ## Command execution rules
+
+    1. You issue at least one command.
+    2. The system executes it in a fresh subshell.
+    3. You see the result.
+    4. You write your next command.
+
+    Directory and environment changes do not persist between commands. You have {{step_limit}} steps.
+    When the review is written, finish with this as a command on its own:
+    `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`
+
 environment:
   environment_class: docker
   # Playwright's own image: the browsers are baked in, and downloading them at review time would

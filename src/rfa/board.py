@@ -61,19 +61,11 @@ def copy_commands(landed: dict, configured: dict, state: dict | None = None) -> 
     A repository that has since left `repos:` is left out rather than guessed at: without its
     checkout there is no path to run the command in.
     """
-    bases = first_bases(state or {})
+    bases = rounds.first_bases(state or {})
     return {
         name: copy_command(repo, landed[name], bases.get(name, ""))
         for name, repo in checkouts(landed, configured).items()
     }
-
-
-def first_bases(state: dict) -> dict[str, str]:
-    """Where each repository's work began: the base of the earliest round that landed a commit there."""
-    bases = {}
-    for entry in reversed(state.get("rounds") or []):
-        bases |= {name: c["base"] for name, c in (entry.get("commits") or {}).items()}
-    return bases
 
 
 def checkouts(landed: dict, configured: dict) -> dict[str, Path]:
@@ -93,7 +85,7 @@ def full_diff(id: str) -> dict:
     """
     task = tasks.find(id)
     landed = task.meta.get("landed") or {}
-    bases = first_bases(rounds.load(task.id))
+    bases = rounds.first_bases(rounds.load(task.id))
     repos = []
     for name, repo in checkouts(landed, settings.load().get("repos") or {}).items():
         args = ("diff", f"{bases[name]}...{landed[name]}") if name in bases else ("show", "--format=", landed[name])
@@ -184,13 +176,19 @@ def progress(id: str, of: str = "") -> dict:
     swapped, so a read can land mid-write; a half-written file is simply not ready yet.
 
     `of=review` is the reviewer's own session, which lives one folder deeper so that reviewing a
-    card does not write over the coding run it is judging. Otherwise it is the latest round's.
+    card does not write over the coding run it is judging -- whichever pass wrote last, the code
+    review's or the app's. Otherwise it is the latest round's.
     """
     if not tasks.ID_RE.fullmatch(id):
         return {"steps": []}
     run = rounds.run_dir(id)
     coded = sorted(run.glob("round-*/trajectory.json"), key=lambda p: int(p.parent.name.partition("-")[2]))
-    path = (run / "review" / "trajectory.json") if of == "review" else (coded or [run / "trajectory.json"])[-1]
+    reviewed = sorted((run / "review").glob("*trajectory.json"), key=lambda p: p.stat().st_mtime)
+    path = (
+        (reviewed or [run / "review" / "trajectory.json"])[-1]
+        if of == "review"
+        else (coded or [run / "trajectory.json"])[-1]
+    )
     if not path.exists():
         return {"steps": []}
     try:
@@ -393,6 +391,23 @@ def fix(id: str) -> tasks.Task:
     return tasks.move(task, "todo", actor="human", status="todo")
 
 
+def answer(id: str, index: int, text: str) -> tasks.Task:
+    """The owner's answer to one of the reviewer's questions, as a decision in the packet: the coder
+    and the next review both read it as approved. The last answer sends the card back to the reviewer."""
+    task = tasks.find(id)
+    questions = task.meta.get("open_questions") or []
+    if task.stage != "review" or not 0 <= index < len(questions):
+        raise ValueError(f"{task.id} has no question {index} from the reviewer")
+    if not text.strip():
+        raise ValueError("an answer needs some words")
+    task.body = packet.add_decision(
+        rounds.packet_only(task.body), f"{text.strip()} -- the owner's answer to: {questions[index]}"
+    )
+    left = questions[:index] + questions[index + 1 :]
+    tasks.log(type="answered", id=task.id, left=len(left))
+    return tasks.save(task, open_questions=left or None, **({} if left else {"status": "queued"}))
+
+
 def pause(id: str, paused: bool) -> tasks.Task:
     """Hold a card, or let it go again. A run already on it stops before its next model call."""
     task = tasks.save(tasks.find(id), paused=paused or None)
@@ -417,12 +432,12 @@ def rereview(id: str) -> tasks.Task:
     if task.stage not in ("done", "review"):
         raise ValueError(f"{id} is in {task.stage}; only a done card or a review is reviewed again")
     if not daemon.reviewable(task):
-        raise ValueError(f"{id} landed nothing in a repository with an `apps:` block, so there is nothing to review")
+        raise ValueError(f"{id} landed nothing, so there is nothing to review")
     task.body = rounds.packet_only(task.body)
     tasks.log(type="rereview", id=task.id)
     if task.stage == "done":
         return tasks.move(task, "review", actor="human")
-    return tasks.save(task, status="queued", error=None, paused=None)
+    return tasks.save(task, status="queued", error=None, paused=None, open_questions=None)
 
 
 def reorder(payload: dict) -> tasks.Task:
@@ -596,6 +611,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/verdict",
             "/api/comment",
             "/api/fix",
+            "/api/answer",
         )
         if self.path not in posts:
             self._json(404, {"error": "not found"})
@@ -649,10 +665,20 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json(400, {"error": result["message"]})
             return
-        if self.path in ("/api/edit", "/api/pause", "/api/retry", "/api/rereview", "/api/verdict", "/api/reorder"):
+        if self.path in (
+            "/api/edit",
+            "/api/pause",
+            "/api/retry",
+            "/api/rereview",
+            "/api/verdict",
+            "/api/reorder",
+            "/api/answer",
+        ):
             try:
                 if self.path == "/api/edit":
                     task = edit(payload)
+                elif self.path == "/api/answer":
+                    task = answer(payload["id"], int(payload["index"]), str(payload.get("answer") or ""))
                 elif self.path == "/api/pause":
                     task = pause(payload["id"], bool(payload.get("paused")))
                 elif self.path == "/api/retry":

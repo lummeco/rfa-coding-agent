@@ -5,16 +5,24 @@ from jinja2 import StrictUndefined, Template
 
 from minisweagent.environments.local import LocalEnvironment
 from minisweagent.models.test_models import DeterministicModel, make_output
-from rfa import board, daemon, settings, tasks, up
+from rfa import board, daemon, rounds, settings, tasks, up
 from rfa.reviewer import (
+    CodeReview,
+    CodeReviewerAgent,
+    Finding,
     Judgement,
     Review,
     ReviewerAgent,
+    code_problems,
+    comment,
     criteria,
     killed,
+    last_round,
     packet_only,
     playwright_pin,
     problems,
+    question,
+    review_model,
     review_note,
     send_back,
     vm_note,
@@ -165,11 +173,17 @@ def test_a_failed_review_sends_the_card_back_as_the_ticket_it_was(workspace):
     task = tasks.move(task, "under-work", actor="worker")
     task = tasks.move(task, "review", actor="worker", landed={"rfa-coding-agent": "rfa/scroll"})
 
-    sent = send_back(task, ["the column still jumps to the top"], workspace / "var")
+    task.body += "\n## Result\n\n- landed on rfa/scroll\n"
+    found = [{"text": "the column still jumps to the top"}, {"repo": "web", "file": "a.ts", "line": 3, "text": "x"}]
+    sent = send_back(task, found, workspace / "var")
     assert (sent.stage, sent.status) == ("todo", "todo")
-    assert "the column still jumps to the top" in sent.body
-    assert "## Result" not in sent.body
-    assert criteria(sent.body) == criteria(PACKET)
+    # What was found reaches the coder as comments it must answer, not as a note under the ticket.
+    pending = rounds.load(task.id)["pending"]
+    assert [(c["text"], c.get("file"), c["by"]) for c in pending] == [
+        ("the column still jumps to the top", None, "reviewer"),
+        ("x", "a.ts", "reviewer"),
+    ]
+    assert sent.body == packet_only(PACKET) and criteria(sent.body) == criteria(PACKET)
     # The branch really is in the checkout, so the card keeps saying so even though it was rejected.
     assert sent.meta["landed"] == {"rfa-coding-agent": "rfa/scroll"}
 
@@ -179,8 +193,8 @@ def test_review_note_says_which_criteria_failed():
     assert "✓ c0" in note and "✗ c1" in note and "it throws" in note and "a.png" in note
 
 
-def test_only_repos_with_an_apps_block_are_reviewable(workspace, monkeypatch):
-    """This is what keeps the stage opt-in: no app to start, no stage."""
+def test_every_landed_card_is_reviewed_and_only_apps_are_driven(workspace, monkeypatch):
+    """The code is read on every card; an `apps:` block only adds the drive through the app."""
     config = {"apps": {"lummeco/rfa-coding-agent": {"serve": "x", "port": 1}}}
     assert set(settings.app_specs(config, ["lummeco/rfa-coding-agent"])) == {"rfa-coding-agent"}
     assert settings.app_specs(config, ["lummeco/customer-app"]) == {}
@@ -188,8 +202,14 @@ def test_only_repos_with_an_apps_block_are_reviewable(workspace, monkeypatch):
     task = tasks.create("scroll", ["lummeco/customer-app"])
     task = tasks.move(tasks.move(tasks.move(task, "todo"), "under-work", actor="worker"), "review", actor="worker")
     monkeypatch.setattr(settings, "load", lambda stage="planner": config)
-    # A card moved here by hand with nothing to drive must not be picked up every fifteen seconds.
+    # A card moved here by hand with nothing landed must not be picked up every fifteen seconds.
     assert not daemon.reviewable(task)
+    assert daemon.next_job(daemon.DaemonConfig()) is None
+    tasks.save(task, landed={"customer-app": "rfa/scroll"})
+    assert daemon.reviewable(task)
+    assert daemon.next_job(daemon.DaemonConfig())[0] == "review"
+    # Waiting on your answer is not waiting on the reviewer.
+    tasks.save(task, status="question")
     assert daemon.next_job(daemon.DaemonConfig()) is None
 
 
@@ -260,3 +280,126 @@ def test_an_apps_notes_reach_the_reviewer_only_when_written(notes, shown):
         task="t", criteria=["c"], url="u", repo="r", serve_log="l", shots="s", step_limit=1, notes=notes
     )
     assert ("## Using this app" in rendered) is shown and (notes in rendered) and "## Driving the browser" in rendered
+
+
+FILES = {"web": {"src/list.ts", "src/list.test.ts"}}
+
+
+def fix(**kwargs) -> Finding:
+    return Finding(
+        **{"route": "fix", "text": "t", "basis": "decision 1", "repo": "web", "file": "src/list.ts", "line": 3} | kwargs
+    )
+
+
+@pytest.mark.parametrize(
+    ("findings", "met", "latest", "expected"),
+    [
+        ([], (True, True), None, []),
+        ([], (True,), None, ["acceptance criteria"]),
+        ([], (True, False), None, ["no `fix` or `ask`"]),
+        ([Finding(route="note", text="I would name it differently")], (True, False), None, ["no `fix` or `ask`"]),
+        ([fix()], (True, False), None, []),
+        ([fix(basis=" ")], (True, True), None, ["no `basis`"]),
+        ([fix(file="src/ghost.ts")], (True, True), None, ["not a file in the branch"]),
+        ([fix(repo="api")], (True, True), None, ["not a file in the branch"]),
+        ([fix(line=0)], (True, True), None, ["not a file in the branch"]),
+        ([fix(file="", line=0)], (True, True), None, []),
+        ([Finding(route="ask", text="Add a migration?", basis="the ticket is silent")], (True, True), None, []),
+        # After a fix round: new findings only where the fix touched, old ones by number.
+        ([fix()], (True, True), {"web": {"src/list.ts"}}, []),
+        ([fix(file="src/list.test.ts")], (True, True), {"web": {"src/list.ts"}}, ["not on a file this fix round"]),
+        ([fix(file="", line=0)], (True, True), {"web": {"src/list.ts"}}, ["not on a file this fix round"]),
+        ([fix(file="src/list.test.ts", previous=2)], (True, True), {"web": {"src/list.ts"}}, []),
+        ([fix(previous=3)], (True, True), {"web": {"src/list.ts"}}, ["but there were 2"]),
+        ([Finding(route="note", text="anywhere")], (True, True), {}, []),
+    ],
+)
+def test_the_host_reads_the_code_review_rather_than_trusting_it(findings, met, latest, expected):
+    """Every rejection is a review that would send the coder chasing something nobody can act on: a
+    taste, a place that is not there, or -- after a fix round -- a goalpost that moved."""
+    found = code_problems(CodeReview(judgements=judged(*met), findings=findings), ["one", "two"], FILES, latest, 2)
+    assert len(found) == len(expected)
+    assert all(word in " ".join(found) for word in expected)
+
+
+def test_a_code_review_pointing_at_nothing_goes_back_into_the_same_session(tmp_path):
+    review = tmp_path / "review.json"
+    bad = '{"judgements":[{"criterion":"one","met":true,"evidence":"x"}],"findings":[{"route":"fix","text":"t","basis":"b","repo":"web","file":"nope.ts","line":1}]}'
+    good = '{"judgements":[{"criterion":"one","met":true,"evidence":"src/list.ts keeps the offset"}],"findings":[]}'
+    agent = CodeReviewerAgent(
+        DeterministicModel(
+            outputs=[
+                make_output("reading", [{"command": f"cat > {review} <<'EOF'\n{bad}\nEOF"}]),
+                submit(),
+                make_output("fixing", [{"command": f"cat > {review} <<'EOF'\n{good}\nEOF"}]),
+                submit(),
+            ]
+        ),
+        LocalEnvironment(cwd=str(tmp_path)),
+        expected=["one"],
+        files=FILES,
+        system_template="reviewer",
+        instance_template="{{task}}",
+        cost_limit=0,
+        review_path=str(review),
+        shots_path=str(tmp_path / "shots"),
+    )
+    agent.run("the packet")
+    # No screenshots, and none asked for: the code review never opens an app.
+    assert agent.attempt == 1 and "not a file in the branch" in str(agent.messages)
+    assert isinstance(agent.review, CodeReview) and agent.review.findings == []
+
+
+def test_findings_reach_the_coder_and_the_owner_with_their_reasons():
+    assert comment(fix(previous=2)) == {
+        "repo": "web",
+        "file": "src/list.ts",
+        "line": 3,
+        "text": "Still not dealt with (comment 2): t\n\nBasis: decision 1",
+    }
+    asked = Finding(
+        route="ask", text="Add a column?", basis="no decision on the schema", repo="web", file="a.sql", line=1
+    )
+    assert question(asked) == "Add a column? — no decision on the schema (`web/a.sql:1`)"
+
+
+def test_the_reviewer_runs_on_its_own_model_when_one_is_set():
+    config = {"models": {"coder": {}, "judge": {}, "other": {}}}
+    assert review_model(config, {"model": "coder"}) == ("coder", "")  # unset: as it was
+    assert review_model(config | {"review_model": "judge"}, {"model": "coder"}) == ("judge", "")
+    assert review_model(config | {"review_model": "judge"}, {"model": "coder", "review_model": "other"})[0] == "other"
+    assert review_model(config | {"review_model": "judge"}, {"model": "coder"}, "other", "high") == ("other", "high")
+    with pytest.raises(KeyError):
+        review_model(config | {"review_model": "ghost"}, {})
+
+
+def test_a_review_after_a_fix_round_is_held_to_that_round(workspace):
+    task = tasks.create("scroll")
+    assert last_round(task.id) == ([], None)
+    asked = [{"id": "a1", "text": "keep the offset", "answer": "kept it"}]
+    rounds.record(task.id, {"n": 0, "kind": "original", "landed": True}, answered=[])
+    assert last_round(task.id) == ([], None)  # an original round: the whole branch is fair game
+    rounds.record(task.id, {"n": 1, "kind": "fix", "landed": True, "comments": asked}, answered=[])
+    rounds.round_dir(task.id, 1).mkdir(parents=True)
+    (rounds.round_dir(task.id, 1) / "web.patch").write_text("diff --git a/src/list.ts b/src/list.ts\n")
+    assert last_round(task.id) == (asked, {"web": {"src/list.ts"}})
+
+
+def test_the_shipped_code_review_prompt_renders_with_what_the_host_passes():
+    template = settings.load("reviewer")["code_agent"]["instance_template"]
+    render = Template(template, undefined=StrictUndefined).render
+    common = {
+        "task": "t",
+        "criteria": ["c"],
+        "repos": ["web"],
+        "diffs": "/out/diff",
+        "review_path": "r",
+        "step_limit": 1,
+    }
+    first = render(**common, previous=[], latest=None)
+    assert "/out/diff/<repository>.diff" in first and "follows a fix round" not in first
+    previous = [{"repo": "web", "file": "a.ts", "line": 2, "text": "off by one", "answer": "fixed"}, {"text": "whole"}]
+    again = render(**common, previous=previous, latest={"web": ["a.ts"]})
+    assert "1. `web/a.ts` line 2: off by one" in again and "Answer: fixed" in again and "Answer: (none)" in again
+    assert "- `web/a.ts`" in again and "- nothing" not in again
+    assert "- nothing" in render(**common, previous=previous, latest={})

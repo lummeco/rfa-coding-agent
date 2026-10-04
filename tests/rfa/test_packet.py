@@ -1,6 +1,6 @@
 import pytest
 
-from rfa.packet import Packet, PacketFile, parse, problems
+from rfa.packet import Packet, PacketFile, add_decision, parse, problems
 
 REPO_FILES = {"invoicing": {"src/editor/InvoiceEditor.tsx", "src/editor/LineRow.tsx", "tests/editor.test.ts"}}
 
@@ -95,3 +95,22 @@ def test_problems_caps_decisions_and_acceptance_criteria():
 
 def test_problems_rejects_a_packet_written_without_reading_the_code():
     assert "at least 3 tool calls" in problems(packet(), REPO_FILES, tool_calls=0, min_tool_calls=3)[0]
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (
+            "# Task\nT\n\n## Decisions\n- Keep it local.\n  - nested\n\n## Acceptance criteria\n1. Works.\n",
+            "## Decisions\n- Keep it local.\n  - nested\n- Ask first.\n\n## Acceptance criteria\n1. Works.\n",
+        ),
+        (
+            "# Task\nT\n\n## Goal\nG\n\n## Acceptance criteria\n1. Works.\n",
+            "## Goal\nG\n\n## Decisions\n- Ask first.\n\n## Acceptance criteria\n1. Works.\n",
+        ),
+        ("\n# Idea\n\nJust an idea\n", "# Idea\n\nJust an idea\n\n## Decisions\n- Ask first.\n"),
+        ("# Task\nT\n\n## Decisions\n- Keep it local.\n", "## Decisions\n- Keep it local.\n- Ask first.\n"),
+    ],
+)
+def test_an_answer_joins_the_decisions_wherever_the_body_keeps_them(body, expected):
+    assert add_decision(body, " Ask first. ").endswith(expected)

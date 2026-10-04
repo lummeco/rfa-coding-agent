@@ -569,7 +569,7 @@ div.rfa-comment { background: color-mix(in srgb, var(--accent) 9%, var(--surface
 
 <script>
 const LABEL = { "under-work": "Under work", "draft": "Draft", "planning": "Planning", "todo": "To do", "review": "Review", "done": "Done" };
-const TONE = { ready: "green", done: "green", built: "amber", shipped: "green", failed: "red", planning: "amber", queued: "", coding: "blue", starting: "blue", todo: "blue", reviewing: "blue" };
+const TONE = { ready: "green", done: "green", built: "amber", shipped: "green", failed: "red", planning: "amber", question: "amber", queued: "", coding: "blue", starting: "blue", todo: "blue", reviewing: "blue" };
 const LIVE = new Set(["planning", "coding", "checking", "starting", "reviewing"]);
 
 let state = { tasks: [], events: [], stages: [], system: null };
@@ -583,6 +583,11 @@ const GROUPS = {
     { key: "planning", label: "Planning" },
     { key: "queued", label: "Queued", test: t => t.status === "queued" },
     { key: "failed", label: "Failed", test: t => t.status === "failed" },
+  ],
+  // A card the reviewer has a question on goes nowhere until you answer it.
+  review: [
+    { key: "question", label: "Needs your answer", test: t => t.status === "question" },
+    { key: "others", label: "Reviewing" },
   ],
   // Shipped and trashed are your verdicts; anything built and not yet judged is waiting on you.
   done: [
@@ -1493,9 +1498,9 @@ function showDetail(id) {
       : "Paused — the daemon leaves it alone until you <strong>Resume</strong>. A run starts over from the beginning."}</div>`;
   if (t.stage === "draft") head += `<div class="note">A draft. <strong>Edit</strong> changes any part of it; <strong>Plan it</strong> hands it to the planner${t.planned ? ", or <strong>Approve as is</strong> sends this packet straight to the coder" : ""}.</div>`;
   if (t.status === "queued" && t.stage === "planning" && !t.paused) head += `<div class="note">Waiting for the planner — <code>rfa plan</code></div>`;
-  if (t.stage === "planning" && t.open_questions?.length)
-    head += t.packet
-      ? `<div class="note"><strong>Open questions</strong> — an answer goes into the packet as a decision.<ul class="oq">${t.open_questions.map((q, i) =>
+  if ((t.stage === "planning" || t.stage === "review") && t.open_questions?.length)
+    head += t.packet || t.stage === "review"
+      ? `<div class="note"><strong>${t.stage === "review" ? "The reviewer asks" : "Open questions"}</strong> — an answer goes into the packet as a decision${t.stage === "review" ? ", and the last one sends the card back to the reviewer" : ""}.<ul class="oq">${t.open_questions.map((q, i) =>
           `<li><p>${esc(q)}</p><div class="answer"><textarea rows="1" data-oq="${i}" placeholder="Your answer">${esc(answers.get(`${t.id}\n${q}`) || "")}</textarea>`
           + `<button class="action" data-answer="${i}">Answer</button></div></li>`).join("")}</ul></div>`
       : `<div class="note"><strong>Open questions</strong><ul>${t.open_questions.map(q => `<li>${esc(q)}</li>`).join("")}</ul></div>`;
@@ -1585,10 +1590,11 @@ async function answerQuestion(i) {
   const q = t.open_questions[i];
   const answer = (answers.get(`${t.id}\n${q}`) || "").trim();
   if (!answer) return document.querySelector(`.oq textarea[data-oq="${i}"]`)?.focus();
-  const res = await api("/api/edit", {
+  // The reviewer's questions are answered by the host, which knows where in the packet they go.
+  const res = await api(t.stage === "review" ? "/api/answer" : "/api/edit", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+    body: JSON.stringify(t.stage === "review" ? { id: t.id, index: i, answer } : {
       id: t.id,
       decisions: [...t.packet.decisions, `${answer} -- the owner's answer to: ${q}`],
       open_questions: t.open_questions.filter((_, j) => j !== i),

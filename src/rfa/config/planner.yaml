@@ -59,7 +59,9 @@ agent:
     idea touches before you write a word of the packet. A packet written from the idea alone is
     rejected by the host and sent back to you, and you have only {{attempts}} tries.
 
-    - Read each repository's AGENTS.md / README and follow its conventions.
+    - Read each repository's README.{% if conventions %} Its `agents.md` is at the end of this message, in full:
+      the coder is held to it, so no decision in the packet may go against it.{% endif %}
+
     - Find the code the idea touches, and the closest existing feature that already does something
       similar -- that is what "current behavior" is really about.
     - Check how state is persisted and how the UI talks to the backend, when the idea involves either.
@@ -152,6 +154,19 @@ agent:
 
     Directory and environment changes do not persist between commands -- every action runs in a new
     subshell. Prefix with `cd /work/repos/<name> && ...` when you need a working directory.
+    {% if conventions %}
+
+    ## The repository's own rules
+
+    Every `agents.md` in the repositories: what the people who own this code require of anyone
+    changing it. Each applies to the folder it is in and everything below.
+
+    {% for path, text in conventions.items() %}
+    <agents-md file="/work/repos/{{path}}">
+    {{text}}
+    </agents-md>
+    {% endfor %}
+    {% endif %}
 
 environment:
   environment_class: docker

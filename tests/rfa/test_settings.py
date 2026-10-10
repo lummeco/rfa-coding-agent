@@ -171,3 +171,18 @@ def test_the_containers_block_is_read_off_the_full_repository_name():
     config = {"containers": {"lummeco/base": {"image": "python:3.11", "setup": ["true"]}}}
     assert settings.container(config, "lummeco/base") == {"image": "python:3.11", "setup": ["true"]}
     assert settings.container(config, "lummeco/web") == {} and settings.container({}, "") == {}
+
+
+@pytest.mark.parametrize(
+    ("files", "expected"),
+    [
+        (["web/src/features/chat/ChatPage.tsx", "web/src/tests/chat.test.ts"], ["ui"]),
+        (["base/src/main.py", "web/src/lib/format.ts"], []),
+        (["base/src/main.py", "web/README.md"], ["docs"]),
+        ([], []),
+    ],
+)
+def test_a_skill_is_chosen_by_the_files_the_packet_expects_to_change(files, expected, workspace):
+    config = {"skills": {"ui": {"files": ["*.tsx", "*.css"]}, "docs": {"files": ["*.md"]}, "never": {}}}
+    assert settings.skills(config, files) == {name: workspace / "skills" / name for name in expected}
+    assert settings.skills({}, files) == {}

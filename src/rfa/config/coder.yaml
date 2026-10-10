@@ -32,6 +32,35 @@ agent:
     The repositories are at `/work/repos/`: {{repo_list}}. Each one is a git repository whose only
     commit is the starting point, so `git diff` and `git status` show exactly your own work -- use
     them to check you changed what you meant to and nothing else.
+    {% if conventions %}
+
+    ## The repository's own rules
+
+    Every `agents.md` in the repositories, in full: what the people who own this code require of
+    anyone changing it. Each applies to the folder it is in and everything below. Follow them in
+    every line you write. Where one disagrees with a decision in the packet, the packet wins.
+
+    {% for path, text in conventions.items() %}
+    <agents-md file="/work/repos/{{path}}">
+    {{text}}
+    </agents-md>
+    {% endfor %}
+    {% endif %}
+    {% if skills %}
+
+    ## Skills this work requires
+
+    The packet changes the kind of code these were written for, so they are required, not optional.
+    Each is a folder holding a `SKILL.md`. Read it before your first edit, run the scripts and read
+    the references it points to (with `python3`), and hold what you write to its rules:
+
+    {% for name in skills %}- `/work/skills/{{name}}/SKILL.md`
+    {% endfor %}
+    A skill is general advice and this repository is not a blank page. Where a skill disagrees with
+    the packet, with the repository's own rules, or with the design the app already has, those win:
+    use the skill to build what was asked well, not to restyle what nobody asked you to change.
+    Nothing under `/work/skills` is part of a diff.
+    {% endif %}
     {% if reference %}
 
     ## Reference code

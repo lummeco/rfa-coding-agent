@@ -28,6 +28,7 @@ from rfa.tasks import Task
 
 REPOS_DIR = "/work/repos"
 REFERENCE_DIR = "/work/reference"
+SKILLS_DIR = "/work/skills"
 RETRY_NOTE = (
     "The host rejected the packet you wrote:\n\n{problems}\n\n"
     "Read whatever you need to settle these, write the corrected packet to {path}, and submit again."
@@ -278,6 +279,32 @@ def seed(
     return files
 
 
+def conventions(repos: dict[str, tuple[Path, str]]) -> dict[str, str]:
+    """Every agents.md the repositories hold at their commit, by the path the agent sees it at.
+
+    Put in the prompt by the host rather than left for the agent to go and read: an agent told to
+    read a file reads it on a good day, and `cat AGENTS.md` finds nothing in a repository that
+    spells it `agents.md` or keeps it under `docs/`.
+    """
+    return {
+        f"{name}/{file}": git(path, "show", f"{ref}:{file}")
+        for name, (path, ref) in repos.items()
+        for file in sorted(tracked_files(path, ref), key=lambda f: (f.count("/"), f))
+        if file.rpartition("/")[2].lower() == "agents.md"
+    }
+
+
+def equip(env: Environment, skills: dict[str, Path]) -> None:
+    """The card's skills, each a folder with a SKILL.md, beside the work. Docker environments only."""
+    env.execute({"command": f"mkdir -p {SKILLS_DIR}"})
+    for path in skills.values():
+        subprocess.run(
+            [env.config.executable, "cp", str(path), f"{env.container_id}:{SKILLS_DIR}"],
+            check=True,
+            capture_output=True,
+        )
+
+
 def git(repo: Path, *args: str, text: bool = True):
     """Run git in `repo` and return its stdout. Shared with the worker, which lands the diff."""
     return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=text).stdout
@@ -308,7 +335,7 @@ def plan(
     """Run the planner over `idea`. The packet, when there is one, is on the returned agent."""
     repo_files = seed(env, repos, reference)
     agent = PlannerAgent(model, env, repo_files=repo_files, **kwargs)
-    agent.run(idea, repo_map=render_map(repo_files), reference=sorted(reference or {}))
+    agent.run(idea, repo_map=render_map(repo_files), reference=sorted(reference or {}), conventions=conventions(repos))
     return agent
 
 

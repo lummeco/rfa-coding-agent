@@ -40,7 +40,7 @@ from minisweagent.exceptions import InterruptAgentFlow, Submitted
 from minisweagent.models import get_model
 from minisweagent.utils.serialize import recursive_merge
 from rfa import prepare, rounds, settings, tasks
-from rfa.planner import REPOS_DIR, _errors, git, seed
+from rfa.planner import REPOS_DIR, _errors, conventions, equip, git, seed
 from rfa.rounds import packet_only
 from rfa.tasks import Task
 
@@ -459,9 +459,11 @@ def code_review(task: Task, config: dict, model: dict, expected: list[str], outp
     repos = landed_repos(config, task, task.meta.get("repos") or [])
     write_diffs(task, repos, output / "diff")
     previous, latest = last_round(task.id)
+    skills = settings.skills(config, task.meta.get("packet_files") or [])
     env = get_environment(config.get("environment", {}), default_type="docker")
     try:
         files = seed(env, repos)
+        equip(env, skills)
         env.execute({"command": f"mkdir -p {Path(DIFFS).parent}"})
         put(env, output / "diff", DIFFS)
         agent = CodeReviewerAgent(
@@ -482,6 +484,8 @@ def code_review(task: Task, config: dict, model: dict, expected: list[str], outp
             diffs=DIFFS,
             previous=previous,
             latest=None if latest is None else {name: sorted(paths) for name, paths in latest.items()},
+            conventions=conventions(repos),
+            skills=sorted(skills),
         )
         return agent
     finally:

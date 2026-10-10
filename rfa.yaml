@@ -321,6 +321,19 @@ containers:
     # apptainer and API keys a coder container does not have.
     test: python -m pytest tests/rfa -q -p no:cacheprovider --junitxml=$RFA_JUNIT
 
+# Skills: folders under `skills/` here, each with a SKILL.md. rfa's own copies: nothing is read from
+# `~/.claude`, `~/.agents` or any other agent's skill folders, and a run sees them at
+# `/work/skills/<name>`, which is the path a SKILL.md's commands must use. A card whose packet expects to change a file matching one of a skill's `files:`
+# patterns gets that skill copied into the coder's container and is told to follow it; the code
+# reviewer gets it too, and sends back added lines that plainly break it. Patterns are matched
+# against `<repo>/<path>`, case-sensitively, and `*` crosses folders. See src/rfa/settings.py.
+skills:
+  # UI/UX Pro Max 2.13.0, github.com/nextlevelbuilder/ui-ux-pro-max-skill at 50d8a7d (MIT),
+  # without its own tests and data validation, and with its commands pointed at `/work/skills`.
+  # Needs python3 in the coder's image.
+  ui-ux-pro-max:
+    files: ["*.tsx", "*.jsx", "*.css", "*.scss", "*.html", "*.vue", "*.svelte", "*.swift"]
+
 # The daemon `rfa up` leaves running: it plans cards waiting in `planning` and codes cards you
 # approved into `todo`, one at a time, and only while this Mac can take it. It never moves a packet
 # from planning to todo -- that gate is yours. See src/rfa/daemon.py.

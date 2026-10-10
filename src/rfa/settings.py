@@ -18,6 +18,7 @@ One optional file. Anything at the top level applies to every stage; a `planner:
         image: node:22-bookworm
 """
 
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 import yaml
@@ -93,6 +94,19 @@ def container(config: dict, name: str) -> dict:
     its budget -- or, more often, does not, and the packet's checks are red before it starts.
     """
     return dict((config.get("containers") or {}).get(name) or {})
+
+
+def skills(config: dict, files: list[str]) -> dict[str, Path]:
+    """The `skills:` a card's work calls for, as the folders under `skills/` in the workspace.
+
+    Chosen by the host from the files the packet expects to change, not by the agent from a
+    description: a skill the agent may decide it does not need is a skill it does not follow.
+    """
+    return {
+        name: tasks.home() / "skills" / name
+        for name, spec in (config.get("skills") or {}).items()
+        if any(fnmatchcase(file, pattern) for file in files for pattern in spec.get("files") or [])
+    }
 
 
 def pairs(meta: dict, key: str) -> list[tuple[str, str]]:

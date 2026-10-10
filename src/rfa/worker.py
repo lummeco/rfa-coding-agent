@@ -20,7 +20,7 @@ from minisweagent.models import get_model
 from minisweagent.utils.serialize import recursive_merge
 from rfa import junit, lint, prepare, rounds, settings, tasks
 from rfa.packet import FORBIDDEN_PATHS
-from rfa.planner import REPOS_DIR, fetched, git, pin, seed
+from rfa.planner import REPOS_DIR, conventions, equip, fetched, git, pin, seed
 from rfa.tasks import Task
 
 JUNIT = "/tmp/rfa-junit.xml"
@@ -530,8 +530,10 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         reference = pin(reference)
         container = environment(config, spec)
         container["image"] = prepare.image(container, spec, repos, names[0], "coder")
+        skills = settings.skills(config, task.meta.get("packet_files") or [])
         env = get_environment(container, default_type="docker")
         seed(env, repos, reference)
+        equip(env, skills)
         # Before the base commit, so whatever the services write into the checkout is not the coder's diff.
         prepare.run(env, spec.get("start") or [], cwd, spec.get("setup_timeout", 900))
         make_git_repos(env, names)
@@ -582,6 +584,8 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
             test=test,
             suggested=[c for c in suggested if c not in checks],
             comments=comments,
+            conventions=conventions(repos),
+            skills=sorted(skills),
         )
         patches, dropped = diffs(env, names)
         written = agent.summary()

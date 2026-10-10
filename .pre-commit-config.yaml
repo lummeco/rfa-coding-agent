@@ -1,6 +1,9 @@
 ci:
   autoupdate_commit_msg: "chore: update pre-commit hooks"
 
+# Vendored agent skills: kept as published, so an update is a plain copy.
+exclude: ^skills/
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: "v6.0.0"

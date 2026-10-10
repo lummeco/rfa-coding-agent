@@ -396,8 +396,13 @@ def test_the_shipped_code_review_prompt_renders_with_what_the_host_passes():
         "review_path": "r",
         "step_limit": 1,
     }
-    first = render(**common, previous=[], latest=None)
+    first = render(**common, previous=[], latest=None, conventions={}, skills=[])
     assert "/out/diff/<repository>.diff" in first and "follows a fix round" not in first
+    assert "own rules" not in first and "Skills" not in first
+    common |= {"conventions": {"web/agents.md": "Never use default exports."}, "skills": ["ui-ux-pro-max"]}
+    held = render(**common, previous=[], latest=None)
+    assert '<agents-md file="/work/repos/web/agents.md">\nNever use default exports.' in held
+    assert "- `/work/skills/ui-ux-pro-max/SKILL.md`" in held
     previous = [{"repo": "web", "file": "a.ts", "line": 2, "text": "off by one", "answer": "fixed"}, {"text": "whole"}]
     again = render(**common, previous=previous, latest={"web": ["a.ts"]})
     assert "1. `web/a.ts` line 2: off by one" in again and "Answer: fixed" in again and "Answer: (none)" in again

@@ -8,7 +8,7 @@ import yaml
 
 from minisweagent.environments.local import LocalEnvironment
 from minisweagent.models.test_models import DeterministicModel, make_output
-from rfa.planner import PlannerAgent, render_map, tracked_files
+from rfa.planner import PlannerAgent, conventions, render_map, tracked_files
 from rfa.run.plan import DEFAULT_CONFIG, parse_repo
 
 REPO_FILES = {"invoicing": {"src/LineRow.tsx", "tests/editor.test.ts"}}
@@ -56,7 +56,12 @@ def run_planner(outputs: list[dict], tmp_path, **config) -> PlannerAgent:
         packet_path=str(tmp_path / "packet.json"),
         **(DEFAULTS | config),
     )
-    agent.run("duplicate a line", repo_map="invoicing/src/LineRow.tsx")
+    agent.run(
+        "duplicate a line",
+        repo_map="invoicing/src/LineRow.tsx",
+        reference=[],
+        conventions={"invoicing/docs/agents.md": "Never use default exports."},
+    )
     return agent
 
 
@@ -126,6 +131,22 @@ def test_tracked_files_lists_the_commit_not_the_working_tree(tmp_path):
     assert tracked_files(repo, "HEAD") == {"src/LineRow.tsx"}
 
 
+def test_every_agents_md_reaches_the_prompt_however_it_is_spelled_and_only_as_committed(tmp_path):
+    """Root first, then deeper; `agents.md`, `AGENTS.md` and `docs/` all count; the working tree does not."""
+    repo = tmp_path / "invoicing"
+    (repo / "docs").mkdir(parents=True)
+    (repo / "docs" / "AGENTS.md").write_text("docs rules")
+    (repo / "agents.md").write_text("root rules")
+    (repo / "not-agents.md").write_text("something else")
+    for args in (["init", "-q"], ["add", "."], ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "i"]):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    (repo / "agents.md").write_text("edited after the commit")
+    assert list(conventions({"invoicing": (repo, "HEAD")}).items()) == [
+        ("invoicing/agents.md", "root rules"),
+        ("invoicing/docs/AGENTS.md", "docs rules"),
+    ]
+
+
 def test_render_map_falls_back_to_folders_when_the_repository_is_too_big():
     files = {f"src/mod{i}/file.py" for i in range(10)}
     assert "src/mod0/file.py" in render_map({"big": files}, max_files=100)
@@ -153,6 +174,10 @@ def test_the_shipped_planner_config_renders_with_the_agents_own_variables(tmp_pa
     assert agent.packet is not None
     assert "execution packet" in agent.messages[0]["content"]
     assert str(tmp_path / "packet.json") in agent.messages[1]["content"]
+    assert (
+        '<agents-md file="/work/repos/invoicing/docs/agents.md">\nNever use default exports.'
+        in agent.messages[1]["content"]
+    )
 
 
 def test_the_planner_refuses_a_card_the_human_has_not_moved_into_planning(tmp_path, monkeypatch):

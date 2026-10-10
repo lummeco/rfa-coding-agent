@@ -249,6 +249,8 @@ def test_the_shipped_coder_config_renders_with_the_variables_the_worker_passes(t
             {"repo": "web", "file": "src/a.py", "side": "new", "line": 7, "context": "x = 1", "text": "use 2"},
             {"text": "the planner prompt changes too"},
         ],
+        conventions={"web/agents.md": "Never use default exports."},
+        skills=["ui-ux-pro-max"],
     )
     prompt = agent.messages[1]["content"]
     assert "execution packet" in agent.messages[0]["content"]
@@ -261,6 +263,8 @@ def test_the_shipped_coder_config_renders_with_the_variables_the_worker_passes(t
     assert "1. `web/src/a.py` line 7: use 2" in prompt and "x = 1" in prompt and '"answers"' in prompt
     assert "2. On the whole round: the planner prompt changes too" in prompt
     assert "/work/summary.json" in prompt
+    assert '<agents-md file="/work/repos/web/agents.md">\nNever use default exports.' in prompt
+    assert "- `/work/skills/ui-ux-pro-max/SKILL.md`" in prompt and "required, not optional" in prompt
     assert agent.round == 1 and all(r["ok"] for r in agent.results)
 
 

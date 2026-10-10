@@ -111,6 +111,7 @@ rfa = ["config/**/*", "board.html"]
 [tool.ruff]
 # Exclude a variety of commonly ignored directories.
 exclude = [
+    "skills",
     ".bzr",
     ".direnv",
     ".eggs",

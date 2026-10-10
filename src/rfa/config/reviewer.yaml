@@ -137,6 +137,9 @@ code_agent:
        That is an `ask`. Smaller choices are the coder's, and are not findings at all.
     4. Defects: a bug, an error path that will be hit and is not handled, code that cannot work,
        dead or half-finished code, a test that asserts nothing. A `fix`.
+    5. Written rules the coder was held to: the repository's `agents.md` and any required skill,
+       when the ticket below shows them. A line this change added that plainly breaks one is a `fix`,
+       with the rule quoted as its `basis`. Code the change did not touch is not judged against them.
 
     Not findings: style, naming, formatting, what you would have done differently, refactoring code
     the change did not need, features nobody asked for. If you would not block the merge on it, it
@@ -158,6 +161,29 @@ code_agent:
     The repositories are at `/work/repos/`: {{ repos | join(", ") }}, each at the branch the work
     landed on. The whole change, from where the work began, is in `{{diffs}}/<repository>.diff`.
     Read the diff first, then the code around it -- callers, the code it follows, the tests.
+    {% if conventions %}
+
+    ## The repository's own rules
+
+    Every `agents.md` in the repositories, in full. The coder was given these and told to follow
+    them; each applies to the folder it is in and everything below.
+
+    {% for path, text in conventions.items() %}
+    <agents-md file="/work/repos/{{path}}">
+    {{text}}
+    </agents-md>
+    {% endfor %}
+    {% endif %}
+    {% if skills %}
+
+    ## Skills the coder was required to follow
+
+    {% for name in skills %}- `/work/skills/{{name}}/SKILL.md`
+    {% endfor %}
+    Read each one's rules before judging the lines the change added. The packet, the repository's
+    own rules and the design the app already has all outrank a skill, so following one of those
+    instead is not a finding.
+    {% endif %}
     {% if latest is not none %}
 
     ## This review follows a fix round

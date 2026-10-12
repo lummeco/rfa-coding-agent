@@ -26,6 +26,7 @@ screenshots are written for you, and the board shows them on the card.
 
 import json
 import re
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -360,7 +361,7 @@ def start_app(env: Environment, repo: str, spec: dict) -> None:
                 )
             raise AppFailed(f"`{command}` failed:\n\n{result['output'][-3000:]}")
     env.execute(
-        {"command": f"mkdir -p {Path(SERVE_LOG).parent} && nohup {spec['serve']} > {SERVE_LOG} 2>&1 & echo started"},
+        {"command": f"mkdir -p {Path(SERVE_LOG).parent} && nohup sh -c {shlex.quote(spec['serve'])} > {SERVE_LOG} 2>&1 & echo started"},
         cwd=f"{REPOS_DIR}/{repo}",
     )
     ready = (

@@ -226,7 +226,7 @@ def progress(id: str, of: str = "") -> dict:
     return {"steps": steps, "now": ran or []}
 
 
-SHOT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\.png")
+SHOT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}\.png")
 
 
 def screenshot(id: str, name: str) -> bytes | None:

@@ -246,6 +246,7 @@ def test_the_reviewer_is_a_stage_like_the_other_two(workspace):
     ("id", "name", "found"),
     [
         ("20260921-120000-a-task", "board.png", True),
+        ("20260921-120000-a-task", "before - board.png", True),
         ("20260921-120000-a-task", "../../../../etc/passwd", False),
         ("20260921-120000-a-task", "board.png.sh", False),
         ("../evil", "board.png", False),
@@ -257,6 +258,7 @@ def test_the_board_serves_a_screenshot_only_where_both_halves_are_one(workspace,
     shots = workspace / "var" / "runs" / "20260921-120000-a-task" / "review"
     shots.mkdir(parents=True)
     (shots / "board.png").write_bytes(b"\x89PNG")
+    (shots / "before - board.png").write_bytes(b"\x89PNG")
     assert (board.screenshot(id, name) == b"\x89PNG") is found
 
 

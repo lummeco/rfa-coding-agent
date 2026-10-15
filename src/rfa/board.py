@@ -130,6 +130,7 @@ def snapshot() -> dict:
                 "offline": task.meta.get("offline"),
                 "landed": task.meta.get("landed") or {},
                 "shots": task.meta.get("shots") or [],
+                "booted": task.meta.get("booted"),
                 "copy": copy_commands(task.meta.get("landed") or {}, configured, state),
                 "prs": task.meta.get("prs") or {},
                 "link": task.meta.get("link"),

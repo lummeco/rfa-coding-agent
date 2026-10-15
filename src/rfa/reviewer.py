@@ -495,8 +495,13 @@ def code_review(task: Task, config: dict, model: dict, expected: list[str], outp
 
 def app_review(
     task: Task, config: dict, model: dict, expected: list[str], under_test: str, spec: dict, output: Path
-) -> tuple[ReviewerAgent, list[str]]:
-    """Start the app at the landed branch and drive it against the criteria. Returns the screenshots too."""
+) -> tuple[ReviewerAgent | None, list[str]]:
+    """Start the app at the landed branch and drive it against the criteria. Returns the screenshots too.
+
+    Returning at all means the app booted: `start_app` raises when it does not. A packet with no
+    criteria still gets that much -- there is nothing to drive, but an app that will not start is
+    worth knowing about on any card.
+    """
     # `with:` is what the app cannot run without -- its backend -- seeded beside it at its pinned ref.
     names = list(dict.fromkeys([*(task.meta.get("repos") or []), *(spec.get("with") or [])]))
     repos = landed_repos(config, task, names)
@@ -510,6 +515,8 @@ def app_review(
         seed(env, repos)
         install_drive(env)
         start_app(env, under_test, spec)
+        if not expected:
+            return None, []
         agent = ReviewerAgent(
             get_model(config=model),
             env,
@@ -553,19 +560,20 @@ def review_task(task: Task, config: dict, model: str = "", reasoning: str = "") 
     output.mkdir(parents=True, exist_ok=True)
     chosen, level = review_model(config, task.meta, model, reasoning)
     # Not `model`: that is the coder's, and the next fix round would otherwise run on the reviewer's.
-    tasks.save(task, status="reviewing", reviewed_with=chosen, open_questions=None)
+    tasks.save(task, status="reviewing", reviewed_with=chosen, open_questions=None, booted=None)
     tasks.log(type="review_started", id=task.id, repo=under_test or None, model=chosen)
-    app, shots = None, []
+    app, shots, booted = None, [], None
     try:
         model_config = settings.model_config(config, chosen, level)
         code = code_review(task, config, model_config, expected, output)
         # Driving an app whose code is about to change again would judge a build nobody will ship.
         holds = code.review is not None and all(f.route == "note" for f in code.review.findings)
-        if holds and under_test and expected:
+        if holds and under_test:
             app, shots = app_review(task, config, model_config, expected, under_test, specs[under_test], output)
+            booted = {"repo": under_test, "ok": True, "at": tasks.now()}
     except AppFailed as e:
         tasks.log(type="review_failed", id=task.id, error=str(e))
-        return send_back(task, [{"text": str(e)}], output)
+        return send_back(task, [{"text": str(e)}], output, {"repo": under_test, "ok": False, "at": tasks.now()})
     except tasks.Paused:
         tasks.log(type="review_paused", id=task.id)
         return tasks.save(task, status="queued", paused=True)
@@ -588,7 +596,7 @@ def review_task(task: Task, config: dict, model: str = "", reasoning: str = "") 
     if fixes := [f for f in findings if f.route == "fix"]:
         return send_back(task, [comment(f) for f in fixes], output)
     if app and app.review.verdict == "fail":
-        return send_back(task, [{"text": p} for p in app.review.problems], output)
+        return send_back(task, [{"text": p} for p in app.review.problems], output, booted)
     task.body += code_note(code.review) + (review_note(app.review, shots) if app else "")
     return tasks.move(
         task,
@@ -598,11 +606,12 @@ def review_task(task: Task, config: dict, model: str = "", reasoning: str = "") 
         finished_at=tasks.now(),
         review=str(output),
         shots=shots or None,
+        booted=booted,
         error=None,
     )
 
 
-def send_back(task: Task, found: list[dict], output: Path) -> Task:
+def send_back(task: Task, found: list[dict], output: Path, booted: dict | None = None) -> Task:
     """To `todo`, as the ticket it was, with what the review found waiting as comments on its diff.
 
     Comments rather than a note under the ticket: the coder answers each one by number, the board
@@ -623,5 +632,6 @@ def send_back(task: Task, found: list[dict], output: Path) -> Task:
         status="todo",
         review=str(output),
         shots=sorted(p.name for p in output.glob("*.png")) or None,
+        booted=booted,
         error="; ".join(texts)[:500],
     )

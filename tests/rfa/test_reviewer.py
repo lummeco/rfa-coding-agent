@@ -188,6 +188,19 @@ def test_a_failed_review_sends_the_card_back_as_the_ticket_it_was(workspace):
     assert sent.meta["landed"] == {"rfa-coding-agent": "rfa/scroll"}
 
 
+def test_the_card_says_whether_the_app_booted_and_forgets_it_when_unknown(workspace):
+    """The tag is the host's own record of starting the app, and a send-back before any boot carries none."""
+    task = tasks.create("scroll", ["lummeco/rfa-coding-agent"])
+    task = tasks.move(tasks.move(tasks.move(task, "todo"), "under-work", actor="worker"), "review", actor="worker")
+    booted = {"repo": "rfa-coding-agent", "ok": False, "at": tasks.now()}
+    sent = send_back(task, [{"text": "`serve` never answered"}], workspace / "var", booted)
+    card = next(t for t in board.snapshot()["tasks"] if t["id"] == task.id)
+    assert sent.meta["booted"] == card["booted"] == booted
+    sent = tasks.move(tasks.move(sent, "under-work", actor="worker"), "review", actor="worker")
+    assert send_back(sent, [{"text": "a fix"}], workspace / "var").meta["booted"] is None
+    assert next(t for t in board.snapshot()["tasks"] if t["id"] == task.id)["booted"] is None
+
+
 def test_review_note_says_which_criteria_failed():
     note = review_note(Review(verdict="fail", judgements=judged(True, False), problems=["it throws"]), ["a.png"])
     assert "✓ c0" in note and "✗ c1" in note and "it throws" in note and "a.png" in note

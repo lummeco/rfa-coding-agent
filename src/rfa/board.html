@@ -161,6 +161,9 @@ header .hint { color: var(--text-3); font-size: 12px; }
   padding: 1px 7px;
 }
 .retry.held { color: var(--text-2); background: var(--line); }
+/* The host started the app at the landed branch: it builds, imports and serves. Not the reviewer's word. */
+.boot { font-size: 11px; color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); border-radius: 20px; padding: 1px 7px; }
+.boot.no { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
 .repo { font-size: 11px; color: var(--text-3); }
 .cx { display: inline-flex; gap: 3px; margin-left: auto; }
 .cx i { width: 4px; height: 4px; border-radius: 50%; background: var(--line); }
@@ -700,6 +703,7 @@ function card(t) {
       <div class="meta">
         <span class="status"><span class="dot ${tone}${live}"></span>${esc(t.status)}</span>
         ${t.attempts ? `<span class="retry" title="${t.attempts} retries">↻ ${t.attempts}</span>` : ""}
+        ${t.booted ? `<span class="boot${t.booted.ok ? "" : " no"}" title="${esc(t.booted.repo)} ${t.booted.ok ? "started and answered on its port" : "would not start"} at the landed branch, ${esc(when(t.booted.at))}">${t.booted.ok ? "✓ boots" : "✗ won't boot"}</span>` : ""}
         ${t.paused ? `<span class="retry held">${LIVE.has(t.status) ? "pausing…" : "⏸ paused"}</span>` : ""}
         ${t.repos.length ? `<span class="repo">${esc(t.repos.map(r => r.split("/").pop()).join(", "))}</span>` : ""}
         ${dots}

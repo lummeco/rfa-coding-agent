@@ -57,7 +57,7 @@ ON_ARRIVAL = {"planning": "queued", "under-work": "starting", "review": "queued"
 
 # Statuses with an agent on the card right now. Such a card cannot go back to draft under the run:
 # the run still holds the old path and would write the card back where it was.
-RUNNING = {"planning", "starting", "coding", "checking", "reviewing"}
+RUNNING = {"planning", "writing-tests", "starting", "coding", "checking", "reviewing"}
 
 ID_RE = re.compile(r"[0-9a-z][0-9a-z-]{0,79}")
 FRONT_MATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?(.*)\Z", re.DOTALL)
@@ -290,6 +290,12 @@ def create(idea: str, repos: list[str] | None = None, at: datetime | None = None
     save(task)
     log(type="created", id=id)
     return task
+
+
+def plan_now(task: Task) -> Task:
+    """An idea you add goes straight to the planner. One naming no repository stays a draft: there is
+    nothing to plan it against until you pick one. Sentry's captures are drafts and are left there."""
+    return move(task, "planning") if task.meta.get("repos") else task
 
 
 def move(task: Task, to: str, actor: str = "human", **updates) -> Task:

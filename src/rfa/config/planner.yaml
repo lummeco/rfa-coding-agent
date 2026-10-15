@@ -103,15 +103,18 @@ agent:
       code path, over a client-side copy that skips validation", not "Add a duplicate() function to
       api.ts". Never generic advice, never the same point twice. A one-file tweak may have none.
     - `acceptance_criteria` -- at most 5. Observable proof the work is done, each one distinguishing a
-      correct implementation from a plausible wrong one. When persisted state changes, one criterion shows it
+      correct implementation from a plausible wrong one. Tests are written from these before any code
+      is, so state each one as behavior a test can check: an input, and what must come out of it. When persisted state changes, one criterion shows it
       survives a reload. Never "tests pass" on its own, and never "existing functionality works" on
       its own -- say which functionality.
     - `open_questions` -- ask whenever the idea leaves something open that a reasonable owner could
       answer differently and that would change what gets built: two readings of the idea, a product
       choice, an edge case with no obvious answer, a decision you are unsure the owner would take.
-      Lean towards asking; an unasked question is a guess the owner may never notice. Each question
-      names the options, and the answer you defaulted to is also written down as a decision, so the packet stands on its own if the owner agrees. Never ask what the repository
-      already answers -- read it instead.
+      A question stops the card until the owner answers it, because the tests written next would set
+      your guess in stone -- so ask what would change the behavior or the tests, and decide the rest
+      yourself as a decision. Each question names the options, and the answer you defaulted to is
+      also written down as a decision, so the packet stands on its own if the owner agrees. Never ask
+      what the repository already answers -- read it instead.
 
     ## 4. Two fields the coder never sees
 

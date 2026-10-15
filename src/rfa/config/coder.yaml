@@ -95,6 +95,19 @@ agent:
     {% endfor %}
     {% endif %}
 
+    {% if approved %}
+
+    ## The tests you are coding against
+
+    Before any code was written, these tests were written from the packet and approved by the owner
+    with it. They are already in the repository -- the commit just before yours -- and they fail now.
+    Your work is done when they pass. They are the spec: do not change them, and the host turns down
+    any submit that does. If one looks wrong, say so in your summary and make the rest pass.
+
+    {% for t in approved %}- `{{t.id}}`{% if t.checks %} -- {{t.checks}}{% endif %}
+    {% endfor %}
+    {% endif %}
+
     ## Before you submit
 
     Write `{{summary_path}}` -- outside the repositories, so it is not part of the diff -- as JSON:

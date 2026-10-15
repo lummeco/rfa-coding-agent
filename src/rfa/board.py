@@ -17,6 +17,7 @@ import json
 import re
 import secrets
 import shlex
+import shutil
 import subprocess
 import threading
 import time
@@ -27,6 +28,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from rfa import daemon, github, packet, rounds, settings, tasks
+from rfa.planner import test_notes, tests_dir
 
 PAGE = Path(__file__).parent / "board.html"
 
@@ -132,6 +134,8 @@ def snapshot() -> dict:
                 "prs": task.meta.get("prs") or {},
                 "link": task.meta.get("link"),
                 "open_questions": task.meta.get("open_questions") or [],
+                "tests_note": task.meta.get("tests_note"),
+                "written_tests": written_tests(task),
                 "packet": (plan := planned_packet(task)),
                 # A ready plan reads exactly as the editor will save it, older sections folded in.
                 "body": render_packet(task, plan) if plan else task.body,
@@ -141,6 +145,17 @@ def snapshot() -> dict:
         "events": tasks.events()[-500:],
         "repos": sorted(configured),
         "system": daemon.report(),
+    }
+
+
+def written_tests(task: tasks.Task) -> dict | None:
+    """The tests written ahead of the code, for you to read before you approve: what each one checks
+    and why it fails now, and the code itself. Only on a planning card -- after that they are in the
+    coder's rounds, red or green."""
+    if task.stage != "planning" or not (notes := test_notes(task.id)):
+        return None
+    return notes | {
+        "patches": {p.stem: p.read_text(errors="replace") for p in sorted(tests_dir(task.id).glob("*.patch"))}
     }
 
 
@@ -392,12 +407,14 @@ def fix(id: str) -> tasks.Task:
 
 
 def answer(id: str, index: int, text: str) -> tasks.Task:
-    """The owner's answer to one of the reviewer's questions, as a decision in the packet: the coder
-    and the next review both read it as approved. The last answer sends the card back to the reviewer."""
+    """The owner's answer to a question the planner, the tester or the reviewer stopped on, as a
+    decision in the packet: everything after reads it as approved. The last answer sends the card on
+    -- in planning to have its tests written, in review back to the reviewer."""
     task = tasks.find(id)
     questions = task.meta.get("open_questions") or []
-    if task.stage != "review" or not 0 <= index < len(questions):
-        raise ValueError(f"{task.id} has no question {index} from the reviewer")
+    asking = task.stage == "review" or (task.stage == "planning" and task.status == "question")
+    if not asking or not 0 <= index < len(questions):
+        raise ValueError(f"{task.id} has no question {index} waiting for an answer")
     if not text.strip():
         raise ValueError("an answer needs some words")
     task.body = packet.add_decision(
@@ -406,6 +423,17 @@ def answer(id: str, index: int, text: str) -> tasks.Task:
     left = questions[:index] + questions[index + 1 :]
     tasks.log(type="answered", id=task.id, left=len(left))
     return tasks.save(task, open_questions=left or None, **({} if left else {"status": "queued"}))
+
+
+def retest(id: str) -> tasks.Task:
+    """Throw away a planned card's tests and write them again, from the packet as it is now -- after
+    you edited it, or when the tests do not say what you meant."""
+    task = tasks.find(id)
+    if task.stage != "planning" or task.status not in ("ready", "failed") or not task.meta.get("planned_at"):
+        raise ValueError(f"{task.id} is {task.stage}/{task.status}; tests are written again for a planned card")
+    shutil.rmtree(tests_dir(task.id), ignore_errors=True)
+    tasks.log(type="retest", id=task.id)
+    return tasks.save(task, status="queued", tests_at=None, tests_note=None, error=None, paused=None)
 
 
 def pause(id: str, paused: bool) -> tasks.Task:
@@ -612,6 +640,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/comment",
             "/api/fix",
             "/api/answer",
+            "/api/retest",
         )
         if self.path not in posts:
             self._json(404, {"error": "not found"})
@@ -640,12 +669,14 @@ class Handler(BaseHTTPRequestHandler):
             except (KeyError, ValueError) as e:
                 self._json(400, {"error": str(e).strip("'")})
                 return
-            task = tasks.create(
-                idea,
-                list(payload.get("repos") or []),
-                branches=list(payload.get("branches") or []) or None,
-                context_branches=list(payload.get("context_branches") or [])[: settings.MAX_CONTEXT] or None,
-                **{key: value or None for key, value in run_with.items()},
+            task = tasks.plan_now(
+                tasks.create(
+                    idea,
+                    list(payload.get("repos") or []),
+                    branches=list(payload.get("branches") or []) or None,
+                    context_branches=list(payload.get("context_branches") or [])[: settings.MAX_CONTEXT] or None,
+                    **{key: value or None for key, value in run_with.items()},
+                )
             )
             self._json(200, {"id": task.id, "stage": task.stage, "status": task.status})
             return
@@ -673,6 +704,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/verdict",
             "/api/reorder",
             "/api/answer",
+            "/api/retest",
         ):
             try:
                 if self.path == "/api/edit":
@@ -683,6 +715,8 @@ class Handler(BaseHTTPRequestHandler):
                     task = pause(payload["id"], bool(payload.get("paused")))
                 elif self.path == "/api/retry":
                     task = retry(payload["id"])
+                elif self.path == "/api/retest":
+                    task = retest(payload["id"])
                 elif self.path == "/api/rereview":
                     task = rereview(payload["id"])
                 elif self.path == "/api/reorder":

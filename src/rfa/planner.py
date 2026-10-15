@@ -10,6 +10,7 @@ The model call is made from the host, so the container never needs egress.
 
 import json
 import os
+import shutil
 import subprocess
 import time
 from datetime import datetime
@@ -339,6 +340,22 @@ def plan(
     return agent
 
 
+def tests_dir(id: str) -> Path:
+    """Where the tests written ahead of the code wait for the coder: one patch per repository."""
+    return tasks.home() / "var" / "runs" / id / "tests"
+
+
+def approved_tests(id: str) -> dict[str, str]:
+    """The tests a card's owner approved with its packet, as patches by repository. None for a card
+    planned before tests were written first, or for a repository with nothing to run them."""
+    return {p.stem: p.read_text() for p in sorted(tests_dir(id).glob("*.patch"))}
+
+
+def test_notes(id: str) -> dict | None:
+    path = tests_dir(id) / "tests.json"
+    return json.loads(path.read_text()) if path.exists() else None
+
+
 def write_packet(agent: PlannerAgent, path: Path) -> None:
     """The rendered ticket for the board, with the host's own fields beside it."""
     if agent.packet is None:
@@ -348,11 +365,12 @@ def write_packet(agent: PlannerAgent, path: Path) -> None:
 
 
 def plan_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> Task:
-    """Plan one card in place: the packet becomes its body and it waits in `planning` for a human.
+    """Plan one card in place: the packet becomes its body, and the tests are written next.
 
-    Both ends of this stage are yours. You move a draft into `planning` when you want it planned,
-    and you move the packet on to `todo` when you have read it -- the planner only ever works on
-    cards that are already there, and never moves one out.
+    The planner only ever works on cards already in `planning`, and never moves one out: the move to
+    `todo` is yours, once you have read the packet and the tests written from it. A packet with open
+    questions stops here as a `question` -- the tests would set its guesses in stone -- and your last
+    answer queues it for the tests. Planning again throws away tests written for the old packet.
 
     A card that cannot be planned says so and stays put. It is never re-planned on its own -- a
     second identical attempt fails the same way -- so the next move is yours too.
@@ -392,9 +410,11 @@ def plan_task(task: Task, config: dict, model: str = "", reasoning: str = "") ->
         return tasks.save(task, status="failed", error=note)
     tasks.log(type="planned", id=task.id, complexity=agent.packet.complexity, steps=agent.n_actions, model=chosen)
     task.body = "\n" + agent.packet.render()
+    shutil.rmtree(tests_dir(task.id), ignore_errors=True)
     return tasks.save(
         task,
-        status="ready",
+        status="question" if agent.packet.open_questions else "queued",
+        tests_at=None,
         title=agent.packet.title,
         planned_at=tasks.now(),
         complexity=agent.packet.complexity,

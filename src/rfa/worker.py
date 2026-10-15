@@ -20,7 +20,7 @@ from minisweagent.models import get_model
 from minisweagent.utils.serialize import recursive_merge
 from rfa import junit, lint, prepare, rounds, settings, tasks
 from rfa.packet import FORBIDDEN_PATHS
-from rfa.planner import REPOS_DIR, conventions, equip, fetched, git, pin, seed
+from rfa.planner import REPOS_DIR, approved_tests, conventions, equip, fetched, git, pin, seed, test_notes
 from rfa.tasks import Task
 
 JUNIT = "/tmp/rfa-junit.xml"
@@ -41,6 +41,16 @@ WRAP_UP = (
     "\n\n[{deadline}, and when they run out the run stops where it is: the host runs the checks on "
     "whatever you have changed, and lands it only if they pass. Finish the edit you are on, run the "
     "checks and submit.]"
+)
+
+TOUCHED_TESTS = (
+    "You changed tests the owner approved before any code was written: {paths}. They are the spec, "
+    "not part of the work. Put them back (`git checkout HEAD -- <file>`) and make the code pass them instead."
+)
+
+STALE_TESTS = (
+    "The tests approved with the packet no longer apply to `{repo}` where this run starts, so the run "
+    "did not start. Move the card back to planning and write the tests again.\n\n{output}"
 )
 
 UNJUDGEABLE = (
@@ -92,6 +102,9 @@ class CoderConfig(AgentConfig):
 class CoderAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
     """mini's agent, with the packet's checks and the repository's tests between submitting and done."""
 
+    rejected = CHECKS_FAILED
+    """What a submit the host turns down says, around the report of what is wrong."""
+
     def __init__(
         self,
         model: Model,
@@ -104,6 +117,7 @@ class CoderAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
         test_baseline: dict | None = None,
         lint: str = "",
         lint_baseline: dict | None = None,
+        protected: list[str] | None = None,
         root: str = REPOS_DIR,
         **kwargs,
     ):
@@ -118,6 +132,8 @@ class CoderAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
         self.lint = lint
         self.lint_baseline = lint_baseline or {}
         self.linted: dict | None = None
+        self.protected = set(protected or [])
+        self.changed: list[str] = []
         self.results: list[dict] = []
         self.round = 0
         self.prompt_tokens = 0
@@ -151,6 +167,9 @@ class CoderAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
             found.append({"command": self.test, "ok": False, "returncode": self.tests["returncode"], "output": failed})
         if self.linted and (added := new_problems(self.linted, self.lint_baseline)):
             found.append({"command": self.lint, "ok": False, "returncode": self.linted["returncode"], "output": added})
+        if touched := [p for p in self.changed if p in self.protected]:
+            output = TOUCHED_TESTS.format(paths=", ".join(touched))
+            found.append({"command": "git diff", "ok": False, "returncode": 1, "output": output})
         return found
 
     def exit_status(self) -> str:
@@ -249,7 +268,7 @@ class CoderAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
                     message,
                     [
                         {
-                            "output": CHECKS_FAILED.format(
+                            "output": self.rejected.format(
                                 report=report(self.regressions()), round=self.round, rounds=self.config.rounds
                             ),
                             "returncode": 1,
@@ -265,6 +284,7 @@ class CoderAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
         return self.warn(observations)
 
     def run_checks(self) -> list[dict]:
+        self.changed = changed_paths(self.env, self.root)
         if self.test:
             self.tests = run_tests(self.env, self.test, self.cwd, self.config.junit_path, self.config.test_timeout)
         if self.lint:
@@ -279,6 +299,18 @@ class CoderAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
         except json.JSONDecodeError:
             return {}
         return found if isinstance(found, dict) else {}
+
+
+def changed_paths(env: Environment, root: str = REPOS_DIR) -> list[str]:
+    """Every file changed since the last commit, as `<repo>/<path>`: what a submit is about to ship.
+    Read off `git status` rather than staged, so the index stays the agent's own."""
+    command = (
+        f'for d in {root}/*/; do git -C "$d" status --porcelain --untracked-files=all 2>/dev/null '
+        '| sed "s|^|$(basename "$d") |"; done'
+    )
+    found = [line.partition(" ") for line in env.execute({"command": command})["output"].splitlines()]
+    # `XY path`, or `XY old -> new` for a rename.
+    return [f"{name}/{status[3:].split(' -> ')[-1].strip(chr(34))}" for name, _, status in found]
 
 
 def usage(message: dict) -> dict:
@@ -493,6 +525,8 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         raise ValueError(f"{task.id} names no repositories; add `repos:` to the card")
     names = list(repos)
     before = task.meta.get("landed") or {}
+    # A fix round starts from a branch that already holds them; the first round starts from the tests alone.
+    approved = {} if before else approved_tests(task.id)
     state = rounds.view(task)
     n, comments = len(state["rounds"]), state["pending"]
     # A round that never got recorded -- the machine failed under it -- is simply run again.
@@ -550,7 +584,6 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         if checks and not any(baseline.values()):
             raise Unjudgeable(UNJUDGEABLE.format(report=report(measured)))
         # The repository's own tests and lint, measured the same way but test by test and problem by problem.
-        linted = run_lint(env, lint_command, cwd) if lint_command else None
         if (tested := run_tests(env, test, cwd) if test else None) and tested["cases"] is None:
             raise Unjudgeable(UNTESTABLE.format(output=tested["output"]))
         test_baseline = (
@@ -558,6 +591,10 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
             if tested
             else {}
         )
+        # After the test baseline, so every approved test is a new one the run must turn green; before
+        # the lint's, so whatever the tests themselves trip is not the coder's to fix.
+        apply_tests(env, approved)
+        linted = run_lint(env, lint_command, cwd) if lint_command else None
         agent = CoderAgent(
             get_model(config=settings.model_config(config, chosen, level)),
             env,
@@ -568,6 +605,7 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
             test_baseline=test_baseline,
             lint=lint_command,
             lint_baseline=linted,
+            protected=[f"{name}/{f}" for name, patch in approved.items() for f in rounds.files(patch)],
             output_path=output / "trajectory.json",
             task_id=task.id,
             # The window the variant is served with, unless the workspace said otherwise: a run
@@ -586,6 +624,7 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
             comments=comments,
             conventions=conventions(repos),
             skills=sorted(skills),
+            approved=(test_notes(task.id) or {}).get("tests") if approved else None,
         )
         patches, dropped = diffs(env, names)
         written = agent.summary()
@@ -616,13 +655,16 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         if env is not None:
             env.cleanup()
 
+    shipped = landable(agent, patches)
+    # What lands is the approved tests and the code that passes them, one commit like any round.
+    if shipped:
+        patches = {name: approved.get(name, "") + patches.get(name, "") for name in {**approved, **patches}}
     for name, patch in patches.items():
         (output / f"{name}.patch").write_text(patch)
     (output / "checks.json").write_text(json.dumps(agent.results, indent=2))
     if tests := record_tests(agent.tests, test_baseline, names[0], agent.round):
         (output / "tests.json").write_text(json.dumps(tests, indent=2))
 
-    shipped = landable(agent, patches)
     settled = shipped or kept(agent, patches, before)
     # `landed`, not `branches`: the card's own `branches:` is where its work started from, and
     # these are where it ended up. One name for both would quietly overwrite the first with the second.
@@ -687,6 +729,21 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         landed=landed or None,
         error=None if settled else summarize(agent, patches),
     )
+
+
+def apply_tests(env: Environment, approved: dict[str, str], root: str = REPOS_DIR) -> None:
+    """The tests the owner approved, as one more commit in each repository: the coder's `git diff`
+    stays its own work, and a change to one of them shows in it."""
+    for name, patch in approved.items():
+        where = f"cd {root}/{name}"
+        done = env.execute(
+            {
+                "command": f"set -e; {where}; git apply --whitespace=nowarn - <<'RFA_TESTS_EOF'\n{patch}RFA_TESTS_EOF\n"
+                "git add -A && git -c user.email=rfa@local -c user.name=rfa commit -qm tests"
+            }
+        )
+        if done["returncode"] != 0:
+            raise Unjudgeable(STALE_TESTS.format(repo=name, output=done["output"][-3000:]))
 
 
 def environment(config: dict, spec: dict) -> dict:

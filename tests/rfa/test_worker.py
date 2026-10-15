@@ -251,9 +251,11 @@ def test_the_shipped_coder_config_renders_with_the_variables_the_worker_passes(t
         ],
         conventions={"web/agents.md": "Never use default exports."},
         skills=["ui-ux-pro-max"],
+        approved=[{"id": "tests.test_a::test_dup", "checks": "Duplicate makes exactly one copy"}],
     )
     prompt = agent.messages[1]["content"]
     assert "execution packet" in agent.messages[0]["content"]
+    assert "- `tests.test_a::test_dup` -- Duplicate makes exactly one copy" in prompt and "do not change them" in prompt
     assert "240 steps, counted from your first edit" in prompt
     assert "echo checks-ran" in prompt and "/work/repos/web" in prompt
     assert "already failing" in prompt and "pnpm typecheck" in prompt

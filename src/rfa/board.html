@@ -346,6 +346,22 @@ button.action.quiet { background: transparent; color: var(--text-2); padding-lef
 .md code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; }
 .md .hint { color: var(--text-3); font-size: 13px; font-style: italic; }
 
+/* The tests written ahead of the code: what each one checks, in words, then the code itself. */
+.wt-list { list-style: none; padding: 0; margin: 0 0 14px; display: flex; flex-direction: column; gap: 8px; }
+.md .wt-list li { margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.wt-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.wt-head code { font-weight: 600; }
+.wt-state { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }
+.wt-state.green { color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); }
+.wt-crit { font-size: 11.5px; color: var(--text-3); }
+.md .wt-list p { margin: 6px 0 0; }
+.wt-list details, .wt-code { margin-top: 6px; }
+.wt-list summary, .wt-code summary { cursor: pointer; font-size: 12px; color: var(--text-2); }
+.md .wt-list pre, .md .wt-code pre { margin: 6px 0 0; font-size: 12px; white-space: pre-wrap; }
+.wt-code .add { color: var(--green); }
+.wt-code .del { color: var(--red); }
+.wt-code .hunk { color: var(--text-3); }
+
 .shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin: 8px 0 0; }
 .shots a { display: block; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--bg); }
 .shots img { display: block; width: 100%; height: 120px; object-fit: cover; object-position: top left; }
@@ -569,8 +585,8 @@ div.rfa-comment { background: color-mix(in srgb, var(--accent) 9%, var(--surface
 
 <script>
 const LABEL = { "under-work": "Under work", "draft": "Draft", "planning": "Planning", "todo": "To do", "review": "Review", "done": "Done" };
-const TONE = { ready: "green", done: "green", built: "amber", shipped: "green", failed: "red", planning: "amber", question: "amber", queued: "", coding: "blue", starting: "blue", todo: "blue", reviewing: "blue" };
-const LIVE = new Set(["planning", "coding", "checking", "starting", "reviewing"]);
+const TONE = { "writing-tests": "amber", ready: "green", done: "green", built: "amber", shipped: "green", failed: "red", planning: "amber", question: "amber", queued: "", coding: "blue", starting: "blue", todo: "blue", reviewing: "blue" };
+const LIVE = new Set(["planning", "writing-tests", "coding", "checking", "starting", "reviewing"]);
 
 let state = { tasks: [], events: [], stages: [], system: null };
 let openId = null;
@@ -579,7 +595,8 @@ let openId = null;
 const GROUPS = {
   draft: [{ key: "sentry", label: "Sentry", test: t => t.sentry }, { key: "others", label: "Others" }],
   planning: [
-    { key: "ready", label: "Ready", test: t => t.status === "ready" },
+    { key: "question", label: "Needs your answer", test: t => t.status === "question" },
+    { key: "ready", label: "Ready for review", test: t => t.status === "ready" },
     { key: "planning", label: "Planning" },
     { key: "queued", label: "Queued", test: t => t.status === "queued" },
     { key: "failed", label: "Failed", test: t => t.status === "failed" },
@@ -744,8 +761,11 @@ function actionsFor(t) {
     ? `<button class="action primary" data-pause="0">Resume</button>`
     : `<button class="action" data-pause="1">${LIVE.has(t.status) ? "Pause run" : "Pause"}</button>`;
   if (t.stage === "draft") return `<button class="action" id="edit-draft">Edit</button>` + move("planning", "Plan", "primary") + archive;
-  if (t.stage === "planning" && t.status === "ready") return `<button class="action" id="edit">Edit</button>` + move("todo", "Approve", "primary") + archive;
-  if (t.stage === "planning" && t.status === "failed") return archive;
+  // Tests are written from the packet, so after an edit they may no longer say what it does: write them again.
+  const retest = t.planned ? `<button class="action" id="retest">Write tests again</button>` : "";
+  if (t.stage === "planning" && t.status === "ready") return `<button class="action" id="edit">Edit</button>` + retest + move("todo", "Approve", "primary") + archive;
+  if (t.stage === "planning" && t.status === "failed") return retest + archive;
+  if (t.stage === "planning" && t.status === "question") return archive;
   if (t.stage === "planning") return pause + archive;
   // The daemon gives up on a card after its last attempt; Retry hands the attempts back. Back to
   // planned keeps the plan and waits for your approval again, instead of throwing it away.
@@ -800,13 +820,13 @@ function showCapture(t = null) {
   start = Object.fromEntries((t?.branches || []).map(b => Object.values(splitRef(b))));
   refs = (t?.context_branches || []).map(splitRef);
   document.getElementById("d-title").textContent = t ? "Edit draft" : "New idea";
-  document.getElementById("d-sub").textContent = t ? t.id : "It lands in Draft. You decide when it gets planned.";
+  document.getElementById("d-sub").textContent = t ? t.id : "It is planned right away, and its tests written first. You review both before any code.";
   document.getElementById("d-body").innerHTML = "";   // nothing typed before carries into this form
   detailId = null;
   if (picked.size) loadBranches(); else drawCapture();
   document.getElementById("d-body").scrollTop = 0;
   document.getElementById("d-actions").innerHTML =
-    `<button class="action primary" id="save">Save draft</button>`
+    `<button class="action primary" id="save">${t ? "Save draft" : "Add and plan"}</button>`
     + (t ? `<button class="action quiet" id="cancel-draft">Cancel</button>` : "")
     + `<span class="hint" style="color:var(--text-3);font-size:12px">⌘↵</span>`;
   openPanel();
@@ -1048,11 +1068,13 @@ function strip() {
     // A card is on it right now: name it and the model the run uses, whatever the gates say.
     const t = sys.running[0];
     if (t.status === "planning") cls = "plan", message = withModel("planning", t);
+    else if (t.status === "writing-tests") cls = "plan", message = withModel("writing tests for", t);
     else if (t.status === "reviewing") cls = "review", message = withModel("reviewing", t);
     else cls = "code", message = withModel("coding", t);
   } else if (sys.next) {
     if (blocked.length) cls = "blocked", message = `daemon: blocked — ${esc(blocked.map(g => g.detail).join("; "))}`;
     else if (sys.next.job === "plan") cls = "plan", message = withModel("planning", sys.next);
+    else if (sys.next.job === "tests") cls = "plan", message = withModel("writing tests for", sys.next);
     else if (sys.next.job === "review") cls = "review", message = withModel("reviewing", sys.next);
     else cls = "code", message = withModel("coding", sys.next);
   } else {
@@ -1497,10 +1519,15 @@ function showDetail(id) {
       ? "Pausing — the run stops before its next model call and the card goes back to its queue."
       : "Paused — the daemon leaves it alone until you <strong>Resume</strong>. A run starts over from the beginning."}</div>`;
   if (t.stage === "draft") head += `<div class="note">A draft. <strong>Edit</strong> changes any part of it; <strong>Plan it</strong> hands it to the planner${t.planned ? ", or <strong>Approve as is</strong> sends this packet straight to the coder" : ""}.</div>`;
-  if (t.status === "queued" && t.stage === "planning" && !t.paused) head += `<div class="note">Waiting for the planner — <code>rfa plan</code></div>`;
+  if (t.status === "queued" && t.stage === "planning" && !t.paused)
+    head += `<div class="note">${t.planned ? "Planned. Waiting to have its tests written" : "Waiting for the planner"} — <code>rfa plan</code></div>`;
+  if (t.status === "writing-tests") head += `<div class="note">Writing the tests from this packet — the <strong>Run log</strong> is not kept for this step; it lands here when done.</div>`;
+  if (t.stage === "planning" && t.status === "ready")
+    head += `<div class="note">Read the packet and the tests written from it. <strong>Approve</strong> sends both to the coder, who codes until the tests pass and may not change them.</div>`;
+  const asking = t.stage === "review" || t.status === "question";
   if ((t.stage === "planning" || t.stage === "review") && t.open_questions?.length)
-    head += t.packet || t.stage === "review"
-      ? `<div class="note"><strong>${t.stage === "review" ? "The reviewer asks" : "Open questions"}</strong> — an answer goes into the packet as a decision${t.stage === "review" ? ", and the last one sends the card back to the reviewer" : ""}.<ul class="oq">${t.open_questions.map((q, i) =>
+    head += t.packet || asking
+      ? `<div class="note"><strong>${t.stage === "review" ? "The reviewer asks" : "Open questions"}</strong> — an answer goes into the packet as a decision${t.stage === "review" ? ", and the last one sends the card back to the reviewer" : t.status === "question" ? ", and the last one sends the card on to have its tests written" : ""}.<ul class="oq">${t.open_questions.map((q, i) =>
           `<li><p>${esc(q)}</p><div class="answer"><textarea rows="1" data-oq="${i}" placeholder="Your answer">${esc(answers.get(`${t.id}\n${q}`) || "")}</textarea>`
           + `<button class="action" data-answer="${i}">Answer</button></div></li>`).join("")}</ul></div>`
       : `<div class="note"><strong>Open questions</strong><ul>${t.open_questions.map(q => `<li>${esc(q)}</li>`).join("")}</ul></div>`;
@@ -1556,7 +1583,7 @@ function showDetail(id) {
         `<button role="tab" data-tab="${key}" aria-selected="${tab === key}">${label}${n ? `<span class="n">${n}</span>` : ""}</button>`).join("")}</div>`
       + top + content();
   } else {
-    html = head + `<div class="md">${md(body)}${gallery(t)}${history}</div>`;
+    html = head + `<div class="md">${md(body)}${testsView(t)}${gallery(t)}${history}</div>`;
   }
   // Redrawing the same thing would close every open diff and the `details` you opened; only a change redraws.
   // Compared by what it is drawn from, not by the html: "3m ago" becoming "4m ago" is no change.
@@ -1584,17 +1611,54 @@ function showDetail(id) {
   panel.querySelectorAll(".pe-list textarea, .oq textarea").forEach(grow);
 }
 
+/** The tests written before any code: what each one checks and why it fails now, then the code, file by file. */
+function testsView(t) {
+  const w = t.written_tests;
+  if (!w) return t.tests_note && t.stage === "planning" ? `<h2>Tests</h2><p class="tests">${esc(t.tests_note)}</p>` : "";
+  const items = (w.tests || []).map(c => `<li><div class="wt-head">`
+      + `<span class="wt-state${c.outcome === "passed" ? " green" : ""}">${c.outcome === "passed" ? "passes now" : "fails now"}</span>`
+      + `<code>${esc(c.name)}</code>${c.criterion ? `<span class="wt-crit">criterion ${esc(c.criterion)}</span>` : ""}</div>`
+      + (c.checks ? `<p>${esc(c.checks)}</p>` : "")
+      + (c.message ? `<details><summary>Why it fails now</summary><pre>${esc(c.message)}</pre></details>` : "")
+      + `</li>`).join("");
+  const code = Object.entries(w.patches || {}).flatMap(([repo, patch]) =>
+    String(patch).split(/^(?=diff --git )/m).filter(c => c.startsWith("diff --git ")).map(chunk => {
+      const path = chunk.match(/^diff --git a\/.+? b\/(.+)$/m)?.[1] || "";
+      const added = /^new file mode/m.test(chunk);
+      const at = chunk.search(/^@@/m);
+      const lines = (at < 0 ? "" : chunk.slice(at)).trimEnd().split("\n").filter(l => !(added && l.startsWith("@@")));
+      // A new file reads as the file; a changed one as its hunks, with what was added and removed marked.
+      const body = lines.map(l => added ? esc(l.slice(1))
+        : l.startsWith("@@") ? `<span class="hunk">${esc(l)}</span>`
+        : `<span class="${l[0] === "+" ? "add" : l[0] === "-" ? "del" : ""}">${esc(l)}</span>`).join("\n");
+      return `<details class="wt-code" open><summary><code>${esc(repo)}/${esc(path)}</code>${added ? " — new" : ""}</summary><pre><code>${body}</code></pre></details>`;
+    })).join("");
+  const red = (w.tests || []).filter(c => c.outcome !== "passed").length;
+  return `<h2>Tests written first</h2>`
+    + `<p class="tests">${w.summary ? `${esc(w.summary)} ` : ""}${(w.tests || []).length} new, ${red} failing now · run by <code>${esc(w.command)}</code></p>`
+    + `<ul class="wt-list">${items}</ul><h2>The test code</h2>${code}`;
+}
+
+async function retest(id) {
+  const res = await api("/api/retest", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }),
+  });
+  if (!res.ok) { alert((await res.json()).error); return; }
+  await refresh();
+}
+
 /** The owner's answer joins the decisions and the question leaves the list, so the packet stands on its own. */
 async function answerQuestion(i) {
   const t = state.tasks.find(x => x.id === openId);
   const q = t.open_questions[i];
   const answer = (answers.get(`${t.id}\n${q}`) || "").trim();
   if (!answer) return document.querySelector(`.oq textarea[data-oq="${i}"]`)?.focus();
-  // The reviewer's questions are answered by the host, which knows where in the packet they go.
-  const res = await api(t.stage === "review" ? "/api/answer" : "/api/edit", {
+  // A question a stage stopped on is answered by the host, which knows where in the packet it goes and what comes next.
+  const asking = t.stage === "review" || t.status === "question";
+  const res = await api(asking ? "/api/answer" : "/api/edit", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(t.stage === "review" ? { id: t.id, index: i, answer } : {
+    body: JSON.stringify(asking ? { id: t.id, index: i, answer } : {
       id: t.id,
       decisions: [...t.packet.decisions, `${answer} -- the owner's answer to: ${q}`],
       open_questions: t.open_questions.filter((_, j) => j !== i),
@@ -1791,6 +1855,7 @@ document.getElementById("d-actions").addEventListener("click", e => {
   }
   if (e.target.closest("#fix") && openId) return fixComments(openId);
   if (e.target.closest("#retry") && openId) return retry(openId);
+  if (e.target.closest("#retest") && openId) return retest(openId);
   if (e.target.closest("#rereview") && openId) return rereview(openId);
   if (e.target.closest("#save")) return saveIdea();
   if (e.target.closest("#cancel-draft")) { const id = drafting; drafting = null; return showDetail(id); }
@@ -1809,7 +1874,7 @@ document.getElementById("d-actions").addEventListener("click", e => {
   const el = e.target.closest("button[data-to]");
   if (el && openId) move(openId, el.dataset.to, el.dataset.status);
 });
-document.getElementById("capture").addEventListener("click", showCapture);
+document.getElementById("capture").addEventListener("click", () => showCapture());
 document.getElementById("analytics").addEventListener("click", showAnalytics);
 document.getElementById("d-body").addEventListener("click", e => {
   const t = state.tasks.find(x => x.id === openId);

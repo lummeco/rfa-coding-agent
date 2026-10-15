@@ -27,7 +27,10 @@ from minisweagent.utils.serialize import recursive_merge
 from rfa import tasks
 
 CONFIG_DIR = Path(__file__).parent / "config"
-STAGES = ("planner", "coder", "reviewer")
+STAGES = ("planner", "tester", "coder", "reviewer")
+# A stage that runs in another's container: the tester writes tests where the coder will run them,
+# so it starts from the coder's packaged and workspace settings and overrides only its own.
+INHERITS = {"tester": "coder"}
 DEFAULTS = CONFIG_DIR / "planner.yaml"
 # What `reasoning:` may say. litellm turns this into Ollama's `think`, so for a Qwen it is really
 # on or off -- only the graded models (gpt-oss) tell the three levels apart. See `model_config`.
@@ -39,14 +42,15 @@ def path() -> Path:
 
 
 def load(stage: str = "planner") -> dict:
-    packaged = yaml.safe_load((CONFIG_DIR / f"{stage}.yaml").read_text())
+    chain = [s for s in (INHERITS.get(stage), stage) if s]
+    packaged = recursive_merge(*(yaml.safe_load((CONFIG_DIR / f"{s}.yaml").read_text()) for s in chain))
     if not path().exists():
         return packaged
     mine = yaml.safe_load(path().read_text()) or {}
-    for_stage = mine.pop(stage, None) or {}
+    for_stage = [mine.pop(s, None) or {} for s in chain]
     for other in STAGES:
         mine.pop(other, None)
-    return recursive_merge(packaged, mine, for_stage)
+    return recursive_merge(packaged, mine, *for_stage)
 
 
 MAX_CONTEXT = 3

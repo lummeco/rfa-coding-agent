@@ -167,20 +167,22 @@ def new(
     plan_model: str = typer.Option("", "-M", "--plan-model", help="Plan this card with a particular model"),
     plan_reasoning: str = typer.Option("", "--plan-reasoning", help="none | low | medium | high, for planning"),
 ):
-    """Capture an idea as a draft."""
+    """Capture an idea. With a repository it goes straight to planning; without one it waits as a draft."""
     settings.validate(settings.load(), model, reasoning)
     settings.validate(settings.load(), plan_model, plan_reasoning)
-    task = tasks.create(
-        idea,
-        list(repo),
-        branches=list(branch) or None,
-        context_branches=list(context)[: settings.MAX_CONTEXT] or None,
-        plan_model=plan_model or None,
-        plan_reasoning=plan_reasoning or None,
-        model=model or None,
-        reasoning=reasoning or None,
+    task = tasks.plan_now(
+        tasks.create(
+            idea,
+            list(repo),
+            branches=list(branch) or None,
+            context_branches=list(context)[: settings.MAX_CONTEXT] or None,
+            plan_model=plan_model or None,
+            plan_reasoning=plan_reasoning or None,
+            model=model or None,
+            reasoning=reasoning or None,
+        )
     )
-    console.print(f"[bold green]Draft[/] {task.id}")
+    console.print(f"[bold green]{'Planning' if task.stage == 'planning' else 'Draft'}[/] {task.id}")
 
 
 @app.command()
@@ -232,17 +234,25 @@ def plan(
     model: str = typer.Option("", "-m", "--model", help="A name from `models:` in rfa.yaml"),
     reasoning: str = typer.Option("", "-R", "--reasoning", help="none | low | medium | high"),
 ):
-    """Write execution packets for the cards you moved into planning."""
-    config = settings.load("planner")
+    """Write the execution packet, then the tests from it, for cards waiting in planning."""
+    from rfa.daemon import planning_job
+    from rfa.tester import write_tests
+
     targets = [tasks.find(i) for i in ids] if ids else [t for t in tasks.tasks("planning") if t.status == "queued"]
     if not targets:
         console.print("[dim]Nothing waiting. Move a draft in first: `rfa mv <id> planning`[/]")
         return
     for task in targets:
-        console.print(f"[bold]Planning[/] {task.id}")
-        planned = plan_task(task, config, model, reasoning)
-        style = "green" if planned.status == "ready" else "red"
-        console.print(f"  [{style}]{planned.status}[/] {planned.title}")
+        if planning_job(task) == "plan":
+            console.print(f"[bold]Planning[/] {task.id}")
+            task = plan_task(task, settings.load("planner"), model, reasoning)
+        if task.status == "queued":
+            console.print(f"[bold]Writing tests[/] {task.id}")
+            task = write_tests(task, settings.load("tester"), model, reasoning)
+        style = {"ready": "green", "question": "yellow"}.get(task.status, "red")
+        console.print(f"  [{style}]{task.status}[/] {task.title}")
+        for asked in task.meta.get("open_questions") or [] if task.status == "question" else []:
+            console.print(f"  • {asked}")
 
 
 @app.command()

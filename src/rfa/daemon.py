@@ -1,6 +1,7 @@
 """`rfa daemon`: the loop that pulls cards into the planner, the coder and the reviewer on its own.
 
 It is the three commands you would type -- `rfa plan`, `rfa work` and `rfa review` -- on a timer.
+`rfa plan` is two runs on one card: the packet, then the tests written from it before any code.
 Anything it does you can still do by hand, and stopping it stops nothing else. What it adds is the
 gates: a laptop on a draining battery or short of memory should not start a container, and two runs
 must never overlap, because every stage drives the same local model and two agent calls at once
@@ -66,7 +67,7 @@ def running() -> list[Task]:
     """Cards with a run on them right now: anything in under-work, and a card an agent holds."""
     return (
         tasks.tasks("under-work")
-        + [t for t in tasks.tasks("planning") if t.status == "planning"]
+        + [t for t in tasks.tasks("planning") if t.status in ("planning", "writing-tests")]
         + [t for t in tasks.tasks("review") if t.status == "reviewing"]
     )
 
@@ -83,7 +84,9 @@ def reclaim() -> list[str]:
         tasks.move(t, "todo", actor="worker", status="todo", error="interrupted").id
         for t in tasks.tasks("under-work")
     ]
-    reclaimed += [tasks.save(t, status="queued").id for t in tasks.tasks("planning") if t.status == "planning"]
+    reclaimed += [
+        tasks.save(t, status="queued").id for t in tasks.tasks("planning") if t.status in ("planning", "writing-tests")
+    ]
     reclaimed += [tasks.save(t, status="queued").id for t in tasks.tasks("review") if t.status == "reviewing"]
     for id in reclaimed:
         tasks.log(type="reclaimed", id=id)
@@ -97,6 +100,14 @@ def reviewable(task: Task) -> bool:
     leave that card alone rather than pick it up every fifteen seconds to fail on it again.
     """
     return bool(task.meta.get("landed"))
+
+
+def planning_job(task: Task) -> str:
+    """What a queued planning card waits for: its packet, or the tests written from the packet it has.
+
+    A card with tests already written that is queued again -- dragged back into planning -- is
+    planned again from the start, as it always was."""
+    return "tests" if task.meta.get("planned_at") and not task.meta.get("tests_at") else "plan"
 
 
 def next_job(config: DaemonConfig) -> tuple[str, Task] | None:
@@ -119,11 +130,13 @@ def next_job(config: DaemonConfig) -> tuple[str, Task] | None:
     reviews = [t for t in live["review"] if t.status == "queued" and reviewable(t)] if config.review else []
     if reviews:
         return "review", reviews[0]
+    # Tests for a packet you have already seen come before a new packet: that card is nearly in front of you.
     plans = [t for t in live["planning"] if t.status == "queued"] if config.plan else []
+    plans.sort(key=lambda t: planning_job(t) != "tests")
     work = [t for t in live["todo"] if t.attempts < config.max_attempts] if config.work else []
     waiting = len(live["todo"]) + sum(t.status == "ready" for t in live["planning"])
     if plans and (not work or waiting < config.plan_ahead):
-        return "plan", plans[0]
+        return planning_job(plans[0]), plans[0]
     return ("work", work[0]) if work else None
 
 
@@ -132,12 +145,15 @@ def run(job: tuple[str, Task], config: DaemonConfig) -> None:
     # `rfa status` import this module only to ask what it would do next.
     from rfa.planner import plan_task
     from rfa.reviewer import review_task
+    from rfa.tester import write_tests
     from rfa.worker import run_task
 
     kind, task = job
     with gates.KeepAwake(config.keep_awake):
         if kind == "plan":
             plan_task(task, settings.load("planner"))
+        elif kind == "tests":
+            write_tests(task, settings.load("tester"))
         elif kind == "review":
             review_task(task, settings.load("reviewer"))
         else:

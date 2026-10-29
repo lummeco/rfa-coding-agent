@@ -16,6 +16,8 @@ repos:
   lummeco/base: ~/dev/base@main
   lummeco/infra-ops: ~/dev/infra-ops@main
   lummeco/rfa-coding-agent: ~/dev/rfa-coding-agent@main
+  # A local benchmark repository, not on GitHub: the same empty start for every run of the same card.
+  local/tidy: ~/dev/tidy@main
 
 # The apps the reviewer may drive. Every card's code is reviewed; a repository listed here also gets
 # its app driven: once the code review passes, a container comes up at that branch with playwright in
@@ -295,6 +297,13 @@ containers:
     # rfa's own suite. The rest of `tests/` is mini-swe-agent's, and CI runs it with podman,
     # apptainer and API keys a coder container does not have.
     test: python -m pytest tests/rfa -q -p no:cacheprovider --junitxml=$RFA_JUNIT
+
+  local/tidy:
+    image: python:3.11-bookworm
+    setup:
+      - pip install --quiet -e '.[dev]'
+    lint: ruff check --output-format json .
+    test: python -m pytest tests -q -p no:cacheprovider --junitxml=$RFA_JUNIT
 
 # Skills: folders under `skills/` here, each with a SKILL.md. rfa's own copies: nothing is read from
 # `~/.claude`, `~/.agents` or any other agent's skill folders, and a run sees them at

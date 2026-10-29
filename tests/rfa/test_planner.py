@@ -190,3 +190,25 @@ def test_the_planner_refuses_a_card_the_human_has_not_moved_into_planning(tmp_pa
     tasks.init()
     with pytest.raises(ValueError, match="move it to `planning` first"):
         plan_task(tasks.create("an idea"), {})
+
+
+def test_a_packet_still_rejected_after_the_last_attempt_is_no_plan(tmp_path):
+    """Valid JSON aimed at a repository that is not there must not come back as the card's packet."""
+    lost = PACKET | {"files": [{"path": "tidy/src/tidy/cli.py", "why": "a repository nobody has"}]}
+    turns = [write(lost, tmp_path / "packet.json"), submit()] * 2
+    agent = run_planner(turns, tmp_path, attempts=2)
+    assert agent.messages[-1]["extra"]["exit_status"] == "PacketRejected" and agent.packet is None
+    assert "paths must start with a repository name" in agent.messages[-1]["content"]
+
+
+def test_a_card_with_no_repository_fails_on_the_card_instead_of_stopping_the_daemon(tmp_path, monkeypatch):
+    from rfa import tasks
+    from rfa.planner import NO_REPOS, plan_task
+    from rfa.tester import write_tests
+
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    tasks.init()
+    task = tasks.move(tasks.create("build tidy"), "planning")
+    assert (plan_task(task, {}).status, task.meta["error"]) == ("failed", NO_REPOS)
+    tasks.save(task, status="queued", planned_at=tasks.now(), error=None)
+    assert (write_tests(tasks.find(task.id), {}).status, tasks.find(task.id).meta["error"]) == ("failed", NO_REPOS)

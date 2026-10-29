@@ -30,6 +30,10 @@ from rfa.tasks import Task
 REPOS_DIR = "/work/repos"
 REFERENCE_DIR = "/work/reference"
 SKILLS_DIR = "/work/skills"
+NO_REPOS = (
+    "This card names no repository, so there is nothing to plan, test or code it in. Pick one on the "
+    "card (`repos:`), or for a new tool, create its repository first and list it under `repos:` in rfa.yaml."
+)
 RETRY_NOTE = (
     "The host rejected the packet you wrote:\n\n{problems}\n\n"
     "Read whatever you need to settle these, write the corrected packet to {path}, and submit again."
@@ -105,10 +109,13 @@ class PlannerAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
         except json.JSONDecodeError as e:
             return [f"`{self.config.packet_path}` is not valid JSON: {e}."]
         try:
-            self.packet = Packet.model_validate(data)
+            packet = Packet.model_validate(data)
         except ValidationError as e:
             return [f"`{self.config.packet_path}` does not match the schema: {_errors(e)}"]
-        return problems(self.packet, self.repo_files, self.n_actions, self.config.min_tool_calls)
+        # Only a packet the host accepts is kept: one still rejected after the last attempt is no plan.
+        if not (found := problems(packet, self.repo_files, self.n_actions, self.config.min_tool_calls)):
+            self.packet = packet
+        return found
 
 
 def _errors(e: ValidationError) -> str:
@@ -384,6 +391,9 @@ def plan_task(task: Task, config: dict, model: str = "", reasoning: str = "") ->
     """
     if task.stage != "planning":
         raise ValueError(f"{task.id} is in `{task.stage}`; move it to `planning` first (rfa mv {task.id} planning)")
+    # A card problem, not the machine's: said on the card, rather than raised for the daemon to retry forever.
+    if not task.meta.get("repos"):
+        return tasks.save(task, status="failed", error=NO_REPOS)
     # A card split before plans the rest from where its finished parts left the branch.
     repos = settings.repo_paths(config, task.meta.get("repos") or [], parts.starts(task))
     reference = settings.reference_paths(config, task.meta)

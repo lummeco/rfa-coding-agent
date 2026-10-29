@@ -18,7 +18,7 @@ import shutil
 from minisweagent.environments import get_environment
 from minisweagent.models import get_model
 from rfa import junit, parts, prepare, settings, tasks
-from rfa.planner import REPOS_DIR, conventions, equip, fetched, pin, seed, tests_dir
+from rfa.planner import NO_REPOS, REPOS_DIR, conventions, equip, fetched, pin, seed, tests_dir
 from rfa.tasks import Task
 from rfa.worker import (
     REASONS,
@@ -163,7 +163,7 @@ def write_tests(task: Task, config: dict, model: str = "", reasoning: str = "") 
     names_full = task.meta.get("repos") or []
     repos = settings.repo_paths(config, names_full, parts.starts(task))
     if not repos:
-        raise ValueError(f"{task.id} names no repositories; add `repos:` to the card")
+        return tasks.save(task, status="failed", error=NO_REPOS)
     names = list(repos)
     output = tests_dir(task.id)
     shutil.rmtree(output, ignore_errors=True)

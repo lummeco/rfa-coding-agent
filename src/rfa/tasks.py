@@ -197,11 +197,10 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def mint_id(text: str, at: datetime | None = None) -> str:
-    """Timestamp and slug. Given the same `at` and text it is the same id, which is what lets a
-    source that may be asked twice -- Sentry, by the daemon and by hand at once -- make one card."""
+def mint_id(text: str) -> str:
+    """Timestamp and slug."""
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:50] or "task"
-    return f"{(at or datetime.now(timezone.utc)).astimezone(timezone.utc):%Y%m%d-%H%M%S}-{slug}"
+    return f"{datetime.now(timezone.utc):%Y%m%d-%H%M%S}-{slug}"
 
 
 @contextlib.contextmanager
@@ -271,13 +270,13 @@ def save(task: Task, **updates) -> Task:
     return task
 
 
-def create(idea: str, repos: list[str] | None = None, at: datetime | None = None, **meta) -> Task:
+def create(idea: str, repos: list[str] | None = None, **meta) -> Task:
     """A new draft, in the shape Capture writes so the two are interchangeable.
 
     Never over an existing card, in any stage: the same id again is the same idea again, and the
     second writer loses rather than the first card.
     """
-    id = mint_id(idea.splitlines()[0] if idea.strip() else "task", at)
+    id = mint_id(idea.splitlines()[0] if idea.strip() else "task")
     if taken := [s for s in STAGES if (stage_dir(s) / f"{id}.md").exists()]:
         raise FileExistsError(f"{id} is already in {taken[0]}")
     task = Task(
@@ -294,7 +293,7 @@ def create(idea: str, repos: list[str] | None = None, at: datetime | None = None
 
 def plan_now(task: Task) -> Task:
     """An idea you add goes straight to the planner. One naming no repository stays a draft: there is
-    nothing to plan it against until you pick one. Sentry's captures are drafts and are left there."""
+    nothing to plan it against until you pick one."""
     return move(task, "planning") if task.meta.get("repos") else task
 
 

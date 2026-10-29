@@ -112,7 +112,6 @@ def snapshot() -> dict:
                 "attempts": task.attempts,
                 "archived": task.archived,
                 "paused": task.paused,
-                "sentry": bool(task.meta.get("sentry")),
                 "verdict": task.meta.get("verdict"),
                 "given_title": task.meta.get("title"),
                 "checks": task.meta.get("checks") or [],

@@ -596,7 +596,6 @@ let openId = null;
 // Sub-groups inside a column, in the order drawn. The one without a test takes whatever the others
 // do not; every column also ends in an Archived group. Only archived starts closed.
 const GROUPS = {
-  draft: [{ key: "sentry", label: "Sentry", test: t => t.sentry }, { key: "others", label: "Others" }],
   planning: [
     { key: "question", label: "Needs your answer", test: t => t.status === "question" },
     { key: "ready", label: "Ready for review", test: t => t.status === "ready" },

@@ -17,7 +17,7 @@ import shutil
 
 from minisweagent.environments import get_environment
 from minisweagent.models import get_model
-from rfa import junit, prepare, settings, tasks
+from rfa import junit, parts, prepare, settings, tasks
 from rfa.planner import REPOS_DIR, conventions, equip, fetched, pin, seed, tests_dir
 from rfa.tasks import Task
 from rfa.worker import (
@@ -46,6 +46,12 @@ NO_REPORT = (
     "The repository's `test:` command wrote no JUnit report before any test was written, so no test "
     "could be judged. It must write one to `$RFA_JUNIT`; fix `test:` in rfa.yaml and plan the card again."
     "\n\n{output}"
+)
+
+
+SPLIT = (
+    "Built in {n} parts, so there are no tests for the card as a whole: each part's are written when its "
+    "turn comes, from the branch the parts before it left."
 )
 
 
@@ -142,10 +148,20 @@ def write_tests(task: Task, config: dict, model: str = "", reasoning: str = "") 
     With the planning model: the tests are the packet made exact, which is the planner's kind of work.
     A repository with no `test:` gets no tests -- the host could not run them -- and the card says so.
     """
-    if task.stage != "planning":
-        raise ValueError(f"{task.id} is in `{task.stage}`; tests are written for a planning card")
+    part = bool(task.meta.get("parent"))
+    if task.stage != ("todo" if part else "planning"):
+        raise ValueError(f"{task.id} is in `{task.stage}`; tests are written for a planning card, or a part in todo")
+    # A split card has no tests of its own: each part's are written when its turn comes, from the
+    # branch the parts before it left. Waiting for you is what is left.
+    if task.meta.get("split"):
+        tasks.log(type="tests_skipped", id=task.id)
+        note = SPLIT.format(n=len(task.meta["split"]))
+        return tasks.save(task, status="ready", tests_at=tasks.now(), tests_note=note, error=None)
+    # A part's turn has come: the tests are written now and it goes straight on to the coder, since you
+    # approved it with its card. Planning cards wait as `ready` for you to read them.
+    written_status = "todo" if part else "ready"
     names_full = task.meta.get("repos") or []
-    repos = settings.repo_paths(config, names_full, settings.start_branches(task.meta))
+    repos = settings.repo_paths(config, names_full, parts.starts(task))
     if not repos:
         raise ValueError(f"{task.id} names no repositories; add `repos:` to the card")
     names = list(repos)
@@ -156,7 +172,11 @@ def write_tests(task: Task, config: dict, model: str = "", reasoning: str = "") 
     if not (test := spec.get("test") or ""):
         tasks.log(type="tests_skipped", id=task.id)
         return tasks.save(
-            task, status="ready", tests_at=tasks.now(), tests_note=NO_TEST_COMMAND.format(repo=names[0]), error=None
+            task,
+            status=written_status,
+            tests_at=tasks.now(),
+            tests_note=NO_TEST_COMMAND.format(repo=names[0]),
+            error=None,
         )
 
     chosen, level = settings.for_task(config, task.meta, model, reasoning, prefix="plan_")
@@ -232,4 +252,4 @@ def write_tests(task: Task, config: dict, model: str = "", reasoning: str = "") 
         (output / f"{name}.patch").write_text(patch)
     (output / "tests.json").write_text(json.dumps(describe(agent, written, names[0]), indent=2))
     tasks.log(type="tests_written", id=task.id, tests=len(added(agent.tests, agent.test_baseline)))
-    return tasks.save(task, status="ready", tests_at=tasks.now(), offline=offline, error=None)
+    return tasks.save(task, status=written_status, tests_at=tasks.now(), offline=offline, error=None)

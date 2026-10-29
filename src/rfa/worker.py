@@ -18,7 +18,7 @@ from minisweagent.environments import get_environment
 from minisweagent.exceptions import FormatError, LimitsExceeded, Submitted
 from minisweagent.models import get_model
 from minisweagent.utils.serialize import recursive_merge
-from rfa import junit, lint, prepare, rounds, settings, tasks
+from rfa import junit, lint, parts, prepare, rounds, settings, tasks
 from rfa.packet import FORBIDDEN_PATHS
 from rfa.planner import REPOS_DIR, approved_tests, conventions, equip, fetched, git, pin, seed, test_notes
 from rfa.tasks import Task
@@ -47,6 +47,30 @@ TOUCHED_TESTS = (
     "You changed tests the owner approved before any code was written: {paths}. They are the spec, "
     "not part of the work. Put them back (`git checkout HEAD -- <file>`) and make the code pass them instead."
 )
+
+RESET_ASK = (
+    "\n\n[{used} of the model's {window} tokens of context are used. The host is about to clear this "
+    "conversation and start you again from the packet, with your changes in the repositories as they are. "
+    "With your next command, and nothing else, write `{path}` as JSON: "
+    '{{"done": "what is finished", "left": "what is still to do", "notes": "what the code does not show: '
+    'the failing check, dead ends, decisions you took"}}. It is all you will remember of this conversation.]'
+)
+
+RESUMED = """
+
+## Where you left off
+
+This run was restarted to free up context. Your changes are still in the repositories; `git diff` shows
+them. The steps since your first edit keep counting. Before the restart you wrote:
+
+{note}
+
+What `git status --short` says you have changed:
+
+```
+{status}
+```
+{checks}"""
 
 STALE_TESTS = (
     "The tests approved with the packet no longer apply to `{repo}` where this run starts, so the run "
@@ -97,6 +121,13 @@ class CoderConfig(AgentConfig):
     junit_path: str = JUNIT
     """Where the repository's `test:` command writes its report, handed to it as `$RFA_JUNIT`."""
     test_timeout: int = 1800
+    reset_at: float = 0.6
+    """The share of the window past which the conversation is cleared and the coder starts again from
+    the packet and its own note. A long context is worse long before it is full."""
+    max_resets: int = 2
+    """After this many, the window is left to fill and `wrap_up_at` is what ends the run."""
+    progress_path: str = "/work/progress.json"
+    """Where the coder leaves its note before a reset. Outside the repositories, so never part of the diff."""
 
 
 class CoderAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
@@ -138,6 +169,8 @@ class CoderAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
         self.round = 0
         self.prompt_tokens = 0
         self.edited_at: int | None = None
+        self.segments: list[list[dict]] = []
+        self.resetting = False
         # mini counts from the first call; the budget here counts from the first edit, in `query`.
         self.budget, self.config.step_limit = self.config.step_limit, 0
 
@@ -281,7 +314,44 @@ class CoderAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
             )
         if self.edited_at is None and self.edited():
             self.edited_at = self.n_calls
+        if self.resetting:
+            return self.reset()
+        if self.reset_due() and observations and isinstance(observations[-1].get("content"), str):
+            self.resetting = True
+            observations[-1]["content"] += RESET_ASK.format(
+                used=self.prompt_tokens, window=self.config.context_window, path=self.config.progress_path
+            )
+            return observations
         return self.warn(observations)
+
+    def reset_due(self) -> bool:
+        window = self.config.context_window
+        return len(self.segments) < self.config.max_resets and 0 < window * self.config.reset_at <= self.prompt_tokens
+
+    def reset(self) -> list[dict]:
+        """Start the conversation again from the packet, with the note the coder left in place of the rest.
+
+        The work is in the repositories, not in the messages: what is lost is the reading and the dead
+        ends, and the note is the coder's own account of those. The old messages stay in the trajectory.
+        """
+        note = self.env.execute({"command": f"cat {self.config.progress_path}"})
+        status = self.env.execute(
+            {"command": f'for d in {self.root}/*/; do git -C "$d" status --short | sed "s|^|$(basename "$d") |"; done'}
+        )
+        failed = report(self.regressions()) if self.round else ""
+        resumed = RESUMED.format(
+            note=note["output"].strip() if note["returncode"] == 0 else "(no note was written)",
+            status=status["output"].strip()[:3000] or "nothing",
+            checks=f"\nWhat the checks said on your last submit:\n\n```\n{failed[:3000]}\n```\n" if failed else "",
+        )
+        system, instance = self.messages[:2]
+        self.segments.append(self.messages)
+        self.messages = [system, instance | {"content": instance["content"] + resumed}]
+        self.resetting, self.prompt_tokens = False, 0
+        return []
+
+    def serialize(self, *extra_dicts) -> dict:
+        return super().serialize({"segments": self.segments}, *extra_dicts)
 
     def run_checks(self) -> list[dict]:
         self.changed = changed_paths(self.env, self.root)
@@ -520,11 +590,15 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
     """
     if task.stage != "todo":
         raise ValueError(f"{task.id} is in `{task.stage}`, not `todo`")
-    repos = settings.repo_paths(config, task.meta.get("repos") or [], settings.start_branches(task.meta))
+    if task.meta.get("split") and not parts.finished(task):
+        raise ValueError(f"{task.id} is built in parts; its parts are coded, not the card itself")
+    repos = settings.repo_paths(config, task.meta.get("repos") or [], parts.starts(task))
     if not repos:
         raise ValueError(f"{task.id} names no repositories; add `repos:` to the card")
     names = list(repos)
     before = task.meta.get("landed") or {}
+    # A part's first round lands on its card's branch wherever an earlier part already started it.
+    joining = (owner.meta.get("landed") or {}) if (owner := parts.parent(task)) else {}
     # A fix round starts from a branch that already holds them; the first round starts from the tests alone.
     approved = {} if before else approved_tests(task.id)
     state = rounds.view(task)
@@ -625,6 +699,7 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
             conventions=conventions(repos),
             skills=sorted(skills),
             approved=(test_notes(task.id) or {}).get("tests") if approved else None,
+            earlier=parts.handoff(task, config),
         )
         patches, dropped = diffs(env, names)
         written = agent.summary()
@@ -673,13 +748,17 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         message = f"{task.title} (round {n + 1})" if before else task.title
         for name, (repo, ref) in repos.items():
             if name in patches:
-                branch = before.get(name) or f"rfa/{task.id}"
-                landed[name] = land(repo, ref, branch, output / f"{name}.patch", message, onto=name in before)
+                branch = before.get(name) or joining.get(name) or parts.branch(task)
+                onto = name in before or name in joining
+                landed[name] = land(repo, ref, branch, output / f"{name}.patch", message, onto=onto)
                 commits[name] = {
                     "branch": landed[name],
                     "base": ref,
                     "head": git(repo, "rev-parse", landed[name]).strip(),
                 }
+    if shipped and (owner := parts.parent(task)):
+        tasks.save(owner, landed={**(owner.meta.get("landed") or {}), **landed})
+        parts.note(task, written)
     answers = written.get("answers") if isinstance(written.get("answers"), dict) else {}
     rounds.record(
         task.id,

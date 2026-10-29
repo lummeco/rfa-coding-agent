@@ -114,3 +114,44 @@ def test_problems_rejects_a_packet_written_without_reading_the_code():
 )
 def test_an_answer_joins_the_decisions_wherever_the_body_keeps_them(body, expected):
     assert add_decision(body, " Ask first. ").endswith(expected)
+
+
+def part(n: int, **overrides) -> dict:
+    return {
+        "title": f"Part {n}",
+        "goal": f"Step {n} is in.",
+        "acceptance_criteria": [f"Step {n} can be seen."],
+        "files": [{"path": "invoicing/src/editor/LineRow.tsx", "why": "the row"}],
+        "complexity": 2,
+        **overrides,
+    }
+
+
+@pytest.mark.parametrize(
+    ("overrides", "complaint"),
+    [
+        ({"complexity": 3}, "complexity 3: too much for one coding run"),
+        (
+            {"files": [{"path": "invoicing/src/editor/LineRow.tsx", "why": "x"}, {"path": "api/x.py", "why": "y"}]},
+            "files in 2 repositories",
+        ),
+        ({"complexity": 3, "parts": [part(1)]}, "1 parts; a split has 2 to 6"),
+        ({"complexity": 4, "parts": [part(1), part(2, complexity=3)]}, "Part 2 is complexity 3"),
+        ({"complexity": 3, "parts": [part(1), part(2, acceptance_criteria=["a", "b", "c", "d"])]}, "keep 3"),
+        (
+            {"complexity": 3, "parts": [part(1), part(2, files=[{"path": "invoicing/nowhere/x.ts", "why": "x"}])]},
+            "`invoicing/nowhere/x.ts` does not exist",
+        ),
+    ],
+)
+def test_problems_sends_a_packet_too_big_for_one_run_back_to_be_split(overrides, complaint):
+    repos = REPO_FILES | {"api": {"x.py"}}
+    assert any(complaint in p for p in problems(packet(**overrides), repos, tool_calls=9, min_tool_calls=3))
+
+
+def test_a_packet_split_into_small_parts_passes_and_renders_its_parts_for_the_owner():
+    p = packet(complexity=4, parts=[part(1), part(2)])
+    assert problems(p, REPO_FILES, tool_calls=9, min_tool_calls=3) == []
+    body = p.render()
+    assert "## Parts\n1. **Part 1** -- Step 1 is in.\n   - Step 1 can be seen.\n2. **Part 2**" in body
+    assert parse("\n" + body)["acceptance_criteria"] == p.acceptance_criteria

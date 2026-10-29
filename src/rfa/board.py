@@ -27,7 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from rfa import daemon, github, packet, rounds, settings, tasks
+from rfa import daemon, github, packet, parts, rounds, settings, tasks
 from rfa.planner import test_notes, tests_dir
 
 PAGE = Path(__file__).parent / "board.html"
@@ -100,6 +100,7 @@ def full_diff(id: str) -> dict:
 def snapshot() -> dict:
     """Everything the page draws, in one request."""
     configured = settings.load().get("repos") or {}
+    everything = tasks.tasks()
     return {
         "stages": list(tasks.STAGES),
         "tasks": [
@@ -139,8 +140,16 @@ def snapshot() -> dict:
                 "packet": (plan := planned_packet(task)),
                 # A ready plan reads exactly as the editor will save it, older sections folded in.
                 "body": render_packet(task, plan) if plan else task.body,
+                "parent": task.meta.get("parent"),
+                "part": task.meta.get("part"),
+                "parts": [
+                    {"id": k.id, "part": k.meta.get("part"), "title": k.title, "stage": k.stage, "status": k.status}
+                    for k in parts.children(task, everything)
+                ],
+                "split": len(task.meta.get("split") or []),
+                "blocked": parts.blocked(task, everything),
             }
-            for task in tasks.tasks()
+            for task in everything
         ],
         "events": tasks.events()[-500:],
         "repos": sorted(configured),
@@ -387,7 +396,8 @@ def rendered_packet(task: tasks.Task, payload: dict) -> str:
 def render_packet(task: tasks.Task, fields: dict) -> str:
     complexity = task.meta.get("complexity") or 3
     reason = task.meta.get("complexity_reason") or ""
-    return "\n" + packet.Packet(**fields, complexity=complexity, complexity_reason=reason).render()
+    split = task.meta.get("split") or []
+    return "\n" + packet.Packet(**fields, complexity=complexity, complexity_reason=reason, parts=split).render()
 
 
 def fix(id: str) -> tasks.Task:

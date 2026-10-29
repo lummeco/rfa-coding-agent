@@ -133,6 +133,33 @@ agent:
       4. unfamiliar ground: an unknown cause, no pattern to copy, subtle state or data handling
       5. architecture, cross-cutting refactors, concurrency, transactions, security or auth
 
+    ## 5. Split what one coding run cannot do
+
+    A packet of complexity 3 or more, or one whose files are in more than one repository, is too much
+    for one coding run, and the host sends it back without `parts`. Split it into 2 to 6 parts, in the
+    order they must be built. Each part is coded and reviewed on its own, starting from the branch the
+    part before it left, so a later part can rely on everything an earlier one built.
+
+    - Each part changes one repository and is complexity 1 or 2: a step a coder finishes in one sitting.
+    - Each part stands on its own: when it is done the code builds and the tests pass, with nothing
+      left half-made for the next part to finish.
+    - Build from the bottom up: the data and its migration, then what serves it, then what shows it.
+    - A part has a `title`, a `goal` (what is true once it is done), at most 3 `acceptance_criteria`
+      a test can check, its `files`, and its `complexity`.
+
+    The packet's own goal, current behavior, decisions and acceptance criteria are about the whole
+    work and stay as they are: every part is held to the decisions, and the whole is judged by the
+    criteria once the last part is in.
+    {% if progress %}
+
+    ## Already built
+
+    This card was split before, and these parts are already coded and reviewed. Their work is in the
+    repositories you are reading. Plan only what is still to do, starting from there:
+
+    {{progress}}
+    {% endif %}
+
     ## Output
 
     Write the packet as JSON to `{{packet_path}}` (the folder already exists), then submit. Nothing else leaves this container.
@@ -142,7 +169,11 @@ agent:
     {% raw %}{ "title": "...", "goal": "...", "current_behavior": "...",
       "decisions": ["..."], "acceptance_criteria": ["..."],
       "files": [{ "path": "<repo>/<path>", "why": "..." }],
-      "open_questions": ["..."], "complexity": 2, "complexity_reason": "..." }{% endraw %}
+      "open_questions": ["..."], "complexity": 2, "complexity_reason": "...",
+      "parts": [{ "title": "...", "goal": "...", "acceptance_criteria": ["..."],
+                  "files": [{ "path": "<repo>/<path>", "why": "..." }], "complexity": 2 }] }{% endraw %}
+
+    Leave `parts` out, or empty, for work one coding run can do.
     PACKET_EOF
     ```
 

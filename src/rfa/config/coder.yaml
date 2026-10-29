@@ -27,6 +27,12 @@ agent:
 
     {{task}}
 
+    {% if earlier %}
+    ## This is one part of a larger card
+
+    {{earlier}}
+
+    {% endif %}
     ## Where things are
 
     The repositories are at `/work/repos/`: {{repo_list}}. Each one is a git repository whose only
@@ -111,7 +117,7 @@ agent:
     ## Before you submit
 
     Write `{{summary_path}}` -- outside the repositories, so it is not part of the diff -- as JSON:
-    `{"summary": "one or two sentences on what you changed"{% if comments %}, "answers": {"1": "how you fixed comment 1", ...}{% endif %}}`.
+    `{"summary": "one or two sentences on what you changed"{% if earlier %}, "notes": "what the parts after this one should know: decisions you took, what surprised you"{% endif %}{% if comments %}, "answers": {"1": "how you fixed comment 1", ...}{% endif %}}`.
     This is what the card shows for your round{% if comments %}, and every comment needs its answer{% endif %}.
 
     {% if checks or test or lint %}

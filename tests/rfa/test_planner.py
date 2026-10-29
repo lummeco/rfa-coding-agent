@@ -61,6 +61,7 @@ def run_planner(outputs: list[dict], tmp_path, **config) -> PlannerAgent:
         repo_map="invoicing/src/LineRow.tsx",
         reference=[],
         conventions={"invoicing/docs/agents.md": "Never use default exports."},
+        progress="",
     )
     return agent
 

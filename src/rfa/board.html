@@ -245,6 +245,8 @@ button.action.quiet { background: transparent; color: var(--text-2); padding-lef
   color: var(--text-2);
   margin-bottom: 18px;
 }
+.note ol.parts { margin: 6px 0 0; padding-left: 20px; }
+.note ol.parts .dim { opacity: .7; font-size: 12px; }
 .note.bad { color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }
 
 #idea {
@@ -588,7 +590,7 @@ div.rfa-comment { background: color-mix(in srgb, var(--accent) 9%, var(--surface
 
 <script>
 const LABEL = { "under-work": "Under work", "draft": "Draft", "planning": "Planning", "todo": "To do", "review": "Review", "done": "Done" };
-const TONE = { "writing-tests": "amber", ready: "green", done: "green", built: "amber", shipped: "green", failed: "red", planning: "amber", question: "amber", queued: "", coding: "blue", starting: "blue", todo: "blue", reviewing: "blue" };
+const TONE = { parts: "blue", "writing-tests": "amber", ready: "green", done: "green", built: "amber", shipped: "green", failed: "red", planning: "amber", question: "amber", queued: "", coding: "blue", starting: "blue", todo: "blue", reviewing: "blue" };
 const LIVE = new Set(["planning", "writing-tests", "coding", "checking", "starting", "reviewing"]);
 
 let state = { tasks: [], events: [], stages: [], system: null };
@@ -704,6 +706,7 @@ function card(t) {
         ${t.attempts ? `<span class="retry" title="${t.attempts} retries">↻ ${t.attempts}</span>` : ""}
         ${t.booted ? `<span class="boot${t.booted.ok ? "" : " no"}" title="${esc(t.booted.repo)} ${t.booted.ok ? "started and answered on its port" : "would not start"} at the landed branch, ${esc(when(t.booted.at))}">${t.booted.ok ? "✓ boots" : "✗ won't boot"}</span>` : ""}
         ${t.paused ? `<span class="retry held">${LIVE.has(t.status) ? "pausing…" : "⏸ paused"}</span>` : ""}
+        ${t.parts.length ? `<span class="retry${t.blocked ? " held" : ""}" title="${esc(t.blocked || "parts that passed review")}">▤ ${t.parts.filter(p => p.stage === "done" && ["built", "shipped"].includes(p.status)).length}/${t.parts.length}</span>` : t.split ? `<span class="retry" title="approving makes these parts">▤ ${t.split} parts</span>` : ""}
         ${t.repos.length ? `<span class="repo">${esc(t.repos.map(r => r.split("/").pop()).join(", "))}</span>` : ""}
         ${dots}
       </div>
@@ -740,7 +743,8 @@ function render() {
   document.getElementById("count").textContent =
     visible.length ? `${visible.length} task${visible.length > 1 ? "s" : ""}` : "";
   const html = state.stages.map(stage => {
-    const inStage = state.tasks.filter(t => t.stage === stage);
+    // A part is drawn inside its card, not as a card of its own: the card is the piece of work.
+    const inStage = state.tasks.filter(t => t.stage === stage && !t.parent);
     return `<section class="column" data-stage="${esc(stage)}">
       <h2>${esc(LABEL[stage] || stage)}<span class="n">${inStage.filter(t => !t.archived).length}</span></h2>
       <div class="cards">${groupsOf(stage, inStage).map(g => group(stage, g)).join("") || `<div class="empty">Nothing here</div>`}</div>
@@ -1493,7 +1497,13 @@ function showDetail(id) {
   const from = (t.branches || []).map(b => b.split("@")[1]).join(", ");
   const reading = (t.context_branches || []).map(b => b.split("/").pop()).join(", ");
 
-  let head = "";
+  const owner = t.parent && state.tasks.find(x => x.id === t.parent);
+  const partsNote = (t.parts.length
+    ? `<div class="note${t.blocked ? " bad" : ""}"><strong>Built in parts</strong>${t.blocked ? ` — stuck: ${esc(t.blocked)}` : ""}<ol class="parts">${t.parts.map(p =>
+        `<li><a href="#" data-open="${esc(p.id)}">${esc(p.title)}</a> <span class="dim">${esc(LABEL[p.stage] || p.stage)} · ${esc(p.status)}</span></li>`).join("")}</ol></div>`
+    : t.split ? `<div class="note">Split into ${t.split} parts, listed under the packet. <strong>Approve</strong> approves them all: each is coded in turn on one branch, and this card is reviewed once the last one passes.</div>` : "")
+    + (owner ? `<div class="note">Part ${esc(t.part)} of <a href="#" data-open="${esc(owner.id)}">${esc(owner.title)}</a></div>` : "");
+  let head = partsNote;
   if (t.error) head += `<div class="note bad">${esc(t.error)}</div>`;
   if (t.offline) head += `<div class="note">${esc(t.offline)}</div>`;
   if (prNote?.id === id)
@@ -1563,7 +1573,7 @@ function showDetail(id) {
     // A planned card is edited section by section; the rest of the packet is preserved on save.
     html = head + (t.packet ? packetEdit(t) : `<textarea id="edit-body">${esc(fullBody)}</textarea>`);
   } else if (rounded) {
-    const top = (t.error ? `<div class="note bad">${esc(t.error)}</div>` : "")
+    const top = partsNote + (t.error ? `<div class="note bad">${esc(t.error)}</div>` : "")
       + (t.offline ? `<div class="note">${esc(t.offline)}</div>` : "")
       + (prNote?.id === id ? `<div class="note${prNote.bad ? " bad" : ""}">${esc(prNote.text)}</div>` : "")
       + (t.paused ? `<div class="note">${LIVE.has(t.status) ? "Pausing — the run stops before its next model call." : "Paused until you <strong>Resume</strong>."}</div>` : "");
@@ -1880,6 +1890,8 @@ document.getElementById("d-actions").addEventListener("click", e => {
 document.getElementById("capture").addEventListener("click", () => showCapture());
 document.getElementById("analytics").addEventListener("click", showAnalytics);
 document.getElementById("d-body").addEventListener("click", e => {
+  const opening = e.target.closest("a[data-open]");
+  if (opening) { e.preventDefault(); return showDetail(opening.dataset.open); }
   const t = state.tasks.find(x => x.id === openId);
   const diff = e.target.closest("button[data-diff]");
   if (diff && t) return toggleDiff(t, Number(diff.dataset.diff));

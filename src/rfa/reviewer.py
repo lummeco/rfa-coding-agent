@@ -40,7 +40,7 @@ from minisweagent.environments import get_environment
 from minisweagent.exceptions import InterruptAgentFlow, Submitted
 from minisweagent.models import get_model
 from minisweagent.utils.serialize import recursive_merge
-from rfa import prepare, rounds, settings, tasks
+from rfa import parts, prepare, rounds, settings, tasks
 from rfa.planner import REPOS_DIR, _errors, conventions, equip, git, seed
 from rfa.rounds import packet_only
 from rfa.tasks import Task
@@ -428,7 +428,7 @@ def review_model(config: dict, meta: dict, model: str = "", reasoning: str = "")
 def landed_repos(config: dict, task: Task, names: list[str]) -> dict[str, tuple[Path, str]]:
     """The checkouts a review seeds: what the coder landed at its branch, the rest at its start."""
     landed = task.meta.get("landed") or {}
-    repos = settings.repo_paths(config, names, settings.start_branches(task.meta))
+    repos = settings.repo_paths(config, names, parts.starts(task))
     return {name: (path, landed.get(name) or ref) for name, (path, ref) in repos.items()}
 
 
@@ -554,7 +554,9 @@ def review_task(task: Task, config: dict, model: str = "", reasoning: str = "") 
         raise ValueError(f"{task.id} landed nothing to review")
     expected = criteria(task.body)
     specs = settings.app_specs(config, task.meta.get("repos") or [])
-    under_test = next((name for name in landed if name in specs), "")
+    # A part's app is not driven: halfway through its card the app may not even boot. The card is
+    # driven once its last part is in.
+    under_test = "" if task.meta.get("parent") else next((name for name in landed if name in specs), "")
     output = tasks.home() / "var" / "runs" / task.id / "review"
     shutil.rmtree(output, ignore_errors=True)
     output.mkdir(parents=True, exist_ok=True)

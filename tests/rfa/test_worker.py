@@ -175,7 +175,7 @@ def test_a_model_that_only_rambled_is_asked_again_rather_than_cut_off(tmp_path):
 @pytest.mark.parametrize(
     ("config", "expected"),
     [
-        ({"context_window": 131072}, "120000 of the model's 131072 tokens"),
+        ({"context_window": 131072, "max_resets": 0}, "120000 of the model's 131072 tokens"),
         ({}, "2 of the 2 steps since your first edit"),
     ],
 )
@@ -252,6 +252,7 @@ def test_the_shipped_coder_config_renders_with_the_variables_the_worker_passes(t
         conventions={"web/agents.md": "Never use default exports."},
         skills=["ui-ux-pro-max"],
         approved=[{"id": "tests.test_a::test_dup", "checks": "Duplicate makes exactly one copy"}],
+        earlier="This card, **Tutorials**, is built in parts.\n\n1. Schema -- done\n2. API -- this part",
     )
     prompt = agent.messages[1]["content"]
     assert "execution packet" in agent.messages[0]["content"]
@@ -265,6 +266,7 @@ def test_the_shipped_coder_config_renders_with_the_variables_the_worker_passes(t
     assert "1. `web/src/a.py` line 7: use 2" in prompt and "x = 1" in prompt and '"answers"' in prompt
     assert "2. On the whole round: the planner prompt changes too" in prompt
     assert "/work/summary.json" in prompt
+    assert "## This is one part of a larger card" in prompt and "2. API -- this part" in prompt and '"notes"' in prompt
     assert '<agents-md file="/work/repos/web/agents.md">\nNever use default exports.' in prompt
     assert "- `/work/skills/ui-ux-pro-max/SKILL.md`" in prompt and "required, not optional" in prompt
     assert agent.round == 1 and all(r["ok"] for r in agent.results)
@@ -530,3 +532,43 @@ def test_the_lint_holds_the_coder_to_new_problems_only(tmp_path):
 def test_a_lint_whose_output_is_no_report_is_judged_by_its_exit_code(returncode, before, broke):
     linted = {"returncode": returncode, "output": "lib/main.dart: unused import", "problems": None}
     assert bool(new_problems(linted, {"returncode": before, "problems": None})) == broke
+
+
+def test_a_run_past_reset_at_starts_again_from_the_packet_and_its_own_note(tmp_path):
+    """The work is in the repository, not the messages: a cleared context costs the dead ends, not the diff."""
+    note = tmp_path / "progress.json"
+    outputs = [
+        act("touch half", prompt_tokens=70000),
+        act(f"echo '{{\"left\": \"the other half\"}}' > {note}"),
+        act("ls", prompt_tokens=70000),
+        act("touch fixed", prompt_tokens=70000),
+        submit(),
+    ]
+    agent = run_coder(
+        outputs, tmp_path, ["test -f fixed"], context_window=100000, progress_path=str(note), max_resets=1
+    )
+    assert agent.exit_status() == "Submitted" and len(agent.segments) == 1 and agent.edited_at == 1
+    assert "about to clear this conversation" in str(agent.segments[0]) and "touch half" in str(agent.segments[0])
+    resumed = agent.messages[1]["content"]
+    assert resumed.startswith("the packet") and "the other half" in resumed and "web ?? half" in resumed
+    assert "touch half" not in str(agent.messages[2:])
+    # Past `max_resets` the window is left to fill: the second crossing at `ls` cleared nothing.
+    assert "about to clear" not in str(agent.messages) and agent.serialize()["segments"] == agent.segments
+
+
+def test_a_reset_with_no_note_still_says_what_changed_and_what_the_checks_said(tmp_path):
+    outputs = [
+        act("touch half"),
+        submit(),
+        act("true", prompt_tokens=70000),
+        act("true"),
+        act("touch fixed"),
+        submit(),
+    ]
+    agent = run_coder(
+        outputs, tmp_path, ["test -f fixed"], context_window=100000, progress_path=str(tmp_path / "none.json")
+    )
+    resumed = agent.messages[1]["content"]
+    assert "(no note was written)" in resumed and "web ?? half" in resumed
+    assert "What the checks said on your last submit" in resumed and "test -f fixed" in resumed
+    assert agent.exit_status() == "Submitted" and agent.round == 2

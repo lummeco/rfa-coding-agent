@@ -16,13 +16,17 @@ is not that gate: it can only return work to be redone, never approve it in the 
 Planning goes first, because it is short, bounded and it is what puts a packet in front of you --
 until `plan_ahead` cards of work are already waiting, at which point the coder is the bottleneck and
 another packet would only queue behind it.
+
+A card too big for one run is built in parts (see parts.py). Each tick makes the parts of a split card
+you approved and sends one whose parts have all passed on to review; a part has its tests written when
+its turn comes, and is coded once they are.
 """
 
 import signal
 import time
 from dataclasses import dataclass, field
 
-from rfa import gates, planner, service, settings, tasks
+from rfa import gates, parts, planner, service, settings, tasks
 from rfa.tasks import Task
 
 
@@ -129,8 +133,14 @@ def next_job(config: DaemonConfig) -> tuple[str, Task] | None:
     # Tests for a packet you have already seen come before a new packet: that card is nearly in front of you.
     plans = [t for t in live["planning"] if t.status == "queued"] if config.plan else []
     plans.sort(key=lambda t: planning_job(t) != "tests")
-    work = [t for t in live["todo"] if t.attempts < config.max_attempts] if config.work else []
-    waiting = len(live["todo"]) + sum(t.status == "ready" for t in live["planning"])
+    # A part whose turn has come has its tests written before anything else is coded: it is next.
+    if config.plan and (due := [t for t in live["todo"] if parts.needs_tests(t)]):
+        return "tests", due[0]
+    work = (
+        [t for t in live["todo"] if t.attempts < config.max_attempts and parts.workable(t)] if config.work else []
+    )
+    # A split card counts once: its parts are one piece of work waiting, not six.
+    waiting = sum(not t.meta.get("parent") for t in live["todo"]) + sum(t.status == "ready" for t in live["planning"])
     if plans and (not work or waiting < config.plan_ahead):
         return planning_job(plans[0]), plans[0]
     return ("work", work[0]) if work else None
@@ -239,6 +249,13 @@ class Daemon:
     def tick(self) -> None:
         """One look at the board. Runs at most one card, and only with every gate open."""
         self.fetch()
+        try:
+            for line in parts.advance(settings.load()):
+                print(f"{tasks.now()}  {line}", flush=True)
+        except Exception as e:
+            # A card whose body no longer parses is that card's problem; planning and coding go on.
+            tasks.log(type="parts_error", error=str(e))
+            self.say(f"parts: {e}")
         if (left := self.paused_until - time.monotonic()) > 0:
             return self.say(f"paused for {left / 60:.0f} more min after the last error")
         if (job := next_job(self.config)) is None:

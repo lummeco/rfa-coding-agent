@@ -6,7 +6,8 @@ judged -- the expensive choices a human should see before any code exists. The s
 
 `files` and `complexity` are the exception: they never reach the coder's prompt. The host uses
 `files` to reject a packet whose paths it cannot find (a hallucinated area otherwise costs a whole
-coding run) and to tell the reviewer what was in scope, and `complexity` to pick the coder's tier.
+coding run) and to tell the reviewer what was in scope, and `complexity` to send a packet too big for
+one run back to be split into `parts` -- see parts.py.
 """
 
 import re
@@ -17,6 +18,10 @@ from pydantic import BaseModel
 
 MAX_DECISIONS = 10
 MAX_CRITERIA = 5
+MAX_PARTS = 6
+MAX_PART_CRITERIA = 3
+SPLIT_AT = 3
+"""The complexity from which one coding run is not enough, and the packet must come in parts."""
 
 # Paths the export gate refuses to carry out of the sandbox, so a packet must never aim at one.
 FORBIDDEN_PATHS = [
@@ -48,6 +53,16 @@ PACKET_TEMPLATE = """\
 {% for item in p.acceptance_criteria %}
 {{ loop.index }}. {{ item }}
 {% endfor %}
+{% if p.parts %}
+
+## Parts
+{% for part in p.parts %}
+{{ loop.index }}. **{{ part.title }}** -- {{ part.goal }}
+{% for item in part.acceptance_criteria %}
+   - {{ item }}
+{% endfor %}
+{% endfor %}
+{% endif %}
 """
 
 
@@ -55,6 +70,19 @@ class PacketFile(BaseModel):
     path: str
     """`<repo name>/<path>`, as the file sits under /work/repos."""
     why: str
+
+
+class Part(BaseModel):
+    """One coding run's worth of a packet too big for one: coded after the part before it, on its branch."""
+
+    title: str
+    goal: str
+    acceptance_criteria: list[str]
+    files: list[PacketFile] = []
+    complexity: Literal[1, 2, 3, 4, 5]
+
+    def paths(self) -> list[str]:
+        return [f.path.strip().strip("`") for f in self.files]
 
 
 class Packet(BaseModel):
@@ -69,6 +97,7 @@ class Packet(BaseModel):
     open_questions: list[str] = []
     complexity: Literal[1, 2, 3, 4, 5]
     complexity_reason: str
+    parts: list[Part] = []
 
     def render(self) -> str:
         """The ticket as markdown: the packet's whole contract with the coder."""
@@ -158,8 +187,30 @@ def problems(packet: Packet, repo_files: dict[str, set[str]], tool_calls: int, m
             f"{len(packet.acceptance_criteria)} acceptance criteria; keep the {MAX_CRITERIA} that best tell a "
             "correct implementation from a plausible wrong one."
         )
+    named = {normalize_path(path).partition("/")[0] for path in packet.paths()}
+    if not packet.parts and (packet.complexity >= SPLIT_AT or len(named) > 1):
+        why = (
+            f"complexity {packet.complexity}"
+            if packet.complexity >= SPLIT_AT
+            else f"files in {len(named)} repositories"
+        )
+        found.append(
+            f"This is {why}: too much for one coding run. Split it into 2 to {MAX_PARTS} `parts`, each one "
+            "repository and complexity 1 or 2, in the order they must be built."
+        )
+    if packet.parts and not 2 <= len(packet.parts) <= MAX_PARTS:
+        found.append(f"{len(packet.parts)} parts; a split has 2 to {MAX_PARTS}.")
+    for n, part in enumerate(packet.parts, 1):
+        if part.complexity > 2:
+            found.append(f"Part {n} is complexity {part.complexity}; split it further, every part is 1 or 2.")
+        if len(part.acceptance_criteria) > MAX_PART_CRITERIA:
+            found.append(f"Part {n} has {len(part.acceptance_criteria)} acceptance criteria; keep {MAX_PART_CRITERIA}.")
+        if not part.acceptance_criteria:
+            found.append(f"Part {n} has no acceptance criteria.")
+        if len({normalize_path(path).partition("/")[0] for path in part.paths()}) > 1:
+            found.append(f"Part {n} changes files in more than one repository; give each repository its own part.")
     folders = {name: {p.rpartition("/")[0] for p in paths} for name, paths in repo_files.items()}
-    for path in packet.paths():
+    for path in dict.fromkeys(packet.paths() + [path for part in packet.parts for path in part.paths()]):
         name, _, rel = normalize_path(path).partition("/")
         if name not in repo_files:
             found.append(f"`{path}`: paths must start with a repository name ({', '.join(repo_files)}).")

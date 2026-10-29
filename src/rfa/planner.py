@@ -23,7 +23,7 @@ from minisweagent.agents.default import AgentConfig, DefaultAgent
 from minisweagent.environments import get_environment
 from minisweagent.exceptions import InterruptAgentFlow, Submitted
 from minisweagent.models import get_model
-from rfa import settings, tasks
+from rfa import parts, settings, tasks
 from rfa.packet import Packet, problems
 from rfa.tasks import Task
 
@@ -331,12 +331,19 @@ def plan(
     model: Model,
     env: Environment,
     reference: dict[str, tuple[Path, str]] | None = None,
+    progress: str = "",
     **kwargs,
 ) -> PlannerAgent:
     """Run the planner over `idea`. The packet, when there is one, is on the returned agent."""
     repo_files = seed(env, repos, reference)
     agent = PlannerAgent(model, env, repo_files=repo_files, **kwargs)
-    agent.run(idea, repo_map=render_map(repo_files), reference=sorted(reference or {}), conventions=conventions(repos))
+    agent.run(
+        idea,
+        repo_map=render_map(repo_files),
+        reference=sorted(reference or {}),
+        conventions=conventions(repos),
+        progress=progress,
+    )
     return agent
 
 
@@ -377,7 +384,8 @@ def plan_task(task: Task, config: dict, model: str = "", reasoning: str = "") ->
     """
     if task.stage != "planning":
         raise ValueError(f"{task.id} is in `{task.stage}`; move it to `planning` first (rfa mv {task.id} planning)")
-    repos = settings.repo_paths(config, task.meta.get("repos") or [], settings.start_branches(task.meta))
+    # A card split before plans the rest from where its finished parts left the branch.
+    repos = settings.repo_paths(config, task.meta.get("repos") or [], parts.starts(task))
     reference = settings.reference_paths(config, task.meta)
     offline = fetched(repos, reference)
     repos, reference = pin(repos), pin(reference)
@@ -392,6 +400,7 @@ def plan_task(task: Task, config: dict, model: str = "", reasoning: str = "") ->
             get_model(config=settings.model_config(config, chosen, level)),
             env,
             reference,
+            parts.progress(task),
             task_id=task.id,
             **config.get("agent", {}),
         )
@@ -411,6 +420,7 @@ def plan_task(task: Task, config: dict, model: str = "", reasoning: str = "") ->
     tasks.log(type="planned", id=task.id, complexity=agent.packet.complexity, steps=agent.n_actions, model=chosen)
     task.body = "\n" + agent.packet.render()
     shutil.rmtree(tests_dir(task.id), ignore_errors=True)
+    parts.drop_unstarted(task)
     return tasks.save(
         task,
         status="question" if agent.packet.open_questions else "queued",
@@ -421,5 +431,7 @@ def plan_task(task: Task, config: dict, model: str = "", reasoning: str = "") ->
         complexity_reason=agent.packet.complexity_reason,
         packet_files=agent.packet.paths(),
         open_questions=agent.packet.open_questions,
+        split=[part.model_dump() for part in agent.packet.parts] or None,
+        split_made=None,
         error=None,
     )

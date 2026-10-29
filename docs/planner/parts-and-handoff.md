@@ -72,14 +72,12 @@ hears "wrap up" at 80% of a window the local model has stopped using well long b
 - **Nothing is lost from the record.** The trajectory keeps every segment, so the board still shows
   the whole run.
 
-## Questions for you
+## Settled
 
-1. **Tests for parts.** A later part's tests cannot be written up front against code that does not
-   exist yet. Default: each part's tests are written automatically when its turn comes, without
-   your approval. The alternative is that you approve each part's tests before it codes.
-2. **When to split.** Default: complexity ≥ 3 or more than one repository. Should a file-count rule
-   apply too, such as more than 8 files?
-3. **Approval.** Default: one approval for the whole breakdown. Or approve each part?
+- **Tests for parts** are written automatically when each part's turn comes, against the branch as
+  it stands, with no stop for approval.
+- **Split** at complexity ≥ 3 or more than one repository.
+- **Approval** is once, for the whole breakdown.
 
 ## Where it lands
 
@@ -93,12 +91,6 @@ hears "wrap up" at 80% of a window the local model has stopped using well long b
 | Reset at `reset_at` | `worker.CoderAgent` |
 | Drive the app on the last part only | `reviewer.py` |
 | Parts grouped under their parent | `board.py`, `board.html` |
-
-## Build order
-
-1. **Context resets (4).** Self-contained, and it helps every card at once.
-2. **Parts with handoff notes (1 + 2), together.** Parts without notes start blind, which is the
-   failure we already have.
 
 ## Not in scope
 

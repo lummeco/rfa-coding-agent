@@ -150,6 +150,8 @@ def snapshot() -> dict:
                 "blocked": parts.blocked(task, everything),
                 "progress": parts.progress(task) if task.meta.get("split") else "",
                 "scout": task.meta.get("scout"),
+                "now": bool(task.meta.get("now")) and task.stage != "done",
+                "kept": rounds.kept_dir(task.id).exists(),
                 "suggested": task.meta.get("suggested"),
                 "kind": task.meta.get("kind"),
                 "diffstat": diffstat(task) if task.stage in ("review", "done") and not task.meta.get("verdict") else None,
@@ -507,8 +509,11 @@ def retest(id: str) -> tasks.Task:
     return tasks.save(task, status="queued", tests_at=None, tests_note=None, error=None, paused=None)
 
 
-def pause(id: str, paused: bool) -> tasks.Task:
-    """Hold a card, or let it go again. A run already on it stops before its next model call."""
+def pause(id: str, paused: bool, fresh: bool = False) -> tasks.Task:
+    """Hold a card, or let it go again. A run already on it stops before its next model call, and a
+    coding run is resumed from the changes it had made -- unless you say to start it over."""
+    if fresh:
+        shutil.rmtree(rounds.kept_dir(id), ignore_errors=True)
     task = tasks.save(tasks.find(id), paused=paused or None)
     tasks.log(type="paused" if paused else "resumed", id=task.id)
     return task
@@ -701,6 +706,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/move",
             "/api/new",
             "/api/analyze",
+            "/api/now",
             "/api/pr",
             "/api/edit",
             "/api/reorder",
@@ -750,6 +756,8 @@ class Handler(BaseHTTPRequestHandler):
                     **{key: value or None for key, value in run_with.items()},
                 )
             )
+            if payload.get("now"):
+                task = daemon.do_now(task)
             self._json(200, {"id": task.id, "stage": task.stage, "status": task.status})
             return
         if self.path == "/api/analyze":
@@ -758,6 +766,8 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 self._json(400, {"error": str(e)})
                 return
+            if payload.get("now"):
+                daemon.do_now(task)
             self._json(200, {"id": task.id})
             return
         if self.path == "/api/pr":
@@ -792,7 +802,9 @@ class Handler(BaseHTTPRequestHandler):
                 elif self.path == "/api/answer":
                     task = answer(payload["id"], int(payload["index"]), str(payload.get("answer") or ""))
                 elif self.path == "/api/pause":
-                    task = pause(payload["id"], bool(payload.get("paused")))
+                    task = pause(payload["id"], bool(payload.get("paused")), bool(payload.get("fresh")))
+                elif self.path == "/api/now":
+                    task = daemon.do_now(tasks.find(payload["id"]))
                 elif self.path == "/api/retry":
                     task = retry(payload["id"])
                 elif self.path == "/api/retest":
@@ -820,6 +832,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             task = tasks.move(tasks.find(payload["id"]), payload["to"], actor="human", **payload.get("meta", {}))
+            # A card to be done now is still that after you approve it: whatever runs steps aside again.
+            if task.meta.get("now"):
+                daemon.do_now(task)
         except (FileNotFoundError, KeyError, tasks.TransitionError, FileExistsError) as e:
             self._json(400, {"error": f"{type(e).__name__}: {e}"})
             return

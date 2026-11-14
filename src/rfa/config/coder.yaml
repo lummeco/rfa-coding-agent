@@ -33,6 +33,8 @@ agent:
     {{earlier}}
 
     {% endif %}
+    {{resumed}}
+
     ## Where things are
 
     The repositories are at `/work/repos/`: {{repo_list}}. Each one is a git repository whose only

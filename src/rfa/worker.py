@@ -56,6 +56,14 @@ RESET_ASK = (
     'the failing check, dead ends, decisions you took"}}. It is all you will remember of this conversation.]'
 )
 
+PAUSE_ASK = (
+    "[The owner is pausing this run. It will be picked up again later, in a new conversation, from the "
+    "changes you have made. With your next command, and nothing else, write `{path}` as JSON: "
+    '{{"done": "what is finished", "left": "what is still to do", "notes": "what the code does not show: '
+    'the failing check, dead ends, decisions you took"}}. It is all you will remember of this conversation.]'
+)
+STALE_KEPT = "The changes this run was paused with no longer apply to where it starts, so it started over."
+
 RESUMED = """
 
 ## Where you left off
@@ -150,6 +158,7 @@ class CoderAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
         lint_baseline: dict | None = None,
         protected: list[str] | None = None,
         root: str = REPOS_DIR,
+        spent: int = 0,
         **kwargs,
     ):
         super().__init__(model, env, config_class=CoderConfig, **kwargs)
@@ -171,6 +180,8 @@ class CoderAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
         self.edited_at: int | None = None
         self.segments: list[list[dict]] = []
         self.resetting = False
+        # Steps a run paused before this one already spent, and whether this one is writing its note to stop.
+        self.spent, self.parting = spent, False
         # mini counts from the first call; the budget here counts from the first edit, in `query`.
         self.budget, self.config.step_limit = self.config.step_limit, 0
 
@@ -179,7 +190,19 @@ class CoderAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
 
     def steps(self) -> int:
         """Steps spent since the first edit, which is where the budget starts."""
-        return self.n_calls - self.edited_at if self.edited_at is not None else 0
+        return self.spent + (self.n_calls - self.edited_at if self.edited_at is not None else 0)
+
+    def halted(self) -> bool:
+        """A coder with changes in the container gets one more turn before it stops, to leave the note
+        the run that resumes it starts from. One with nothing to lose stops at once."""
+        if not super().halted():
+            self.parting = False
+            return False
+        if self.parting or self.edited_at is None:
+            return True
+        self.parting = True
+        self.add_messages({"role": "user", "content": PAUSE_ASK.format(path=self.config.progress_path)})
+        return False
 
     def edited(self) -> bool:
         """Has any repository under the work root changed since its base commit?"""
@@ -530,6 +553,32 @@ def blocked(paths: list[str]) -> list[str]:
     return [p for p in paths if any(rx.search(p) for rx in FORBIDDEN_PATHS)]
 
 
+def keep(env: Environment, agent: CoderAgent, names: list[str], id: str) -> None:
+    """What a paused run leaves behind: its changes per repository, its note, and the steps it spent."""
+    shutil.rmtree(folder := rounds.kept_dir(id), ignore_errors=True)
+    if not (patches := diffs(env, names)[0]):
+        return
+    folder.mkdir(parents=True)
+    for name, patch in patches.items():
+        (folder / f"{name}.patch").write_text(patch)
+    note = env.execute({"command": f"cat {agent.config.progress_path}"})
+    left = {"note": note["output"].strip() if note["returncode"] == 0 else "", "steps": agent.steps()}
+    (folder / "note.json").write_text(json.dumps(left))
+
+
+def restore(env: Environment, id: str) -> dict | None:
+    """Put a paused run's changes back, uncommitted, as the coder left them. Nothing when there are
+    none -- or when they no longer apply, because the branch moved: then the run starts over."""
+    if not (folder := rounds.kept_dir(id)).exists():
+        return None
+    for patch in sorted(folder.glob("*.patch")):
+        command = f"cd {REPOS_DIR}/{patch.stem} && git apply --whitespace=nowarn - <<'RFA_KEPT_EOF'\n{patch.read_text()}RFA_KEPT_EOF"
+        if env.execute({"command": command})["returncode"] != 0:
+            env.execute({"command": f'for d in {REPOS_DIR}/*/; do git -C "$d" reset -q --hard && git -C "$d" clean -fdq; done'})
+            return {}
+    return json.loads((folder / "note.json").read_text())
+
+
 def diffs(env: Environment, names: list[str]) -> tuple[dict[str, str], dict[str, list[str]]]:
     """What the coder changed, per repository, and what the gate dropped on the way out.
 
@@ -669,6 +718,9 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
         # the lint's, so whatever the tests themselves trip is not the coder's to fix.
         apply_tests(env, approved)
         linted = run_lint(env, lint_command, cwd) if lint_command else None
+        # A run you paused, or that stepped aside, carries on from its changes and its own note.
+        if (saved := restore(env, task.id)) == {}:
+            task = tasks.save(task, offline=" ".join(filter(None, [task.meta.get("offline"), STALE_KEPT])))
         agent = CoderAgent(
             get_model(config=settings.model_config(config, chosen, level)),
             env,
@@ -682,6 +734,7 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
             protected=[f"{name}/{f}" for name, patch in approved.items() for f in rounds.files(patch)],
             output_path=output / "trajectory.json",
             task_id=task.id,
+            spent=(saved or {}).get("steps", 0),
             # The window the variant is served with, unless the workspace said otherwise: a run
             # that does not know where its ceiling is can only find it by hitting it.
             **({"context_window": settings.context_window(config, chosen)} | config.get("agent", {})),
@@ -700,9 +753,15 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
             skills=sorted(skills),
             approved=(test_notes(task.id) or {}).get("tests") if approved else None,
             earlier=parts.handoff(task, config),
+            resumed=RESUMED.format(
+                note=saved["note"] or "(no note was written)", status="\n".join(changed_paths(env)) or "nothing", checks=""
+            )
+            if saved
+            else "",
         )
         patches, dropped = diffs(env, names)
         written = agent.summary()
+        shutil.rmtree(rounds.kept_dir(task.id), ignore_errors=True)
     except Unjudgeable as e:
         # A verdict on the packet, not on the machine: retrying would fail the same way in a minute.
         tasks.log(type="run_finished", id=task.id, shipped=False, rounds=0, landed={}, dropped={}, exit="Unjudgeable")
@@ -717,9 +776,12 @@ def run_task(task: Task, config: dict, model: str = "", reasoning: str = "") -> 
             error=str(e).partition("\n")[0],
         )
     except tasks.Paused:
-        # Back to todo, held, and the attempt given back: you stopped it, the run did not fail.
+        # Back to todo with the attempt given back: you stopped it, the run did not fail. Held if
+        # you paused it, and not if it only stepped aside -- the card on disk says which.
+        keep(env, agent, names, task.id)
         tasks.log(type="run_paused", id=task.id)
-        return tasks.move(task, "todo", actor="worker", status="todo", attempts=task.attempts - 1, paused=True)
+        held = tasks.find(task.id).paused or None
+        return tasks.move(task, "todo", actor="worker", status="todo", attempts=task.attempts - 1, paused=held, aside=None)
     except Exception as e:
         # Docker down, the model unreachable, the image missing: nothing to do with the task itself.
         # Put it back in the queue rather than leaving a card in under-work with no worker on it.

@@ -55,7 +55,9 @@ def problems(found: Found, repo_files: dict[str, set[str]], tool_calls: int, min
         said.append(f"{len(found.suggestions)} suggestions; give {MIN} to {MAX}, the most worth doing first.")
     for n, s in enumerate(found.suggestions, 1):
         if s.complexity > MAX_COMPLEXITY:
-            said.append(f"Suggestion {n} is complexity {s.complexity}; suggest only work of 1 or 2, or a smaller piece of it.")
+            said.append(
+                f"Suggestion {n} is complexity {s.complexity}; suggest only work of 1 or 2, or a smaller piece of it."
+            )
         if not s.evidence:
             said.append(f"Suggestion {n} has no evidence; name the file it is about.")
         for path in s.evidence:
@@ -92,7 +94,9 @@ def request(repo: str, focus: str = "anything") -> Task:
     if waiting := pending(repo):
         raise ValueError(f"{repo} still has {len(waiting)} to decide on: {waiting[0].title}")
     short = repo.rpartition("/")[2]
-    return tasks.plan_now(tasks.create(f"Analyze {short}: {focus}", [repo], scout=focus, title=f"Analyze {short} · {focus}"))
+    return tasks.plan_now(
+        tasks.create(f"Analyze {short}: {focus}", [repo], scout=focus, title=f"Analyze {short} · {focus}")
+    )
 
 
 def known(repo: str) -> str:
@@ -102,7 +106,9 @@ def known(repo: str) -> str:
         (
             t
             for t in tasks.tasks()
-            if repo in (t.meta.get("repos") or []) and not t.meta.get("scout") and (not t.archived or t.meta.get("suggested"))
+            if repo in (t.meta.get("repos") or [])
+            and not t.meta.get("scout")
+            and (not t.archived or t.meta.get("suggested"))
         ),
         key=lambda t: t.id,
     )
@@ -148,7 +154,7 @@ def scout_task(task: Task, config: dict) -> Task:
         )
     except tasks.Paused:
         tasks.log(type="plan_paused", id=task.id)
-        return tasks.save(task, status="queued", paused=True)
+        return tasks.save(task, status="queued", paused=tasks.find(task.id).paused or None, aside=None)
     except Exception as e:
         tasks.log(type="plan_failed", id=task.id, error=str(e))
         return tasks.save(task, status="failed", error=str(e))

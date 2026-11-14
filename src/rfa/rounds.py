@@ -102,6 +102,11 @@ def first_bases(state: dict) -> dict[str, str]:
     return bases
 
 
+def kept_dir(id: str) -> Path:
+    """Where a paused coding run leaves its changes and its note for the run that resumes it."""
+    return run_dir(id) / "paused"
+
+
 def view(task: tasks.Task) -> dict:
     """What the board draws for a card's rounds.
 

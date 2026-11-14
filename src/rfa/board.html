@@ -701,6 +701,7 @@ button.action.you { background: var(--you); color: var(--on-accent); font-weight
 #detail.page footer .action.primary { min-height: 46px; padding: 0 26px; font-size: 16px; }
 #detail.page footer[data-yours] .action.primary { background: #ff9f0a; color: #000; }
 #logs { margin-left: auto; }
+.nowbox { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text-2); cursor: pointer; }
 #detail.page #d-side { flex: 0 0 320px; order: 2; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 #detail.page #d-side:empty { display: none; }
 /* The body is a column of tiles for a plan, and one tile for what has tabs, a form or a log. */
@@ -1049,9 +1050,11 @@ function actionsFor(t) {
     `<button class="action ${cls}" data-to="${to}"${status ? ` data-status="${status}"` : ""}>${label}</button>`;
   // Archive is a flag, not a move, so it rides along wherever the task is.
   const archive = `<button class="action" data-archive="${esc(t.id)}" aria-pressed="${t.archived}" title="${t.archived ? "Unarchive" : "Archive"}">${t.archived ? "Unarchive" : "Archive"}</button>`;
-  // Pausing a card with a run on it stops the run before its next model call; resuming starts over.
+  // Pausing a card with a run on it stops the run once the coder has left its note; resuming carries
+  // on from the changes it had made, unless you start it over.
   const pause = t.paused
     ? `<button class="action primary" data-pause="0">Resume</button>`
+      + (t.kept ? `<button class="action" data-pause="0" data-fresh="1" title="Throw away the changes this run was paused with">Start over</button>` : "")
     : `<button class="action" data-pause="1">${LIVE.has(t.status) ? "Pause run" : "Pause"}</button>`;
   if (t.stage === "draft") return `<button class="action" id="edit-draft">Edit</button>` + move("planning", "Plan", "primary") + archive;
   // Tests are written from the packet, so after an edit they may no longer say what it does: write them again.
@@ -1125,7 +1128,8 @@ function showCapture(t = null) {
   document.getElementById("d-body").scrollTop = 0;
   document.getElementById("d-actions").innerHTML =
     `<button class="action primary" id="save">${t ? "Save draft" : "Add and plan"}</button>`
-    + (t ? `<button class="action quiet" id="cancel-draft">Cancel</button>` : "")
+    + (t ? `<button class="action quiet" id="cancel-draft">Cancel</button>`
+      : `<label class="nowbox"><input type="checkbox" id="cap-now"> Do this now</label>`)
     + `<span class="hint" style="color:var(--text-3);font-size:12px">⌘↵</span>`;
   openPanel();
   document.getElementById("idea").focus();
@@ -1268,7 +1272,7 @@ async function saveIdea() {
         body: "\n" + idea + "\n",
         title: document.getElementById("cap-title").value.trim(),
         checks: document.getElementById("cap-checks").value.split("\n").map(c => c.trim()).filter(Boolean),
-      } : { idea }),
+      } : { idea, now: document.getElementById("cap-now").checked }),
       repos: [...picked],
       branches: [...picked].filter(r => start[r]).map(r => `${r}@${start[r]}`),
       context_branches: refs.map(r => `${r.repo}@${r.branch}`),
@@ -1649,7 +1653,7 @@ const scouting = repo => state.tasks.some(t => !t.archived && t.repos.includes(r
 /** What a scout found, for you to plan, edit or dismiss; and, while the machine is free, the buttons that send one out. */
 function scoutTiles() {
   const found = state.tasks.filter(t => !t.archived && t.suggested && t.stage === "draft");
-  const free = state.system && !state.system.running.length;
+  const busy = Boolean(state.system?.running.length);
   return (found.length ? `<section class="tile" aria-labelledby="found-h">
       <div class="sec-head"><h2 id="found-h">Suggested</h2><span class="n">${found.length}</span><span class="why">found by a scout; nothing happens until you plan one</span></div>
       ${found.map(t => `<article class="item">
@@ -1663,8 +1667,10 @@ function scoutTiles() {
         </div>
       </article>`).join("")}
     </section>` : "")
-    + (free && state.repos.length ? `<section class="tile" aria-labelledby="find-h">
-      <div class="sec-head"><h2 id="find-h">Find work</h2><span class="why">The machine is free. Have it read a repo and suggest 3 to 5 small fixes.</span></div>
+    + (state.repos.length ? `<section class="tile" aria-labelledby="find-h">
+      <div class="sec-head"><h2 id="find-h">Find work</h2><span class="why">${busy
+        ? "Have the machine read a repo and suggest 3 to 5 small fixes. It steps in front of the current run, which carries on afterwards."
+        : "The machine is free. Have it read a repo and suggest 3 to 5 small fixes."}</span></div>
       <div class="pick" role="group" aria-label="What to look for">${(state.focuses || []).map(f =>
         `<button data-focus="${esc(f)}" aria-pressed="${f === focus}">${esc(f)}</button>`).join("")}</div>
       <div class="find">${state.repos.map(r => `<button class="action" data-analyze="${esc(r)}"${scouting(r)
@@ -1676,7 +1682,7 @@ async function analyze(repo) {
   const res = await api("/api/analyze", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ repo, focus }),
+    body: JSON.stringify({ repo, focus, now: Boolean(state.system?.running.length) }),
   });
   if (!res.ok) { alert((await res.json()).error); return; }
   refresh();
@@ -1804,7 +1810,7 @@ function kickFor(t) {
   const { yours } = standing(t), owner = t.parent && state.tasks.find(x => x.id === t.parent);
   const cls = t.status === "failed" ? "blocked" : yours || (LIVE.has(t.status) && !t.paused) ? "" : "idle";
   return `<span class="kicker ${cls}"><i></i>${yours ? "Waiting on you · " : ""}${esc(LABEL[t.stage] || t.stage)} · ${esc(t.status)}`
-    + `${t.paused ? " · paused" : ""}${owner ? ` · part ${esc(t.part)} of ${owner.parts.length}` : ""}</span>`;
+    + `${t.paused ? " · paused" : ""}${t.now ? " · now" : ""}${owner ? ` · part ${esc(t.part)} of ${owner.parts.length}` : ""}</span>`;
 }
 
 function factsFor(t) {
@@ -2361,7 +2367,8 @@ function showDetail(id) {
   if (t.paused)
     head += `<div class="note">${LIVE.has(t.status)
       ? "Pausing — the run stops before its next model call and the card goes back to its queue."
-      : "Paused — the daemon leaves it alone until you <strong>Resume</strong>. A run starts over from the beginning."}</div>`;
+      : `Paused — the daemon leaves it alone until you <strong>Resume</strong>. ${t.kept
+        ? "The coder's changes and its note are kept: it carries on from them." : "A run starts over from the beginning."}`}</div>`;
   if (t.stage === "draft") head += `<div class="note">A draft. <strong>Edit</strong> changes any part of it; <strong>Plan it</strong> hands it to the planner${t.planned ? ", or <strong>Approve as is</strong> sends this packet straight to the coder" : ""}.</div>`;
   if (t.status === "queued" && t.stage === "planning" && !t.paused)
     head += `<div class="note">${t.planned ? "Planned. Waiting to have its tests written" : "Waiting for the planner"} — <code>rfa plan</code></div>`;
@@ -2457,6 +2464,8 @@ function showDetail(id) {
     document.getElementById("d-actions").innerHTML = `<button class="action primary" id="save-edit">Save</button><button class="action quiet" id="cancel-edit">Cancel</button>`;
   } else {
     document.getElementById("d-actions").innerHTML = actionsFor(t)
+      + (t.now || t.stage === "done" || t.archived || LIVE.has(t.status) ? ""
+        : `<button class="action" id="now" title="Ahead of everything else; a run in its way steps aside and carries on afterwards">Do this now</button>`)
       + (t.stage === "draft" ? "" : `<button class="action" id="logs" aria-pressed="${logsOpen}">Logs and thinking</button>`);
   }
   document.getElementById("d-actions").toggleAttribute("data-yours", yours && !editing);
@@ -2625,11 +2634,21 @@ async function rereview(id) {
   await refresh();
 }
 
-async function setPaused(id, paused) {
+async function doNow(id) {
+  const res = await api("/api/now", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+  if (!res.ok) { alert((await res.json()).error); return; }
+  refresh();
+}
+
+async function setPaused(id, paused, fresh = false) {
   const res = await api("/api/pause", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id, paused }),
+    body: JSON.stringify({ id, paused, fresh }),
   });
   if (!res.ok) { alert((await res.json()).error); return; }
   refresh();
@@ -2719,7 +2738,8 @@ document.getElementById("d-actions").addEventListener("click", e => {
   const verdict = e.target.closest("button[data-verdict]");
   if (verdict && openId) return setVerdict(openId, verdict.dataset.verdict);
   const held = e.target.closest("button[data-pause]");
-  if (held && openId) return setPaused(openId, held.dataset.pause === "1");
+  if (held && openId) return setPaused(openId, held.dataset.pause === "1", held.dataset.fresh === "1");
+  if (e.target.closest("#now") && openId) return doNow(openId);
   const arch = e.target.closest("button[data-archive]");
   if (arch) return toggleArchive(arch.dataset.archive);
   const prBtn = e.target.closest("button[data-pr]");

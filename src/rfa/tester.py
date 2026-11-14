@@ -229,7 +229,7 @@ def write_tests(task: Task, config: dict, model: str = "", reasoning: str = "") 
         written = agent.summary()
     except tasks.Paused:
         tasks.log(type="tests_paused", id=task.id)
-        return tasks.save(task, status="queued", paused=True)
+        return tasks.save(task, status="queued", paused=tasks.find(task.id).paused or None, aside=None)
     except Exception as e:
         tasks.log(type="tests_failed", id=task.id, error=str(e))
         return tasks.save(task, status="failed", error=str(e))

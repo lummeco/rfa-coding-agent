@@ -189,3 +189,21 @@ def test_the_daemon_keeps_every_repository_fetched_and_names_the_ones_it_cannot_
     assert daemon.said == "nothing to do" and daemon.fetch_due > 0
     daemon.tick()
     assert len([e for e in tasks.events() if e["type"] == "fetch_failed"]) == 1
+
+
+def test_a_card_to_do_now_goes_ahead_of_everything_and_the_run_in_its_way_steps_aside():
+    from rfa.daemon import do_now
+
+    review = card("under-work", "cache the price list")
+    review = tasks.move(review, "review", actor="worker", landed={"web": "rfa/x"})
+    coding = card("under-work", "rename the invoice column", status="coding")
+    first = do_now(card("todo", "an older urgent card"))
+    idea = do_now(tasks.create("fix the login redirect", ["lummeco/web"]))
+    # One card at a time, straight into planning, and ahead of the review that would otherwise go first.
+    assert (idea.stage, idea.meta["now"], tasks.find(first.id).meta.get("now")) == ("planning", True, None)
+    assert [next_job(DaemonConfig())[0], next_job(DaemonConfig())[1].id] == ["plan", idea.id]
+    # The run in its way is told to step aside, not held: it is back in the queue once it has stopped.
+    assert tasks.find(coding.id).meta["aside"] is True and not tasks.find(coding.id).paused
+    # Waiting on you, the urgent card has no job, and the queue carries on as it always did.
+    tasks.save(idea, status="ready")
+    assert [next_job(DaemonConfig())[0], next_job(DaemonConfig())[1].id] == ["review", review.id]

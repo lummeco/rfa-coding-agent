@@ -37,13 +37,23 @@ def found(*suggestions: dict) -> Found:
         (found(*[suggestion(n) for n in range(6)]), 5, ["6 suggestions; give 3 to 5"]),
         (found(suggestion(1, complexity=3), suggestion(2), suggestion(3)), 5, ["Suggestion 1 is complexity 3"]),
         (found(suggestion(1), suggestion(2, evidence=[]), suggestion(3)), 5, ["Suggestion 2 has no evidence"]),
-        (found(suggestion(1), suggestion(2), suggestion(3, evidence=["web/src/gone.ts"])), 5, ["`web/src/gone.ts` is not a file"]),
-        (found(suggestion(1), suggestion(2), suggestion(3, evidence=["src/price.ts"])), 5, ["`src/price.ts` is not a file"]),
+        (
+            found(suggestion(1), suggestion(2), suggestion(3, evidence=["web/src/gone.ts"])),
+            5,
+            ["`web/src/gone.ts` is not a file"],
+        ),
+        (
+            found(suggestion(1), suggestion(2), suggestion(3, evidence=["src/price.ts"])),
+            5,
+            ["`src/price.ts` is not a file"],
+        ),
         (found(suggestion(1, evidence=["/work/repos/web/src/cart.ts"]), suggestion(2), suggestion(3)), 5, []),
     ],
 )
 def test_suggestions_are_few_small_and_point_at_real_files(given, tool_calls, said):
-    assert [any(want in line for line in problems(given, REPO_FILES, tool_calls, 3)) for want in said] == [True] * len(said)
+    assert [any(want in line for line in problems(given, REPO_FILES, tool_calls, 3)) for want in said] == [True] * len(
+        said
+    )
     assert len(problems(given, REPO_FILES, tool_calls, 3)) == len(said)
 
 
@@ -67,7 +77,9 @@ def test_the_scout_is_sent_back_until_its_suggestions_hold(tmp_path):
         cost_limit=0,
     )
     agent.run("bugs", progress="")
-    assert agent.attempt == 1 and [s.title for s in agent.packet.suggestions] == [s["title"] for s in good["suggestions"]]
+    assert agent.attempt == 1 and [s.title for s in agent.packet.suggestions] == [
+        s["title"] for s in good["suggestions"]
+    ]
     assert "give 3 to 5" in json.dumps(agent.messages)
 
 
@@ -75,9 +87,16 @@ def test_the_packaged_prompt_renders_with_what_the_scout_is_given():
     config = settings.load("scout")["agent"]
     assert "Scout stage" in config["system_template"] and config["attempts"] == 3, "the planner's settings carry over"
     said = Template(config["instance_template"], undefined=StrictUndefined).render(
-        **config, packet_path="/out/packet.json", task=scout.FOCUS["bugs"], repo_map="web", conventions={}, progress="- Old card (trashed)"
+        **config,
+        packet_path="/out/packet.json",
+        task=scout.FOCUS["bugs"],
+        repo_map="web",
+        conventions={},
+        progress="- Old card (trashed)",
     )
-    assert "Bugs: code that does the wrong thing" in said and "- Old card (trashed)" in said and "/out/packet.json" in said
+    assert (
+        "Bugs: code that does the wrong thing" in said and "- Old card (trashed)" in said and "/out/packet.json" in said
+    )
 
 
 @pytest.fixture
@@ -89,7 +108,12 @@ def workspace(tmp_path, monkeypatch):
 
 def test_a_scout_becomes_drafts_you_decide_on_before_the_next_one(workspace):
     card = scout.request("lummeco/web", "bugs")
-    assert (card.stage, card.status, card.title, card.meta["scout"]) == ("planning", "queued", "Analyze web · bugs", "bugs")
+    assert (card.stage, card.status, card.title, card.meta["scout"]) == (
+        "planning",
+        "queued",
+        "Analyze web · bugs",
+        "bugs",
+    )
     # One scout per repository at a time; another repository is its own question.
     with pytest.raises(ValueError, match="still has 1 to decide on: Analyze web"):
         scout.request("lummeco/web")
@@ -115,7 +139,10 @@ def test_a_scout_becomes_drafts_you_decide_on_before_the_next_one(workspace):
     assert scout.request("lummeco/web", "tests").meta["scout"] == "tests"
 
 
-@pytest.mark.parametrize(("repo", "focus", "why"), [("lummeco/nope", "bugs", "no such repository"), ("lummeco/web", "vibes", "no such focus")])
+@pytest.mark.parametrize(
+    ("repo", "focus", "why"),
+    [("lummeco/nope", "bugs", "no such repository"), ("lummeco/web", "vibes", "no such focus")],
+)
 def test_a_scout_is_only_of_a_configured_repository_and_a_known_focus(workspace, repo, focus, why):
     with pytest.raises(ValueError, match=why):
         scout.request(repo, focus)

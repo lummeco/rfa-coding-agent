@@ -113,6 +113,39 @@ def planning_job(task: Task) -> str:
     return "tests" if task.meta.get("planned_at") and not task.meta.get("tests_at") else "plan"
 
 
+def urgent(task: Task) -> bool:
+    """Marked to be done now, itself or as a part of a card that is."""
+    return bool(task.meta.get("now") or ((owner := parts.parent(task)) and owner.meta.get("now")))
+
+
+def job_for(task: Task, config: DaemonConfig) -> str | None:
+    """The job one card is waiting for, or nothing while it waits on you."""
+    if task.stage == "review":
+        return "review" if config.review and task.status == "queued" and reviewable(task) else None
+    if task.stage == "planning":
+        return planning_job(task) if config.plan and task.status == "queued" else None
+    if parts.needs_tests(task):
+        return "tests" if config.plan else None
+    return "work" if config.work and task.attempts < config.max_attempts and parts.workable(task) else None
+
+
+def do_now(task: Task) -> Task:
+    """Put one card ahead of everything, and have whatever is running step aside for it.
+
+    One card at a time: marking another takes the mark off the first. A run that steps aside goes
+    back to its queue, not held, so it carries on by itself once this card is finished or waiting
+    on you -- and a coding run carries on from the changes it had made.
+    """
+    for other in tasks.tasks():
+        if other.meta.get("now") and other.id != task.id:
+            tasks.save(other, now=None)
+    for other in running():
+        if other.id != task.id and other.meta.get("parent") != task.id:
+            tasks.save(other, aside=True)
+    tasks.log(type="now", id=task.id)
+    return tasks.save(tasks.plan_now(task) if task.stage == "draft" else task, now=True, paused=None)
+
+
 def next_job(config: DaemonConfig) -> tuple[str, Task] | None:
     """The card to run next and what to run on it, or nothing to do.
 
@@ -130,6 +163,10 @@ def next_job(config: DaemonConfig) -> tuple[str, Task] | None:
         stage: [t for t in tasks.tasks(stage) if not t.paused and not (t.archived and stage == "planning")]
         for stage in ("planning", "todo", "review")
     }
+    # A card you said to do now is ahead of everything, reviews included, whatever it needs next.
+    for task in (t for stage in live.values() for t in stage if urgent(t)):
+        if job := job_for(task, config):
+            return job, task
     reviews = [t for t in live["review"] if t.status == "queued" and reviewable(t)] if config.review else []
     if reviews:
         return "review", reviews[0]
@@ -159,6 +196,9 @@ def run(job: tuple[str, Task], config: DaemonConfig) -> None:
     from rfa.worker import run_task
 
     kind, task = job
+    # Told to step aside for a run that has since ended: this is its own turn again.
+    if task.meta.get("aside"):
+        task = tasks.save(task, aside=None)
     with gates.KeepAwake(config.keep_awake):
         if kind == "plan" and task.meta.get("scout"):
             scout_task(task, settings.load("scout"))

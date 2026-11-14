@@ -1,5 +1,6 @@
 """The coder loop: mini's agent, with the packet's checks standing between submitting and done."""
 
+import json
 import subprocess
 
 import pytest
@@ -7,7 +8,7 @@ import pytest
 from minisweagent.environments.local import LocalEnvironment
 from minisweagent.exceptions import FormatError
 from minisweagent.models.test_models import DeterministicModel, make_output
-from rfa import lint
+from rfa import lint, worker
 from rfa.planner import git
 from rfa.worker import (
     UNJUDGEABLE,
@@ -253,6 +254,7 @@ def test_the_shipped_coder_config_renders_with_the_variables_the_worker_passes(t
         skills=["ui-ux-pro-max"],
         approved=[{"id": "tests.test_a::test_dup", "checks": "Duplicate makes exactly one copy"}],
         earlier="This card, **Tutorials**, is built in parts.\n\n1. Schema -- done\n2. API -- this part",
+        resumed="\n\n## Where you left off\n\nthe note",
     )
     prompt = agent.messages[1]["content"]
     assert "execution packet" in agent.messages[0]["content"]
@@ -572,3 +574,40 @@ def test_a_reset_with_no_note_still_says_what_changed_and_what_the_checks_said(t
     assert "(no note was written)" in resumed and "web ?? half" in resumed
     assert "What the checks said on your last submit" in resumed and "test -f fixed" in resumed
     assert agent.exit_status() == "Submitted" and agent.round == 2
+
+
+def test_a_paused_coder_leaves_a_note_and_its_changes_and_the_next_run_starts_from_them(tmp_path, monkeypatch):
+    from rfa import rounds, tasks
+
+    monkeypatch.setenv("RFA_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(worker, "REPOS_DIR", str(tmp_path))
+    tasks.init()
+    task = tasks.create("an idea")
+    note = tmp_path / "progress.json"
+    pause = f"sed -i.bak 's/^status: .*/status: draft\\npaused: true/' '{task.path}' && rm '{task.path}.bak'"
+    agent = None
+    with pytest.raises(tasks.Paused):
+        # The pause lands while the coder has changes: it gets one more turn, for the note.
+        agent = run_coder(
+            [act("echo half > feature.txt"), act(pause), act(f"echo '{{\"left\": \"the other half\"}}' > {note}"), submit()],
+            tmp_path,
+            checks=[],
+            task_id=task.id,
+            progress_path=str(note),
+        )
+    assert agent is None and tasks.find(task.id).paused
+    coder = CoderAgent(
+        DeterministicModel(outputs=[]), LocalEnvironment(cwd=str(tmp_path / "web")), checks=[], cwd=str(tmp_path / "web"),
+        root=str(tmp_path), progress_path=str(note), system_template="coder", instance_template="{{task}}", cost_limit=0,
+    )
+    coder.spent = 7
+    worker.keep(coder.env, coder, ["web"], task.id)
+    assert json.loads((rounds.kept_dir(task.id) / "note.json").read_text()) == {"note": '{"left": "the other half"}', "steps": 7}
+    # A fresh checkout gets the changes back, uncommitted; one that has moved under them starts over.
+    subprocess.run(["git", "-C", str(tmp_path / "web"), "reset", "-q", "--hard"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path / "web"), "clean", "-fdq"], check=True)
+    assert worker.restore(coder.env, task.id)["steps"] == 7 and (tmp_path / "web" / "feature.txt").read_text() == "half\n"
+    (tmp_path / "web" / "feature.txt").write_text("someone else's\n")
+    subprocess.run(["git", "-C", str(tmp_path / "web"), "add", "-A"], check=True)
+    assert worker.restore(coder.env, task.id) == {} and not (tmp_path / "web" / "feature.txt").exists()
+    assert worker.restore(coder.env, "20260101-000000-never-paused") is None

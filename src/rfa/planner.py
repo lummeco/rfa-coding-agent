@@ -421,7 +421,7 @@ def plan_task(task: Task, config: dict, model: str = "", reasoning: str = "") ->
     except tasks.Paused:
         # Back in the queue, held: resuming plans it again from the start.
         tasks.log(type="plan_paused", id=task.id)
-        return tasks.save(task, status="queued", paused=True)
+        return tasks.save(task, status="queued", paused=tasks.find(task.id).paused or None, aside=None)
     except Exception as e:
         tasks.log(type="plan_failed", id=task.id, error=str(e))
         return tasks.save(task, status="failed", error=str(e))

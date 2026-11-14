@@ -97,8 +97,12 @@ class Pausable:
         super().__init__(*args, **kwargs)
         self.task_id = task_id
 
+    def halted(self) -> bool:
+        """Has the card been paused, or told to step aside for one that is to be done now?"""
+        return bool(self.task_id) and ((task := find(self.task_id)).paused or bool(task.meta.get("aside")))
+
     def query(self) -> dict:
-        if self.task_id and find(self.task_id).paused:
+        if self.halted():
             raise Paused(self.task_id)
         return super().query()
 

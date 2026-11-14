@@ -554,3 +554,43 @@ def test_an_answer_to_the_reviewer_becomes_a_decision_and_the_last_one_sends_it_
     assert len(packet.parse(done.body)["decisions"]) == 3
     with pytest.raises(ValueError, match="no question 0"):
         board.answer(task.id, 0, "again")
+
+
+def test_a_reset_run_shows_every_segment_its_context_and_the_note_it_resumed_from(tmp_path, monkeypatch):
+    """A context reset is a step of its own, and the board can draw how full each segment got."""
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    run = tmp_path / "var" / "runs" / "20260921-120000-a-task" / "round-0"
+    run.mkdir(parents=True)
+    used = lambda n: {"response": {"usage": {"prompt_tokens": n}}}
+    before = [
+        {"role": "system"},
+        {"role": "user", "content": "the packet"},
+        {"role": "assistant", "extra": {"actions": [{"command": "ls"}], **used(600)}},
+        {"role": "tool", "content": "a.py", "extra": {"returncode": 0}},
+    ]
+    after = [
+        {"role": "system"},
+        {"role": "user", "content": "the packet\n\nBefore the restart you wrote:\n\n{\"left\": \"undo\"}\n\nWhat `git status --short` says"},
+        {"role": "assistant", "extra": {"actions": [{"command": "pytest"}], **used(250)}},
+    ]
+    agent = {"context_window": 1000, "reset_at": 0.6, "wrap_up_at": 0.8, "max_resets": 2}
+    (run / "trajectory.json").write_text(
+        json.dumps({"info": {"config": {"agent": agent}}, "segments": [before], "messages": after})
+    )
+    found = board.progress("20260921-120000-a-task")
+    assert [s.get("reset", False) for s in found["steps"]] == [False, True] and found["now"] == ["pytest"]
+    assert found["context"] == {
+        "window": 1000, "used": 250, "segments": [600], "reset_at": 0.6, "wrap_up_at": 0.8, "max_resets": 2,
+        "note": '{"left": "undo"}',
+    }
+
+
+def test_a_build_waiting_for_a_verdict_carries_the_size_of_its_latest_round(tmp_path, monkeypatch):
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    tasks.init()
+    task = tasks.move(tasks.move(tasks.move(tasks.create("idea"), "todo"), "under-work"), "done", actor="worker")
+    for n, patch in ((0, "+a\n"), (1, "+b\n+c\n-d\n")):
+        (rounds.run_dir(task.id) / f"round-{n}").mkdir(parents=True)
+        (rounds.run_dir(task.id) / f"round-{n}" / "web.patch").write_text(f"diff --git a/x b/x\n--- a/x\n+++ b/x\n{patch}")
+    (card,) = [t for t in board.snapshot()["tasks"] if t["id"] == task.id]
+    assert card["diffstat"] == {"added": 2, "removed": 1, "files": 1} and card["progress"] == ""

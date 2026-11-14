@@ -64,11 +64,13 @@ class DaemonConfig:
 
 
 def running() -> list[Task]:
-    """Cards with a run on them right now: anything in under-work, and a card an agent holds."""
+    """Cards with a run on them right now: anything in under-work, and a card an agent holds -- a part
+    has its tests written in todo."""
     return (
         tasks.tasks("under-work")
         + [t for t in tasks.tasks("planning") if t.status in ("planning", "writing-tests")]
         + [t for t in tasks.tasks("review") if t.status == "reviewing"]
+        + [t for t in tasks.tasks("todo") if t.status == "writing-tests"]
     )
 
 
@@ -88,6 +90,7 @@ def reclaim() -> list[str]:
         tasks.save(t, status="queued").id for t in tasks.tasks("planning") if t.status in ("planning", "writing-tests")
     ]
     reclaimed += [tasks.save(t, status="queued").id for t in tasks.tasks("review") if t.status == "reviewing"]
+    reclaimed += [tasks.save(t, status="todo").id for t in tasks.tasks("todo") if t.status == "writing-tests"]
     for id in reclaimed:
         tasks.log(type="reclaimed", id=id)
     return reclaimed

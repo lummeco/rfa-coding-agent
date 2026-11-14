@@ -148,6 +148,8 @@ def snapshot() -> dict:
                 ],
                 "split": len(task.meta.get("split") or []),
                 "blocked": parts.blocked(task, everything),
+                "progress": parts.progress(task) if task.meta.get("split") else "",
+                "diffstat": diffstat(task) if task.stage in ("review", "done") and not task.meta.get("verdict") else None,
             }
             for task in everything
         ],
@@ -216,9 +218,32 @@ def progress(id: str, of: str = "") -> dict:
     if not path.exists():
         return {"steps": []}
     try:
-        messages = json.loads(path.read_text()).get("messages", [])
+        saved = json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
         return {"steps": [], "again": True}
+    # A run whose context was reset keeps what came before in `segments`; each reset is a step of its own.
+    segments = [*saved.get("segments", []), saved.get("messages", [])]
+    steps, now = [], []
+    for n, messages in enumerate(segments):
+        found, now = steps_of(messages)
+        steps += ([{"commands": [], "returncode": 0, "output": "", "reset": True}] if n else []) + found
+    found = {"steps": steps, "now": now}
+    agent = (saved.get("info") or {}).get("config", {}).get("agent", {})
+    if window := agent.get("context_window"):
+        found["context"] = {
+            "window": window,
+            "used": ([0] + [prompt_tokens(m) for m in segments[-1] if prompt_tokens(m)])[-1],
+            "segments": [max([0] + [prompt_tokens(m) for m in segment]) for segment in segments[:-1]],
+            "reset_at": agent.get("reset_at", 0),
+            "wrap_up_at": agent.get("wrap_up_at", 0),
+            "max_resets": agent.get("max_resets", 0),
+            "note": resumed_note(segments[-1]) if len(segments) > 1 else "",
+        }
+    return found
+
+
+def steps_of(messages: list[dict]) -> tuple[list[dict], list[str]]:
+    """One conversation's commands and what came back, and the command still waiting for its answer."""
     steps, ran = [], None
     for message in messages:
         extra = message.get("extra") or {}
@@ -232,7 +257,33 @@ def progress(id: str, of: str = "") -> dict:
             steps.append({"commands": [], "returncode": 0, "output": tail(message), "exit": True})
             ran = None
     # The last one has no observation yet: that command is what the run is doing right now.
-    return {"steps": steps, "now": ran or []}
+    return steps, ran or []
+
+
+def prompt_tokens(message: dict) -> int:
+    response = (message.get("extra") or {}).get("response")
+    return ((response.get("usage") or {}).get("prompt_tokens") or 0) if isinstance(response, dict) else 0
+
+
+def resumed_note(messages: list[dict]) -> str:
+    """The note the coder wrote before its latest reset, as the host handed it back."""
+    content = str(messages[1].get("content", "")) if len(messages) > 1 else ""
+    return content.rpartition("Before the restart you wrote:")[2].partition("What `git status --short`")[0].strip()
+
+
+def diffstat(task: tasks.Task) -> dict | None:
+    """Lines added and removed, and files touched, in the latest round that left patches."""
+    run = rounds.run_dir(task.id)
+    folders = [run, *sorted((p for p in run.glob("round-*") if p.name[6:].isdigit()), key=lambda p: int(p.name[6:]))]
+    patches = next((found for folder in reversed(folders) if (found := sorted(folder.glob("*.patch")))), [])
+    if not patches:
+        return None
+    lines = [line for patch in patches for line in patch.read_text(errors="replace").splitlines()]
+    return {
+        "added": sum(1 for line in lines if line.startswith("+") and not line.startswith("+++")),
+        "removed": sum(1 for line in lines if line.startswith("-") and not line.startswith("---")),
+        "files": sum(1 for line in lines if line.startswith("diff --git ")),
+    }
 
 
 SHOT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}\.png")

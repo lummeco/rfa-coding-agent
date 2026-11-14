@@ -5,7 +5,7 @@ import subprocess
 import pytest
 
 from rfa import packet, parts, rounds, settings, tasks
-from rfa.daemon import DaemonConfig, next_job
+from rfa.daemon import DaemonConfig, next_job, reclaim, running
 from rfa.tester import write_tests
 
 SPLIT = [
@@ -163,3 +163,12 @@ def test_a_split_card_has_no_tests_of_its_own(repo):
     task = tasks.move(tasks.save(tasks.create("big", ["lummeco/web"]), split=SPLIT), "planning")
     written = write_tests(task, {})
     assert written.status == "ready" and "Built in 2 parts" in written.meta["tests_note"]
+
+
+def test_a_part_writing_its_tests_holds_the_machine_and_a_restart_hands_it_back(repo):
+    card = approved()
+    parts.advance(settings.load())
+    first, _ = parts.children(tasks.find(card.id))
+    tasks.save(first, status="writing-tests")
+    assert [t.id for t in running()] == [first.id]
+    assert reclaim() == [first.id] and next_job(DaemonConfig()) == ("tests", tasks.find(first.id))

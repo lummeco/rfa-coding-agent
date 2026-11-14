@@ -603,8 +603,20 @@ div.rfa-comment { background: color-mix(in srgb, var(--accent) 9%, var(--surface
 .upnext .what { all: unset; cursor: pointer; flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .upnext .what small { font-size: 12px; font-weight: 600; color: var(--accent); }
 .upnext .what span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.upnext .ico { all: unset; cursor: pointer; width: 34px; height: 44px; text-align: center; color: var(--text-3); font-size: 16px; }
-.upnext .ico:hover { color: var(--text); }
+.kebab { position: relative; flex: none; }
+.kebab summary {
+  list-style: none; cursor: pointer; width: 36px; height: 44px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center; color: var(--text-3); font-size: 18px;
+}
+.kebab summary::-webkit-details-marker { display: none; }
+.kebab[open] summary, .kebab summary:hover { color: var(--text); background: var(--line); }
+.kebab .pop {
+  position: absolute; right: 0; top: 100%; z-index: 5; min-width: 190px; padding: 6px; border-radius: 14px;
+  background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-lift); display: flex; flex-direction: column;
+}
+.kebab .pop button { all: unset; cursor: pointer; padding: 10px 12px; border-radius: 8px; font-size: 14px; }
+.kebab .pop button:hover { background: var(--surface-2); }
+.kebab .pop button:disabled { color: var(--text-3); cursor: default; background: none; }
 /* A card as a row: what it is, the step it has reached, and the one thing to do with it. */
 .crow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 14px 0; border-top: 1px solid var(--line); }
 .crow[draggable] { cursor: grab; }
@@ -1492,7 +1504,7 @@ requestAnimationFrame(orbTick);
 const WILL = { plan: "To be planned", tests: "To have its tests written", work: "To be coded", review: "To be reviewed" };
 const NEEDS = { answer: "Needs your answers", failed: "Failed", approve: "Needs your approval", judge: "Needs your verdict" };
 const short = repo => repo.split("/").pop();
-const will = t => t.scout ? "To read the repo and suggest work" : WILL[t.job];
+const will = t => t.scout ? "To be analyzed" : WILL[t.job];
 
 /** Your line for the desk, in your order: cards the machine has something to do for and is not on now. */
 function linedUp() {
@@ -1534,9 +1546,12 @@ function deskTile(lined, ready) {
     <ol class="upnext">${lined.map((t, i) => `<li draggable="true" data-drag="${esc(t.id)}" data-at="${i}">
       <span class="n">${i + 1}</span>
       <button class="what" data-id="${esc(t.id)}"><small>${will(t)}</small><span>${esc(t.title)}</span></button>
-      <button class="ico" data-line="${esc(t.id)}" data-to="${i - 1}" aria-label="Move it earlier"${i ? "" : " disabled"}>↑</button>
-      <button class="ico" data-line="${esc(t.id)}" data-to="${i + 1}" aria-label="Move it later"${i < lined.length - 1 ? "" : " disabled"}>↓</button>
-      <button class="ico" data-line="${esc(t.id)}" data-to="" aria-label="Take it out of the line">×</button>
+      <details class="kebab"><summary aria-label="Move or remove ${esc(t.title)}">⋮</summary><div class="pop">
+        <button data-line="${esc(t.id)}" data-to="${i - 1}"${i ? "" : " disabled"}>Move earlier</button>
+        <button data-line="${esc(t.id)}" data-to="${i + 1}"${i < lined.length - 1 ? "" : " disabled"}>Move later</button>
+        <button data-now="${esc(t.id)}">Start it now</button>
+        <button data-line="${esc(t.id)}" data-to="">Take out of the line</button>
+      </div></details>
     </li>`).join("")}</ol>
     <div class="zone" data-zone="end">Drop a card here to add it to the end</div>
     <p class="why" style="margin:0">${ready ? `After ${lined.length ? "these" : "this"}, the desk takes the ${plural(ready, "ready card")} by itself. It is never idle while there is work.`
@@ -1583,12 +1598,12 @@ let focus = "anything";   // what the next scout is asked to look for
 // A repository is busy while a scout of it is queued or its suggestions wait on you.
 const scouting = repo => state.tasks.some(t => !t.archived && t.repos.includes(repo) && (t.scout || (t.suggested && t.stage === "draft")));
 
-/** The buttons that send a scout out. With a run going, the scout steps in front of it. */
+/** The buttons that send a scout out. It waits its turn like any card; starting it now is a drag away. */
 function findTile() {
   const busy = Boolean(state.system?.running.length);
   return !state.repos.length ? "" : `<section class="tile" aria-labelledby="find-h">
     <div class="sec-head"><h2 id="find-h">Find work</h2><span class="why">${busy
-      ? "Have the machine read a repo and suggest 3 to 5 small fixes. It steps in front of the current run, which carries on afterwards."
+      ? "Have the machine read a repo and suggest 3 to 5 small fixes. It waits its turn: drag it onto the desk to start it now."
       : "The machine is free. Have it read a repo and suggest 3 to 5 small fixes."}</span></div>
     <div class="pick" role="group" aria-label="What to look for">${(state.focuses || []).map(f =>
       `<button data-focus="${esc(f)}" aria-pressed="${f === focus}">${esc(f)}</button>`).join("")}</div>
@@ -1601,7 +1616,7 @@ async function analyze(repo) {
   const res = await api("/api/analyze", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ repo, focus, now: Boolean(state.system?.running.length) }),
+    body: JSON.stringify({ repo, focus }),
   });
   if (!res.ok) { alert((await res.json()).error); return; }
   refresh();
@@ -2715,6 +2730,10 @@ document.getElementById("home").addEventListener("click", e => {
   const act = e.target.closest("button[data-act]");
   if (act) return act.dataset.act === "pause" ? setPaused(act.dataset.actId, true) : toggleArchive(act.dataset.actId);
   // In the line, a place; out of it, none.
+  const start = e.target.closest("button[data-now]");
+  if (start) return doNow(start.dataset.now);
+  // A menu left open closes on a click anywhere else.
+  document.querySelectorAll("#home .kebab[open]").forEach(k => k.contains(e.target) || k.removeAttribute("open"));
   const line = e.target.closest("button[data-line]");
   if (line) return lineUp(line.dataset.line, line.dataset.to === "" ? null : Number(line.dataset.to));
   const el = e.target.closest("[data-id]");

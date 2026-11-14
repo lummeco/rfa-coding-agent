@@ -101,6 +101,7 @@ def snapshot() -> dict:
     """Everything the page draws, in one request."""
     configured = settings.load().get("repos") or {}
     everything = tasks.tasks()
+    jobs = daemon.DaemonConfig.load()
     return {
         "stages": list(tasks.STAGES),
         "tasks": [
@@ -150,6 +151,9 @@ def snapshot() -> dict:
                 "blocked": parts.blocked(task, everything),
                 "progress": parts.progress(task) if task.meta.get("split") else "",
                 "scout": task.meta.get("scout"),
+                "desk": task.meta.get("desk"),
+                # What the machine would do for this card next, or nothing while it waits on you.
+                "job": None if task.paused or task.archived else daemon.job_for(task, jobs),
                 "now": bool(task.meta.get("now")) and task.stage != "done",
                 "kept": rounds.kept_dir(task.id).exists(),
                 "suggested": task.meta.get("suggested"),
@@ -707,6 +711,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/new",
             "/api/analyze",
             "/api/now",
+            "/api/desk",
             "/api/pr",
             "/api/edit",
             "/api/reorder",
@@ -789,6 +794,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in (
             "/api/edit",
             "/api/pause",
+            "/api/desk",
+            "/api/now",
             "/api/retry",
             "/api/rereview",
             "/api/verdict",
@@ -803,6 +810,8 @@ class Handler(BaseHTTPRequestHandler):
                     task = answer(payload["id"], int(payload["index"]), str(payload.get("answer") or ""))
                 elif self.path == "/api/pause":
                     task = pause(payload["id"], bool(payload.get("paused")), bool(payload.get("fresh")))
+                elif self.path == "/api/desk":
+                    task = daemon.line_up(tasks.find(payload["id"]), payload.get("index"))
                 elif self.path == "/api/now":
                     task = daemon.do_now(tasks.find(payload["id"]))
                 elif self.path == "/api/retry":

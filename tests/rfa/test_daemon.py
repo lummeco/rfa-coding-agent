@@ -207,3 +207,29 @@ def test_a_card_to_do_now_goes_ahead_of_everything_and_the_run_in_its_way_steps_
     # Waiting on you, the urgent card has no job, and the queue carries on as it always did.
     tasks.save(idea, status="ready")
     assert [next_job(DaemonConfig())[0], next_job(DaemonConfig())[1].id] == ["review", review.id]
+
+
+def test_your_line_for_the_desk_is_worked_first_in_your_order_and_a_card_waiting_on_you_keeps_its_place():
+    from rfa.daemon import line_up, lined_up
+
+    first, second = card("todo", "rename the invoice column"), card("todo", "cache the price list")
+    plan = card("planning", "add a duplicate button", status="queued")
+    line_up(second, 0)
+    line_up(plan, 0)
+    assert [t.id for t in lined_up()] == [plan.id, second.id]
+    assert [next_job(DaemonConfig())[0], next_job(DaemonConfig())[1].id] == ["plan", plan.id]
+    # Stopped for you, it is passed over without losing its place, and the line goes on.
+    tasks.save(tasks.find(plan.id), status="ready")
+    assert next_job(DaemonConfig())[1].id == second.id
+    tasks.save(tasks.find(plan.id), status="queued", planned_at=tasks.now())
+    assert [next_job(DaemonConfig())[0], next_job(DaemonConfig())[1].id] == ["tests", plan.id]
+    # Taken out of the line, the rest close up, and what is left over is the daemon's own order.
+    line_up(tasks.find(plan.id), None)
+    assert [(t.id, t.meta["desk"]) for t in lined_up()] == [(second.id, 0)]
+    line_up(tasks.find(second.id), None)
+    assert lined_up() == [] and next_job(DaemonConfig(plan_ahead=0))[0] == "work"
+    # A draft joins the line by being handed to the planner; one with nowhere to be planned cannot.
+    with pytest.raises(ValueError, match="names no repository"):
+        line_up(tasks.create("an idea with no repository"), 0)
+    assert line_up(tasks.create("fix the login redirect", ["lummeco/web"]), 0).stage == "planning"
+    assert first.id not in [t.id for t in lined_up()]

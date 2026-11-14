@@ -578,17 +578,54 @@ div.rfa-comment { background: color-mix(in srgb, var(--accent) 9%, var(--surface
 .stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .lbl { margin: 0; font-size: 13px; font-weight: 600; color: var(--text-3); }
 .why { color: var(--text-3); font-size: 13px; }
-/* Now: what the one machine is on, with the orb saying so before you read a word. */
-.nowtile { padding: 26px 28px; gap: 18px; }
-.nowtile .top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; }
-.nowtile .words { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.stack.deskcol { flex: 1 1 340px; max-width: 440px; }
+/* The desk: what the one machine is on, and your line of what it takes next. */
+.desk { padding: 24px; gap: 14px; }
+.desk h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; overflow-wrap: anywhere; }
+.desk h2 button { all: unset; cursor: pointer; }
+.desk h2 button:hover { text-decoration: underline; }
+.desk h2 small { display: block; font-size: 13px; font-weight: 400; letter-spacing: 0; color: var(--text-3); margin-top: 6px; }
+.desk .steps { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.desk .steps small { display: none; }
+.desk .steps b { font-size: 10px; overflow: hidden; text-overflow: ellipsis; }
+.desk .acts { display: flex; flex-wrap: wrap; gap: 10px; }
+.zone {
+  display: flex; align-items: center; justify-content: center; min-height: 48px; padding: 6px 14px; border-radius: 14px;
+  border: 2px dashed var(--line); color: var(--text-3); font-size: 13px; text-align: center;
+}
+.dragging .zone, .dragging .upnext li { border-color: #ff9f0a; color: var(--you); background: color-mix(in srgb, #ff9f0a 12%, transparent); }
+.upnext { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.upnext li {
+  display: flex; align-items: center; gap: 2px; min-height: 52px; padding: 4px 4px 4px 14px; border-radius: 14px;
+  background: var(--surface-2); border: 2px solid transparent; cursor: grab;
+}
+.upnext .n { font-weight: 600; color: var(--text-3); padding-right: 8px; }
+.upnext .what { all: unset; cursor: pointer; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.upnext .what small { font-size: 12px; font-weight: 600; color: var(--accent); }
+.upnext .what span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upnext .ico { all: unset; cursor: pointer; width: 34px; height: 44px; text-align: center; color: var(--text-3); font-size: 16px; }
+.upnext .ico:hover { color: var(--text); }
+/* A card as a row: what it is, the step it has reached, and the one thing to do with it. */
+.crow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 14px 0; border-top: 1px solid var(--line); }
+.crow[draggable] { cursor: grab; }
+.crow .what { all: unset; cursor: pointer; flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.crow .what b { font-weight: 600; }
+.crow .what:hover b { text-decoration: underline; }
+.crow .what small, .crow .where small { font-size: 13px; color: var(--text-3); }
+.crow .where { flex: 0 0 190px; display: flex; flex-direction: column; gap: 6px; }
+.crow .where small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crow > .action { flex: 0 0 190px; box-sizing: border-box; justify-content: center; padding: 0 10px; min-height: 44px; }
+.crow .x { all: unset; cursor: pointer; color: var(--accent); font-size: 13px; }
+.mini { display: flex; gap: 3px; }
+.mini i { flex: 1; height: 5px; border-radius: 3px; background: var(--line); }
+.mini .done { background: var(--accent); }
+.mini .at { background: #ff9f0a; }
+.mini .here { background: var(--text); }
 .kicker { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--you); }
 .kicker.idle { color: var(--text-3); }
 .kicker.blocked { color: var(--red); }
 .kicker i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-.nowtile h2 { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.1; overflow-wrap: anywhere; }
-.nowtile h2 small { display: block; font-size: 15px; font-weight: 400; letter-spacing: 0; color: var(--text-3); margin-top: 8px; }
-#orb { flex: none; width: 190px; height: 190px; color: var(--text); }
+#orb { align-self: center; width: 170px; height: 170px; color: var(--text); }
 .steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
 .steps li { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-3); }
 .steps li::before { content: ""; height: 6px; border-radius: 3px; background: var(--line); margin-bottom: 4px; }
@@ -596,9 +633,6 @@ div.rfa-comment { background: color-mix(in srgb, var(--accent) 9%, var(--surface
 .steps .at::before { background: #ff9f0a; }
 .steps b { font-size: 13px; font-weight: 500; }
 .steps .at b { color: var(--text); font-weight: 600; }
-.nowtile .acts { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: auto; font-size: 14px; color: var(--text-3); }
-.nowtile .acts .next { all: unset; cursor: pointer; color: var(--accent); }
-.nowtile .acts .next:hover { text-decoration: underline; }
 .meter { display: flex; gap: 2px; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
 .meter i { background: var(--green); }
 .kv { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
@@ -610,35 +644,9 @@ div.rfa-comment { background: color-mix(in srgb, var(--accent) 9%, var(--surface
 .sec-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .sec-head h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
 .sec-head .n { font-weight: 600; color: var(--you); }
-.item { border-top: 1px solid var(--line); padding: 16px 0 6px; display: flex; flex-direction: column; gap: 8px; }
-.item .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font: 12px var(--mono); color: var(--text-3); }
-.tag { border-radius: 6px; padding: 2px 8px; font-weight: 500; }
-.tag.answer { background: color-mix(in srgb, var(--you) 16%, transparent); color: var(--you); }
-.tag.failed { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red); }
-.tag.approve { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); }
-.tag.judge { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
-.item h3 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.35; }
-.item h3 button { all: unset; cursor: pointer; }
-.item h3 button:hover { text-decoration: underline; }
-.item h3 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
-.item p { margin: 0; color: var(--text-2); font-size: 14px; }
-.item p.err { color: var(--red); font: 12.5px/1.5 var(--mono); white-space: pre-wrap; max-height: 5.5em; overflow: hidden; }
-.item .facts { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--text-2); }
-.item .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
-button.action.ship { background: var(--green); color: var(--on-accent); font-weight: 600; }
+.sec-head .n.idle { color: var(--text-3); }
 button.action.you { background: var(--you); color: var(--on-accent); font-weight: 600; }
 .clear { border: 1px dashed var(--line); border-radius: var(--radius); padding: 16px 20px; color: var(--text-3); font-size: 14px; }
-.onl { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); }
-.onl:hover { border-color: var(--text-3); }
-.onl:focus-visible { outline: 2px solid var(--accent); }
-.onl .top { display: flex; gap: 8px; align-items: baseline; }
-.onl .top b { font-weight: 600; flex: 1; min-width: 0; }
-.onl .top span, .onl .bottom { font-size: 12px; color: var(--text-3); }
-.bar { display: flex; gap: 4px; }
-.bar i { flex: 1; height: 7px; border-radius: 4px; background: var(--line); }
-.bar i.passed { background: var(--accent); }
-.bar i.now { background: linear-gradient(90deg, var(--accent) 35%, color-mix(in srgb, var(--accent) 30%, transparent) 35%); }
-.bar i.stuck { background: var(--red); }
 .ledger { list-style: none; margin: 0; padding: 0; }
 .ledger li { border-bottom: 1px solid var(--line); }
 .ledger button { all: unset; cursor: pointer; display: flex; gap: 10px; align-items: baseline; width: 100%; padding: 8px 2px; font-size: 14px; }
@@ -649,23 +657,6 @@ button.action.you { background: var(--you); color: var(--on-accent); font-weight
 .linkish { all: unset; cursor: pointer; color: var(--accent); font-size: 14px; }
 .linkish:hover { text-decoration: underline; }
 [hidden] { display: none !important; }
-
-/* Home: a build to judge shows what the reviewer saw; a question is answered where it is asked. */
-.item.judge { flex-direction: row; flex-wrap: wrap; gap: 18px; }
-.item .thumb {
-  flex: 0 0 168px; height: 112px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2);
-  overflow: hidden; display: flex; align-items: center; justify-content: center; color: var(--text-3); font-size: 12px; padding: 0; cursor: pointer;
-}
-.item .thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top left; display: block; }
-.item .main { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-.qa { display: flex; flex-direction: column; gap: 8px; }
-.qa .row2 { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
-.qa textarea {
-  flex: 1 1 260px; min-height: 38px; resize: vertical; box-sizing: border-box; font: inherit; font-size: 14px;
-  color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px;
-}
-.qa textarea:focus { outline: 2px solid var(--you); border-color: transparent; }
-.diffstat .add { color: var(--green); } .diffstat .del { color: var(--red); }
 
 /* The side panel (a new idea, analytics) and the card page share one element. */
 .sheet { flex: 1; min-height: 0; display: flex; }
@@ -828,8 +819,7 @@ button.action.you { background: var(--you); color: var(--on-accent); font-weight
   body > header { padding: 16px 16px 12px; }
   #board { padding: 0 20px 20px; grid-auto-columns: minmax(252px, 1fr); }
   .home { padding: 0 16px 28px; }
-  .nowtile h2 { font-size: 24px; }
-  .steps small { display: none; }
+  .stack.deskcol { max-width: none; }
 }
 </style>
 </head>
@@ -955,10 +945,6 @@ function md(src) {
 const grow = el => { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; };
 document.addEventListener("input", e => {
   if (e.target.matches(".pe-list textarea, .oq textarea")) grow(e.target);
-  if (e.target.matches(".qa textarea")) {
-    const t = state.tasks.find(x => x.id === e.target.dataset.qaId);
-    if (t) answers.set(`${t.id}\n${t.open_questions[e.target.dataset.qa]}`, e.target.value);
-  }
   if (e.target.matches(".oq textarea")) {
     const t = state.tasks.find(x => x.id === openId);
     answers.set(`${t.id}\n${t.open_questions[e.target.dataset.oq]}`, e.target.value);
@@ -1512,7 +1498,20 @@ function orbTick(now) {
 requestAnimationFrame(orbTick);
 
 /** What the one machine is on, where that is on the line, and what comes after. Sets the orb's mode. */
-function nowTile() {
+// What the machine will do for a card when its turn comes, and what a card in Your move needs from you.
+const WILL = { plan: "To be planned", tests: "To have its tests written", work: "To be coded", review: "To be reviewed" };
+const NEEDS = { answer: "Needs your answers", failed: "Failed", approve: "Needs your approval", judge: "Needs your verdict" };
+const short = repo => repo.split("/").pop();
+const will = t => t.scout ? "To read the repo and suggest work" : WILL[t.job];
+
+/** Your line for the desk, in your order: cards the machine has something to do for and is not on now. */
+function linedUp() {
+  const running = new Set((state.system?.running || []).map(t => t.id));
+  return state.tasks.filter(t => Number.isInteger(t.desk) && t.job && !running.has(t.id)).sort((a, b) => a.desk - b.desk);
+}
+
+/** The desk: what the one machine is on, and under it your line of what it takes next. Sets the orb's mode. */
+function deskTile(lined, ready) {
   const sys = state.system;
   if (!sys) return "";
   const blocked = sys.gates.filter(g => ["power", "memory"].includes(g.name) && !g.ok);
@@ -1522,44 +1521,32 @@ function nowTile() {
   orb.mode = !sys.services.daemon ? "idle"
     : run ? ({ planning: "planning", "writing-tests": "tests", reviewing: "reviewing" }[run.status] || "coding")
     : sys.next && blocked.length ? "blocked" : turn && !sys.next ? "waiting" : "idle";
-  const at = run ? (AT[run.status] ?? 3) : sys.next ? JOB_AT[sys.next.job] ?? 3 : orb.mode === "waiting" ? 5 : -1;
-  const [kicker, cls] = !sys.services.daemon ? ["Stopped", "idle"] : run ? ["Now running", ""]
+  const at = run ? (AT[run.status] ?? 3) : sys.next ? JOB_AT[sys.next.job] ?? 3 : -1;
+  const [kicker, cls] = !sys.services.daemon ? ["Stopped", "idle"] : run ? ["On the desk", ""]
     : orb.mode === "blocked" ? [`Held · ${blocked.map(g => g.detail).join("; ")}`, "blocked"]
     : sys.next ? ["Up next", "idle"] : orb.mode === "waiting" ? ["Waiting on you", ""] : ["Idle", "idle"];
-  const title = on ? `${VERB[at]} ${esc(on.title)}<small>${esc([card && partOf(card).slice(3), on.model].filter(Boolean).join(" · "))}</small>`
+  const title = on ? `<button data-id="${esc(on.id)}">${VERB[at]} ${esc(on.title)}</button><small>${esc([card && partOf(card).slice(3), on.model].filter(Boolean).join(" · "))}</small>`
     : orb.mode === "waiting" ? `${plural(turn, "thing")} need${turn === 1 ? "s" : ""} you<small>The machine has nothing else to do.</small>`
-    : `Nothing on the line<small>Capture an idea, or approve a plan.</small>`;
-  const live = state.tasks.filter(t => !t.archived && !t.parent);
-  const count = stage => live.filter(t => t.stage === stage).length;
-  const notes = [
-    count("draft") ? plural(count("draft"), "draft") : "no drafts",
-    count("planning") ? `${count("planning")} in planning` : "empty",
-    "before code",
-    count("todo") ? `${count("todo")} approved` : "empty",
-    count("review") ? `${count("review")} in review` : "empty",
-    turn ? `${turn} waiting` : "nothing waiting",
-  ];
-  // After this job: plans that wait for the planner, then approved cards and parts, in the daemon's order.
-  const after = [
-    ...state.tasks.filter(t => !t.archived && t.stage === "planning" && t.status === "queued").map(t => ["plan", t]),
-    ...state.tasks.filter(t => !t.archived && t.stage === "todo" && !t.split).map(t => ["code", t]),
-  ].filter(([, t]) => t.id !== on?.id);
-  const then = after.length
-    ? `Then: ` + after.slice(0, 2).map(([verb, t]) => `<button class="next" data-id="${esc(t.id)}">${verb} ${esc(t.title)}</button>`).join(", ")
-      + (after.length > 2 ? ` +${after.length - 2} more` : "")
-    : "Then: nothing else queued";
-  return `<section class="tile wide nowtile" aria-label="Now">
-    <div class="top">
-      <div class="words"><span class="kicker ${cls}"><i></i>${esc(kicker)}</span><h2>${title}</h2></div>
-      <canvas id="orb" role="img" aria-label="The machine is ${orb.mode}"></canvas>
-    </div>
-    <ol class="steps">${STATIONS.map((name, i) =>
-      `<li class="${on && i < at ? "done" : i === at ? "at" : ""}"><b>${name}</b><small>${esc(notes[i])}</small></li>`).join("")}</ol>
-    <div class="acts">
-      ${on ? `<button class="action primary" data-id="${esc(on.id)}">${run ? "Watch the run" : "Open the card"}</button>` : ""}
-      ${run ? `<button class="action" data-act="pause" data-act-id="${esc(run.id)}">Pause</button>` : ""}
-      <span>${then}</span>
-    </div>
+    : `Nothing on the desk<small>Give it a card, or capture an idea.</small>`;
+  return `<section class="tile desk" aria-label="The desk">
+    <canvas id="orb" role="img" aria-label="The machine is ${orb.mode}"></canvas>
+    <span class="kicker ${cls}"><i></i>${esc(kicker)}</span>
+    <h2>${title}</h2>
+    ${card ? `<ol class="steps">${stepsFor(card)}</ol>` : ""}
+    ${run ? `<div class="acts"><button class="action primary" data-id="${esc(run.id)}">Watch the run</button>`
+      + `<button class="action" data-act="pause" data-act-id="${esc(run.id)}">Pause</button></div>` : ""}
+    <div class="zone" data-zone="now">Drop a card here to do it now. ${run ? "The current run steps aside." : ""}</div>
+    <h3 class="lbl">Up next</h3>
+    <ol class="upnext">${lined.map((t, i) => `<li draggable="true" data-drag="${esc(t.id)}" data-at="${i}">
+      <span class="n">${i + 1}</span>
+      <button class="what" data-id="${esc(t.id)}"><small>${will(t)}</small><span>${esc(t.title)}</span></button>
+      <button class="ico" data-line="${esc(t.id)}" data-to="${i - 1}" aria-label="Move it earlier"${i ? "" : " disabled"}>↑</button>
+      <button class="ico" data-line="${esc(t.id)}" data-to="${i + 1}" aria-label="Move it later"${i < lined.length - 1 ? "" : " disabled"}>↓</button>
+      <button class="ico" data-line="${esc(t.id)}" data-to="" aria-label="Take it out of the line">×</button>
+    </li>`).join("")}</ol>
+    <div class="zone" data-zone="end">Drop a card here to add it to the end</div>
+    <p class="why" style="margin:0">${ready ? `After ${lined.length ? "these" : "this"}, the desk takes the ${plural(ready, "ready card")} by itself. It is never idle while there is work.`
+      : lined.length || run ? `Nothing else is ready. After ${lined.length ? "these" : "this"} the desk is idle.` : "Nothing is ready. The desk is idle until you give it something."}</p>
   </section>`;
 }
 
@@ -1570,7 +1557,7 @@ function machineTile() {
   const gate = name => sys.gates.find(g => g.name === name) || { ok: true, detail: "unknown" };
   const memory = gate("memory"), power = gate("power"), free = memory.detail.match(/(\d+)% free/);
   const row = (label, value, ok = true) => `<div class="kv"><span>${label}</span><b class="${ok ? "" : "bad"}">${esc(value)}</b></div>`;
-  return `<section class="tile narrow" aria-labelledby="machine-h">
+  return `<section class="tile" aria-labelledby="machine-h">
     <h2 class="lbl" id="machine-h">Machine</h2>
     ${row("Memory", memory.detail, memory.ok)}
     ${free ? `<div class="meter" aria-hidden="true"><i style="flex:${free[1]}"></i><span style="flex:${100 - free[1]}"></span></div>` : ""}
@@ -1580,102 +1567,40 @@ function machineTile() {
   </section>`;
 }
 
-function turnItem({ kind, label, t }) {
-  const rounds = (t.rounds || []).length;
-  const where = [t.repos.map(r => r.split("/").pop()).join(", "), rounds && `round ${rounds}`, when(t.created)].filter(Boolean).join(" · ");
-  const open = (text, cls = "") => `<button class="action ${cls}" data-id="${esc(t.id)}">${text}</button>`;
-  let body = "", acts = "";
-  if (kind === "answer") {
-    // Every question gets its own box: the default it was asked with is one click, anything else is typed.
-    body = t.open_questions.map((q, i) => `<div class="qa">
-        <p>${inline(q)}</p>
-        <div class="row2">
-          <textarea rows="1" data-qa-id="${esc(t.id)}" data-qa="${i}" aria-label="Your answer" placeholder="Your answer">${esc(answers.get(`${t.id}\n${q}`) || "")}</textarea>
-          <button class="action" data-act="default" data-act-id="${esc(t.id)}" data-i="${i}">Default is good</button>
-          <button class="action you" data-act="answer" data-act-id="${esc(t.id)}" data-i="${i}">Answer</button>
-        </div>
-      </div>`).join("") || `<p>It stopped on a question. Open it to see where.</p>`;
-    acts = open("Open the card");
-  } else if (kind === "failed") {
-    body = t.error ? `<p class="err">${esc(String(t.error).slice(0, 400))}</p>` : "";
-    acts = (t.stage === "todo" ? `<button class="action primary" data-act="retry" data-act-id="${esc(t.id)}">Retry</button>` : "") + open("Open");
-  } else if (kind === "approve") {
-    const facts = [t.complexity && `complexity ${t.complexity}/5`, t.split && `built in ${t.split} parts`, t.open_questions.length && plural(t.open_questions.length, "open question")];
-    body = `<div class="facts">${facts.filter(Boolean).map(f => `<span>${esc(f)}</span>`).join("")}</div>`;
-    acts = `<button class="action primary" data-act="approve" data-act-id="${esc(t.id)}">Approve</button>` + open("Read the plan");
-  } else {
-    const pending = (t.pending || []).length;
-    const d = t.diffstat;
-    const facts = [
-      d ? `<span class="diffstat"><span class="add">+${d.added}</span> <span class="del">−${d.removed}</span> in ${plural(d.files, "file")}</span>` : "",
-      t.booted ? (t.booted.ok ? `<span style="color: var(--green)">✓ boots</span>` : `<span style="color: var(--red)">✗ won't boot</span>`) : "",
-      `<span>${esc(t.status)}</span>`,
-      pending ? `<span>${plural(pending, "comment")} waiting</span>` : "",
-      t.parts.length ? `<span>built in ${t.parts.length} parts</span>` : "",
-    ];
-    body = `<div class="facts">${facts.join("")}</div>`;
-    acts = `<button class="action ship" data-act="ship" data-act-id="${esc(t.id)}">Ship it</button>` + open("Read the diff")
-      + `<button class="action quiet" data-act="trash" data-act-id="${esc(t.id)}">Trash</button>`;
-  }
-  const main = `<div class="row"><span class="tag ${kind}">${esc(label.toUpperCase())}${kind === "answer" ? " · holds the line" : ""}</span><span>${esc(where + partOf(t))}</span></div>
-    <h3><button data-id="${esc(t.id)}">${esc(t.title)}</button></h3>
-    ${body}
-    <div class="acts">${acts}</div>`;
-  if (kind !== "judge") return `<article class="item">${main}</article>`;
-  // One picture, the one most likely to show the change: an after or a criterion shot over a before.
-  const pick = (t.shots || []).find(n => !/^(before|debug)\b/i.test(n)) || (t.shots || [])[0];
-  if (pick) loadShots(t, [pick]);
-  const shot = pick && shotUrls.get(`${t.id}/${t.attempts}/${pick}`);
-  return `<article class="item judge">
-    <button class="thumb" data-id="${esc(t.id)}" aria-label="Open ${esc(t.title)}">${shot ? `<img src="${shot}" alt="">` : t.shots?.length ? "loading…" : "no screenshot"}</button>
-    <div class="main">${main}</div>
-  </article>`;
+/** One card as a row. `says` is the line under its steps; `does` its one button, or a give-to-the-desk one. */
+function cardRow(t, says, does = "") {
+  const { at, yours } = standing(t);
+  return `<div class="crow"${does ? "" : ` draggable="true" data-drag="${esc(t.id)}"`}>
+    <button class="what" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><small>${esc(t.repos.map(short).join(", ") + partOf(t))}</small></button>
+    <div class="where"><span class="mini" role="img" aria-label="Step ${Math.min(at + 1, 7)} of 7">${[0, 1, 2, 3, 4, 5, 6].map(i =>
+      `<i class="${i < at ? "done" : i === at ? (yours ? "at" : "here") : ""}"></i>`).join("")}</span><small>${says}</small></div>
+    ${does || `<button class="action primary" data-line="${esc(t.id)}" data-to="9999">Give to the desk</button>`}
+  </div>`;
 }
 
-function onLine(t) {
-  const bar = t.parts.length
-    ? `<div class="bar">${t.parts.map(p => `<i class="${passed(p) ? "passed" : ["failed", "question"].includes(p.status) ? "stuck" : p.stage !== "todo" || LIVE.has(p.status) ? "now" : ""}"></i>`).join("")}</div>`
-      + `<div class="bottom">${esc(t.blocked || t.parts.map(p => `p${p.part} ${p.status}`).join(" · "))}</div>`
-    : `<div class="bottom">${esc(LABEL[t.stage] || t.stage)} · ${esc(t.status)}${t.paused ? " · paused" : ""}</div>`;
-  return `<button class="onl" data-id="${esc(t.id)}">
-    <div class="top"><b>${esc(t.title)}</b><span>${esc(t.repos.map(r => r.split("/").pop()).join(", "))}</span></div>
-    ${bar}
-  </button>`;
-}
+const cardGroup = (name, rows, hint, cls = "") => `<section class="tile">
+  <div class="sec-head"><h2>${name}</h2><span class="n ${cls}">${rows.length || ""}</span><span class="why">${hint}</span></div>
+  ${rows.join("") || `<div class="clear">Nothing here.</div>`}
+</section>`;
 
 let homeHtml = "";
 let focus = "anything";   // what the next scout is asked to look for
 
-const short = repo => repo.split("/").pop();
 // A repository is busy while a scout of it is queued or its suggestions wait on you.
 const scouting = repo => state.tasks.some(t => !t.archived && t.repos.includes(repo) && (t.scout || (t.suggested && t.stage === "draft")));
 
-/** What a scout found, for you to plan, edit or dismiss; and, while the machine is free, the buttons that send one out. */
-function scoutTiles() {
-  const found = state.tasks.filter(t => !t.archived && t.suggested && t.stage === "draft");
+/** The buttons that send a scout out. With a run going, the scout steps in front of it. */
+function findTile() {
   const busy = Boolean(state.system?.running.length);
-  return (found.length ? `<section class="tile" aria-labelledby="found-h">
-      <div class="sec-head"><h2 id="found-h">Suggested</h2><span class="n">${found.length}</span><span class="why">found by a scout; nothing happens until you plan one</span></div>
-      ${found.map(t => `<article class="item">
-        <div class="row"><span class="tag ${t.kind === "bug" ? "failed" : "judge"}">${esc((t.kind || "idea").toUpperCase())}</span><span>${esc(t.repos.map(short).join(", "))}</span></div>
-        <h3><button data-id="${esc(t.id)}">${esc(t.title)}</button></h3>
-        <p>${inline(String(t.body).trim().split("\n\n")[2] || "")}</p>
-        <div class="acts">
-          <button class="action primary" data-act="approve-idea" data-act-id="${esc(t.id)}">Plan it</button>
-          <button class="action" data-id="${esc(t.id)}">Edit</button>
-          <button class="action quiet" data-act="dismiss" data-act-id="${esc(t.id)}">Dismiss</button>
-        </div>
-      </article>`).join("")}
-    </section>` : "")
-    + (state.repos.length ? `<section class="tile" aria-labelledby="find-h">
-      <div class="sec-head"><h2 id="find-h">Find work</h2><span class="why">${busy
-        ? "Have the machine read a repo and suggest 3 to 5 small fixes. It steps in front of the current run, which carries on afterwards."
-        : "The machine is free. Have it read a repo and suggest 3 to 5 small fixes."}</span></div>
-      <div class="pick" role="group" aria-label="What to look for">${(state.focuses || []).map(f =>
-        `<button data-focus="${esc(f)}" aria-pressed="${f === focus}">${esc(f)}</button>`).join("")}</div>
-      <div class="find">${state.repos.map(r => `<button class="action" data-analyze="${esc(r)}"${scouting(r)
-        ? ` disabled title="Decide on what the last scout of it found first"` : ""}>Analyze ${esc(short(r))}</button>`).join("")}</div>
-    </section>` : "");
+  return !state.repos.length ? "" : `<section class="tile" aria-labelledby="find-h">
+    <div class="sec-head"><h2 id="find-h">Find work</h2><span class="why">${busy
+      ? "Have the machine read a repo and suggest 3 to 5 small fixes. It steps in front of the current run, which carries on afterwards."
+      : "The machine is free. Have it read a repo and suggest 3 to 5 small fixes."}</span></div>
+    <div class="pick" role="group" aria-label="What to look for">${(state.focuses || []).map(f =>
+      `<button data-focus="${esc(f)}" aria-pressed="${f === focus}">${esc(f)}</button>`).join("")}</div>
+    <div class="find">${state.repos.map(r => `<button class="action" data-analyze="${esc(r)}"${scouting(r)
+      ? ` disabled title="Decide on what the last scout of it found first"` : ""}>Analyze ${esc(short(r))}</button>`).join("")}</div>
+  </section>`;
 }
 
 async function analyze(repo) {
@@ -1688,41 +1613,55 @@ async function analyze(repo) {
   refresh();
 }
 
+/** Put a card at `index` in your line for the desk, or take it out with no index. */
+async function lineUp(id, index) {
+  const res = await api("/api/desk", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, index }),
+  });
+  if (!res.ok) { alert((await res.json()).error); return; }
+  refresh();
+}
+
 function home() {
   const items = turnItems();
   document.getElementById("turn-n").textContent = items.length || "";
-  const top = state.tasks.filter(t => !t.archived && !t.parent);
-  const line = top.filter(t => ["todo", "under-work", "review"].includes(t.stage) && t.status !== "failed" && t.status !== "question");
+  const running = new Set((state.system?.running || []).map(t => t.id));
+  const lined = linedUp(), inLine = new Set(lined.map(t => t.id));
+  const ready = state.tasks.filter(t => t.job && !inLine.has(t.id) && !running.has(t.id)).sort(byCreated);
+  const drafts = state.tasks.filter(t => !t.archived && t.stage === "draft").sort(byCreated);
   const verdicts = state.tasks.filter(t => !t.archived && t.verdict);
   const shipped = verdicts.filter(t => t.verdict === "shipped").sort(byCreated).reverse();
   const trashed = verdicts.length - shipped.length;
-  const html = `<div class="home">
-    <div class="widgets">${nowTile()}${machineTile()}</div>
-    <div class="widgets">
-      <div class="stack wide">
-        <section class="tile" aria-labelledby="turn-h">
-          <div class="sec-head"><h2 id="turn-h">Your turn</h2><span class="n">${items.length || ""}</span></div>
-          ${items.map(turnItem).join("") || `<div class="clear">Nothing waits on you. New work starts with an idea: press N.</div>`}
-        </section>
-        ${scoutTiles()}
-      </div>
-      <div class="stack">
-        <section class="tile" aria-labelledby="ledger-h">
-          <h2 class="lbl" id="ledger-h">Ledger</h2>
-          <div><span class="big">${shipped.length}</span> <span class="why">shipped</span></div>
-          <div class="meter" role="img" aria-label="${shipped.length} shipped, ${trashed} trashed"><i style="flex:${shipped.length}"></i><span style="flex:${trashed}"></span></div>
-          <span class="why">${trashed} trashed</span>
-          <ol class="ledger">${shipped.slice(0, 5).map(t =>
-            `<li><button data-id="${esc(t.id)}"><span class="g" aria-hidden="true">●</span><span class="t">${esc(t.title)}</span><span class="r">↻${(t.rounds || []).length || 1}</span></button></li>`).join("")}</ol>
-          <button class="linkish" data-view="board">All cards, archived ones included</button>
-        </section>
-        ${line.length ? `<section class="tile" aria-labelledby="line-h">
-          <h2 class="lbl" id="line-h">On the line</h2>
-          ${line.map(onLine).join("")}
-        </section>` : ""}
-      </div>
+  const does = { answer: t => `Answer ${plural(t.open_questions.length || 1, "question")}`, failed: () => "See what failed",
+    approve: () => "Check plan and tests", judge: () => "Judge it" };
+  const html = `<div class="home"><div class="widgets">
+    <div class="stack deskcol">
+      ${deskTile(lined, ready.length)}
+      ${machineTile()}
+      <section class="tile" aria-labelledby="ledger-h">
+        <h2 class="lbl" id="ledger-h">Ledger</h2>
+        <div><span class="big">${shipped.length}</span> <span class="why">shipped</span></div>
+        <div class="meter" role="img" aria-label="${shipped.length} shipped, ${trashed} trashed"><i style="flex:${shipped.length}"></i><span style="flex:${trashed}"></span></div>
+        <span class="why">${trashed} trashed</span>
+        <ol class="ledger">${shipped.slice(0, 5).map(t =>
+          `<li><button data-id="${esc(t.id)}"><span class="g" aria-hidden="true">●</span><span class="t">${esc(t.title)}</span><span class="r">↻${(t.rounds || []).length || 1}</span></button></li>`).join("")}</ol>
+        <button class="linkish" data-view="board">All cards, archived ones included</button>
+      </section>
     </div>
-  </div>`;
+    <div class="stack wide">
+      ${cardGroup("Your move", items.map(({ kind, t }) => cardRow(t, NEEDS[kind],
+        `<button class="action ${kind === "failed" ? "" : "you"}" data-id="${esc(t.id)}">${does[kind](t)}</button>`)),
+        "A card that needs you leaves the desk and waits here. Once you answer, it goes back in line by itself.")}
+      ${cardGroup("Ready for the desk", ready.map(t => cardRow(t, will(t))),
+        "Work you already asked for. The desk takes these by itself when Up next is empty.", "idle")}
+      ${drafts.length ? cardGroup("Drafts", drafts.map(t => cardRow(t, t.suggested
+        ? `Suggested ${esc(t.kind || "idea")} · <button class="x" data-act="dismiss" data-act-id="${esc(t.id)}">Dismiss</button>` : "Not handed over yet")),
+        "Ideas you have not handed over. The desk never takes these by itself.", "idle") : ""}
+      ${findTile()}
+    </div>
+  </div></div>`;
   if (html !== homeHtml) document.getElementById("home").innerHTML = homeHtml = html;
 }
 
@@ -1912,7 +1851,6 @@ async function loadShots(t, names = t.shots || []) {
     shotUrls.set(key, URL.createObjectURL(await res.blob()));
     arrived = true;
   }
-  if (arrived) home();
   if (arrived && detailId === t.id) showDetail(t.id);
 }
 
@@ -2763,28 +2701,37 @@ document.getElementById("home").addEventListener("click", e => {
   const repo = e.target.closest("button[data-analyze]");
   if (repo) { repo.disabled = true; return analyze(repo.dataset.analyze); }
   const act = e.target.closest("button[data-act]");
-  if (act) {
-    const id = act.dataset.actId;
-    act.disabled = true;
-    if (act.dataset.act === "approve") return move(id, "todo");
-    if (act.dataset.act === "retry") return retry(id);
-    if (act.dataset.act === "ship") return setVerdict(id, "shipped");
-    if (act.dataset.act === "trash") return setVerdict(id, "trashed");
-    if (act.dataset.act === "pause") return setPaused(id, true);
-    if (act.dataset.act === "approve-idea") return move(id, "planning");
-    if (act.dataset.act === "dismiss") return toggleArchive(id);
-    const t = state.tasks.find(x => x.id === id);
-    const i = Number(act.dataset.i);
-    if (act.dataset.act === "default") return sendAnswer(t, i, "Default is good");
-    if (act.dataset.act === "answer") {
-      const answer = (answers.get(`${id}\n${t.open_questions[i]}`) || "").trim();
-      if (answer) return sendAnswer(t, i, answer);
-      act.disabled = false;
-      return document.querySelector(`.qa textarea[data-qa-id="${CSS.escape(id)}"][data-qa="${i}"]`)?.focus();
-    }
-  }
+  if (act) return act.dataset.act === "pause" ? setPaused(act.dataset.actId, true) : toggleArchive(act.dataset.actId);
+  // In the line, a place; out of it, none.
+  const line = e.target.closest("button[data-line]");
+  if (line) return lineUp(line.dataset.line, line.dataset.to === "" ? null : Number(line.dataset.to));
   const el = e.target.closest("[data-id]");
   if (el) showDetail(el.dataset.id);
+});
+// A card dragged onto the desk: on the top zone it is done now, on a row of the line it takes that
+// row's place, and on the bottom zone it goes to the end.
+let carrying = null;
+document.getElementById("home").addEventListener("dragstart", e => {
+  if (!(carrying = e.target.closest("[data-drag]")?.dataset.drag)) return;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", carrying);
+  document.getElementById("home").classList.add("dragging");
+});
+document.getElementById("home").addEventListener("dragend", () => {
+  carrying = null;
+  document.getElementById("home").classList.remove("dragging");
+});
+document.getElementById("home").addEventListener("dragover", e => {
+  if (carrying && e.target.closest(".zone, .upnext li")) e.preventDefault();
+});
+document.getElementById("home").addEventListener("drop", e => {
+  const zone = e.target.closest(".zone"), row = e.target.closest(".upnext li");
+  if (!carrying || !(zone || row)) return;
+  e.preventDefault();
+  const id = carrying;
+  document.getElementById("home").classList.remove("dragging");
+  carrying = null;
+  return zone?.dataset.zone === "now" ? doNow(id) : lineUp(id, row ? Number(row.dataset.at) : 9999);
 });
 document.getElementById("analytics").addEventListener("click", showAnalytics);
 document.getElementById("d-body").addEventListener("click", e => {

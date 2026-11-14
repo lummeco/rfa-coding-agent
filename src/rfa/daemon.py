@@ -124,9 +124,39 @@ def job_for(task: Task, config: DaemonConfig) -> str | None:
         return "review" if config.review and task.status == "queued" and reviewable(task) else None
     if task.stage == "planning":
         return planning_job(task) if config.plan and task.status == "queued" else None
+    if task.stage != "todo":
+        return None
     if parts.needs_tests(task):
         return "tests" if config.plan else None
     return "work" if config.work and task.attempts < config.max_attempts and parts.workable(task) else None
+
+
+def lined_up() -> list[Task]:
+    """The cards you put in line for the desk, in your order -- whatever stage each has reached."""
+    line = [t for t in tasks.tasks() if isinstance(t.meta.get("desk"), int) and not t.archived]
+    return sorted(line, key=lambda t: t.meta["desk"])
+
+
+def line_up(task: Task, index: int | None) -> Task:
+    """Put a card at `index` in your line for the desk, or take it out of the line.
+
+    The line is yours: the daemon works it first, in order, and goes back to its own order when the
+    line has nothing it can do. A card that stops for you keeps its place, so it is next again the
+    moment you answer. A draft put in line is handed to the planner, which is what being in line means.
+    """
+    if index is not None and task.stage == "draft":
+        if not task.meta.get("repos"):
+            raise ValueError("this draft names no repository; pick one before giving it to the desk")
+        task = tasks.plan_now(task)
+    line = [t for t in lined_up() if t.id != task.id]
+    if index is None:
+        tasks.save(task, desk=None)
+    else:
+        line.insert(index, task)
+    for n, other in enumerate(line):
+        if other.meta.get("desk") != n:
+            tasks.save(other, desk=n)
+    return tasks.find(task.id)
 
 
 def do_now(task: Task) -> Task:
@@ -166,6 +196,10 @@ def next_job(config: DaemonConfig) -> tuple[str, Task] | None:
     # A card you said to do now is ahead of everything, reviews included, whatever it needs next.
     for task in (t for stage in live.values() for t in stage if urgent(t)):
         if job := job_for(task, config):
+            return job, task
+    # Then your own line, in your order: the first card in it the machine can do something for.
+    for task in lined_up():
+        if not task.paused and (job := job_for(task, config)):
             return job, task
     reviews = [t for t in live["review"] if t.status == "queued" and reviewable(t)] if config.review else []
     if reviews:

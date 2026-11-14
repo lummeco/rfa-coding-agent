@@ -192,7 +192,7 @@ def test_the_daemon_keeps_every_repository_fetched_and_names_the_ones_it_cannot_
 
 
 def test_a_card_to_do_now_goes_ahead_of_everything_and_the_run_in_its_way_steps_aside():
-    from rfa.daemon import do_now
+    from rfa.daemon import do_now, lined_up
 
     review = card("under-work", "cache the price list")
     review = tasks.move(review, "review", actor="worker", landed={"web": "rfa/x"})
@@ -204,6 +204,8 @@ def test_a_card_to_do_now_goes_ahead_of_everything_and_the_run_in_its_way_steps_
     assert [next_job(DaemonConfig())[0], next_job(DaemonConfig())[1].id] == ["plan", idea.id]
     # The run in its way is told to step aside, not held: it is back in the queue once it has stopped.
     assert tasks.find(coding.id).meta["aside"] is True and not tasks.find(coding.id).paused
+    # And it is first in your line, so it is what the machine takes up again afterwards.
+    assert [t.id for t in lined_up()] == [coding.id]
     # Waiting on you, the urgent card has no job, and the queue carries on as it always did.
     tasks.save(idea, status="ready")
     assert [next_job(DaemonConfig())[0], next_job(DaemonConfig())[1].id] == ["review", review.id]

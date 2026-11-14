@@ -163,17 +163,17 @@ def do_now(task: Task) -> Task:
     """Put one card ahead of everything, and have whatever is running step aside for it.
 
     One card at a time: marking another takes the mark off the first. A run that steps aside goes
-    back to its queue, not held, so it carries on by itself once this card is finished or waiting
-    on you -- and a coding run carries on from the changes it had made.
+    to the front of your line, not held, so it is what the machine takes up again once this card is
+    finished or waiting on you -- and a coding run carries on from the changes it had made.
     """
     for other in tasks.tasks():
         if other.meta.get("now") and other.id != task.id:
             tasks.save(other, now=None)
     for other in running():
         if other.id != task.id and other.meta.get("parent") != task.id:
-            tasks.save(other, aside=True)
+            line_up(tasks.save(other, aside=True), 0)
     tasks.log(type="now", id=task.id)
-    return tasks.save(tasks.plan_now(task) if task.stage == "draft" else task, now=True, paused=None)
+    return tasks.save(tasks.plan_now(task) if task.stage == "draft" else task, now=True, paused=None, desk=None)
 
 
 def next_job(config: DaemonConfig) -> tuple[str, Task] | None:

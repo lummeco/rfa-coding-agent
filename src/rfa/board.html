@@ -582,6 +582,17 @@ div.rfa-comment { background: color-mix(in srgb, var(--accent) 9%, var(--surface
   display: flex; align-items: center; justify-content: center; min-height: 48px; padding: 6px 14px; border-radius: 14px;
   border: 2px dashed var(--line); color: var(--text-3); font-size: 13px; text-align: center;
 }
+/* A switch in progress: the card coming onto the desk, shown from the moment you ask for it. */
+.switching {
+  display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 14px; border-radius: 14px;
+  border: 2px solid #ff9f0a; background: color-mix(in srgb, #ff9f0a 12%, transparent);
+}
+.switching div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.switching small { font-size: 12px; font-weight: 600; color: var(--you); }
+.switching span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spin { flex: none; width: 16px; height: 16px; border-radius: 50%; border: 2px solid color-mix(in srgb, #ff9f0a 30%, transparent); border-top-color: #ff9f0a; animation: spin .9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
 .dragging .zone, .dragging .upnext li { border-color: #ff9f0a; color: var(--you); background: color-mix(in srgb, #ff9f0a 12%, transparent); }
 .upnext { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .upnext li {
@@ -1486,7 +1497,7 @@ const will = t => t.scout ? "To read the repo and suggest work" : WILL[t.job];
 /** Your line for the desk, in your order: cards the machine has something to do for and is not on now. */
 function linedUp() {
   const running = new Set((state.system?.running || []).map(t => t.id));
-  return state.tasks.filter(t => Number.isInteger(t.desk) && t.job && !running.has(t.id)).sort((a, b) => a.desk - b.desk);
+  return state.tasks.filter(t => Number.isInteger(t.desk) && t.job && !t.now && !running.has(t.id)).sort((a, b) => a.desk - b.desk);
 }
 
 /** The desk: what the one machine is on, and under it your line of what it takes next. Sets the orb's mode. */
@@ -1501,7 +1512,9 @@ function deskTile(lined, ready) {
     : run ? ({ planning: "planning", "writing-tests": "tests", reviewing: "reviewing" }[run.status] || "coding")
     : sys.next && blocked.length ? "blocked" : turn && !sys.next ? "waiting" : "idle";
   const at = run ? (AT[run.status] ?? 3) : sys.next ? JOB_AT[sys.next.job] ?? 3 : -1;
-  const [kicker, cls] = !sys.services.daemon ? ["Stopped", "idle"] : run ? ["On the desk", ""]
+  // A card you said to start now, not on the desk yet: the switch is under way until it is.
+  const incoming = state.tasks.find(t => t.now && !t.archived && t.id !== run?.id && (t.job || t.stage === "draft"));
+  const [kicker, cls] = !sys.services.daemon ? ["Stopped", "idle"] : run ? [incoming ? "Stepping aside" : "On the desk", ""]
     : orb.mode === "blocked" ? [`Held · ${blocked.map(g => g.detail).join("; ")}`, "blocked"]
     : sys.next ? ["Up next", "idle"] : orb.mode === "waiting" ? ["Waiting on you", ""] : ["Idle", "idle"];
   const title = on ? `<button data-id="${esc(on.id)}">${VERB[at]} ${esc(on.title)}</button><small>${esc([card && partOf(card).slice(3), on.model].filter(Boolean).join(" · "))}</small>`
@@ -1514,7 +1527,9 @@ function deskTile(lined, ready) {
     ${card ? `<ol class="steps">${stepsFor(card)}</ol>` : ""}
     ${run ? `<div class="acts"><button class="action primary" data-id="${esc(run.id)}">Watch the run</button>`
       + `<button class="action" data-act="pause" data-act-id="${esc(run.id)}">Pause</button></div>` : ""}
-    <div class="zone" data-zone="now">Drop a card here to do it now. ${run ? "The current run steps aside." : ""}</div>
+    ${incoming ? `<div class="switching" role="status"><i class="spin"></i><div>
+        <small>Starting now${run ? " · the current run is stepping aside" : ""}</small><span>${esc(incoming.title)}</span></div></div>`
+      : `<div class="zone" data-zone="now">Drop a card here to start it now${run ? ". The current run steps aside and goes first in line." : ""}</div>`}
     <h3 class="lbl">Up next</h3>
     <ol class="upnext">${lined.map((t, i) => `<li draggable="true" data-drag="${esc(t.id)}" data-at="${i}">
       <span class="n">${i + 1}</span>
@@ -1608,7 +1623,7 @@ function home() {
   document.getElementById("turn-n").textContent = items.length || "";
   const running = new Set((state.system?.running || []).map(t => t.id));
   const lined = linedUp(), inLine = new Set(lined.map(t => t.id));
-  const ready = state.tasks.filter(t => t.job && !inLine.has(t.id) && !running.has(t.id)).sort(byCreated);
+  const ready = state.tasks.filter(t => t.job && !t.now && !inLine.has(t.id) && !running.has(t.id)).sort(byCreated);
   const drafts = state.tasks.filter(t => !t.archived && t.stage === "draft").sort(byCreated);
   const does = { answer: t => `Answer ${plural(t.open_questions.length || 1, "question")}`, failed: () => "See what failed",
     approve: () => "Check plan and tests", judge: () => "Judge it" };
@@ -1716,7 +1731,7 @@ function kickFor(t) {
   const { yours } = standing(t), owner = t.parent && state.tasks.find(x => x.id === t.parent);
   const cls = t.status === "failed" ? "blocked" : yours || (LIVE.has(t.status) && !t.paused) ? "" : "idle";
   return `<span class="kicker ${cls}"><i></i>${yours ? "Waiting on you · " : ""}${esc(LABEL[t.stage] || t.stage)} · ${esc(t.status)}`
-    + `${t.paused ? " · paused" : ""}${t.now ? " · now" : ""}${owner ? ` · part ${esc(t.part)} of ${owner.parts.length}` : ""}</span>`;
+    + `${t.paused ? " · paused" : ""}${t.now && !LIVE.has(t.status) && (t.job || t.stage === "draft") ? " · starting now" : t.aside ? " · stepping aside" : ""}${owner ? ` · part ${esc(t.part)} of ${owner.parts.length}` : ""}</span>`;
 }
 
 function factsFor(t) {
@@ -2373,6 +2388,7 @@ function showDetail(id) {
     document.getElementById("d-actions").innerHTML = actionsFor(t)
       + (t.now || t.stage === "done" || t.archived || LIVE.has(t.status) ? ""
         : `<button class="action" id="now" title="Ahead of everything else; a run in its way steps aside and carries on afterwards">Do this now</button>`)
+      + (t.now && !LIVE.has(t.status) && (t.job || t.stage === "draft") ? `<span class="switching" role="status" style="min-height:38px;padding:0 14px"><i class="spin"></i><small>Starting now</small></span>` : "")
       + (t.stage === "draft" ? "" : `<button class="action" id="logs" aria-pressed="${logsOpen}">Logs and thinking</button>`);
   }
   document.getElementById("d-actions").toggleAttribute("data-yours", yours && !editing);
@@ -2551,6 +2567,14 @@ async function rereview(id) {
 }
 
 async function doNow(id) {
+  // Shown at once: the switch takes until the running card's next step, and a click that shows
+  // nothing for that long reads as a click that did nothing. The next snapshot is the truth.
+  for (const t of state.tasks) t.now = t.id === id;
+  for (const r of state.system?.running || []) {
+    const on = state.tasks.find(t => t.id === r.id);
+    if (on && on.id !== id) on.aside = true;
+  }
+  render();
   const res = await api("/api/now", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -2687,8 +2711,8 @@ document.getElementById("home").addEventListener("click", e => {
   const el = e.target.closest("[data-id]");
   if (el) showDetail(el.dataset.id);
 });
-// A card dragged onto the desk: on the top zone it is done now, on a row of the line it takes that
-// row's place, and on the bottom zone it goes to the end.
+// A card dragged onto the desk: on the top zone it starts now and the current run steps aside; on a
+// row of your line it takes that row's place; on the bottom zone it goes to the end.
 let carrying = null;
 document.getElementById("home").addEventListener("dragstart", e => {
   if (!(carrying = e.target.closest("[data-drag]")?.dataset.drag)) return;

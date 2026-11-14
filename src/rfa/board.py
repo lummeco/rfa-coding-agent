@@ -9,8 +9,10 @@ Binding to localhost is not access control. Every process on this Mac can reach 
 can any web page you happen to have open -- a cross-site form post to 127.0.0.1 needs nobody's
 permission. That matters here more than on most local servers, because `POST /api/move` can carry a
 card from `planning` to `todo`, which is the one gate between an idea and a machine writing code.
-So each start mints a token, `rfa up` prints it in the URL fragment, and the page hands it back in a
-header that no cross-site request can set without a preflight this server refuses.
+So the board has a token, `rfa up` prints it in the URL fragment, and the page hands it back in a
+header that no cross-site request can set without a preflight this server refuses. The token is
+kept across restarts in `var/board.token`: it is on disk either way, and a page left open through a restart
+that was refused from then on looked, to the person in front of it, like a board that had frozen.
 """
 
 import json
@@ -154,6 +156,7 @@ def snapshot() -> dict:
                 "scout": task.meta.get("scout"),
                 "desk": task.meta.get("desk"),
                 "overrule": bool(task.meta.get("overrule")),
+                "aside": bool(task.meta.get("aside")),
                 # What the machine would do for this card next, or nothing while it waits on you.
                 "job": None if task.paused or task.archived else daemon.job_for(task, jobs),
                 "now": bool(task.meta.get("now")) and task.stage != "done",
@@ -942,11 +945,14 @@ def serve(host: str = "127.0.0.1", port: int = 4380, open_browser: bool = True) 
     # Threaded, because every open page holds `/api/stream` for as long as it is open.
     server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
-    server.token = secrets.token_urlsafe(16)
     server.origin = f"http://{host}:{port}"
     # Written down rather than only printed: `rfa status`, `rfa up` and the menu bar all open the
-    # board, and none of them can reach it without this start's token.
+    # board, and none of them can reach it without the token.
     (path := tasks.home() / "var" / "board.url").parent.mkdir(parents=True, exist_ok=True)
+    # In a file of its own: stopping the board takes `board.url` away, and the token has to outlive that.
+    kept = path.with_name("board.token")
+    server.token = kept.read_text().strip() if kept.exists() else secrets.token_urlsafe(16)
+    kept.write_text(server.token)
     path.write_text(url := f"{server.origin}/#token={server.token}")
     print(f"Board on {url}  (ctrl-c to stop)")
     if open_browser:

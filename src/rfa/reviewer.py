@@ -552,6 +552,9 @@ def review_task(task: Task, config: dict, model: str = "", reasoning: str = "") 
         raise ValueError(f"{task.id} is in `{task.stage}`, not `review`")
     if not (landed := task.meta.get("landed") or {}):
         raise ValueError(f"{task.id} landed nothing to review")
+    # Overruled before this review began -- across a restart, say: there is nothing left to judge.
+    if task.meta.get("overrule"):
+        return tasks.move(task, "done", actor="reviewer", status="built", finished_at=tasks.now(), overrule=None, error=None)
     expected = criteria(task.body)
     specs = settings.app_specs(config, task.meta.get("repos") or [])
     # A part's app is not driven: halfway through its card the app may not even boot. The card is
@@ -577,7 +580,7 @@ def review_task(task: Task, config: dict, model: str = "", reasoning: str = "") 
         tasks.log(type="review_failed", id=task.id, error=str(e))
         return send_back(task, [{"text": str(e)}], output, {"repo": under_test, "ok": False, "at": tasks.now()})
     except tasks.Paused:
-        # Overruled while it ran: your word stands in for the verdict it never gave.
+        # Overruled while it ran -- or before, and only now reached: your word stands in for its verdict.
         if tasks.find(task.id).meta.get("overrule"):
             return tasks.move(task, "done", actor="reviewer", status="built", finished_at=tasks.now(), overrule=None, error=None)
         tasks.log(type="review_paused", id=task.id)

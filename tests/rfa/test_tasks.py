@@ -276,3 +276,15 @@ def test_an_edit_naming_a_model_the_workspace_lacks_is_refused_and_writes_nothin
     with pytest.raises((KeyError, ValueError)):
         board.edit({"id": task.id, "body": "changed", "model": "no-such-model"})
     assert "changed" not in tasks.find(task.id).body
+
+
+def test_a_run_holding_an_old_copy_of_a_card_does_not_write_over_what_you_marked_meanwhile(tmp_path, monkeypatch):
+    """The board and the daemon are two processes: what one marks, the other must not undo on its next save."""
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    tasks.init()
+    held = tasks.save(tasks.create("an idea"), now=True)
+    tasks.save(tasks.find(held.id), now=None, paused=True, desk=2)
+    saved = tasks.save(held, status="queued", aside=None)
+    assert (saved.meta.get("now"), saved.paused, saved.meta["desk"], saved.status) == (None, True, 2, "queued")
+    # What the run itself says about a mark still wins: that is how a pause is handed back.
+    assert not tasks.save(held, paused=None).paused and not tasks.find(held.id).paused

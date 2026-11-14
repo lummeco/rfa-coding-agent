@@ -268,8 +268,17 @@ def find(id: str) -> Task:
     raise FileNotFoundError(f"no task {id!r} in {home() / 'tasks'}")
 
 
+MARKS = ("paused", "now", "desk", "aside", "overrule", "archived", "order")
+"""What you put on a card from the board. A run holds its own copy of the card for as long as it
+lasts, so `save` reads these back off the file: a mark made meanwhile is never written over by
+the run that did not see it."""
+
+
 def save(task: Task, **updates) -> Task:
     """Write the task back where it is. Atomic, so a reader never sees half a file."""
+    if task.path.exists():
+        on_disk = read(task.path, task.stage).meta
+        task.meta.update({mark: on_disk.get(mark) for mark in MARKS if mark not in updates})
     task.meta.update(updates)
     with _lock():
         task.path.parent.mkdir(parents=True, exist_ok=True)

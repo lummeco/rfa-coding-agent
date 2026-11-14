@@ -458,6 +458,7 @@ button.action:disabled { opacity: .45; cursor: not-allowed; }
 }
 .sec .tag { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--red); }
 .round { border-top: 1px solid var(--line); padding: 16px 0 8px; }
+.round.solo { border-top: none; padding-top: 0; }
 .round > p { margin: 0 0 10px; }
 .round details.plan { margin: 0 0 10px; }
 .round details.plan summary, details.more summary { cursor: pointer; color: var(--text-2); font-size: 13px; }
@@ -2004,7 +2005,8 @@ function roundsView(t) {
     : (r.comments || []).length ? `Review round ${++k}` : `Re-run ${++k}`]));
   for (const r of [...rs].reverse()) {
     const key = `${t.id}/${r.n}`;
-    html += `<section class="round"><div class="sec">${esc(labels.get(r.n))}`
+    // One round needs no heading of its own: the summary above it is already that round's.
+    html += rs.length === 1 && r.landed ? `<section class="round solo">` : `<section class="round"><div class="sec">${esc(labels.get(r.n))}`
       + (r.landed ? "" : `<span class="tag">nothing landed</span>`) + `</div>`;
     if (r.error) html += `<div class="note bad">${esc(r.error)}</div>`;
     if (r.kind === "original" && r.plan)

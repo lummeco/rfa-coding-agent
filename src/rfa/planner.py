@@ -52,6 +52,9 @@ class PlannerConfig(AgentConfig):
 class PlannerAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
     """Submitting is a proposal, not the end: an unusable packet resumes the same session."""
 
+    schema, check = Packet, staticmethod(problems)
+    """What the agent is asked to write, and what the host holds it to. The scout swaps both."""
+
     def __init__(self, model: Model, env: Environment, *, repo_files: dict[str, set[str]], **kwargs):
         super().__init__(model, env, config_class=PlannerConfig, **kwargs)
         self.repo_files = repo_files
@@ -109,11 +112,11 @@ class PlannerAgent(tasks.Pausable, tasks.Unlooping, DefaultAgent):
         except json.JSONDecodeError as e:
             return [f"`{self.config.packet_path}` is not valid JSON: {e}."]
         try:
-            packet = Packet.model_validate(data)
+            packet = self.schema.model_validate(data)
         except ValidationError as e:
             return [f"`{self.config.packet_path}` does not match the schema: {_errors(e)}"]
         # Only a packet the host accepts is kept: one still rejected after the last attempt is no plan.
-        if not (found := problems(packet, self.repo_files, self.n_actions, self.config.min_tool_calls)):
+        if not (found := self.check(packet, self.repo_files, self.n_actions, self.config.min_tool_calls)):
             self.packet = packet
         return found
 
@@ -339,11 +342,12 @@ def plan(
     env: Environment,
     reference: dict[str, tuple[Path, str]] | None = None,
     progress: str = "",
+    agent_class: type[PlannerAgent] = PlannerAgent,
     **kwargs,
 ) -> PlannerAgent:
     """Run the planner over `idea`. The packet, when there is one, is on the returned agent."""
     repo_files = seed(env, repos, reference)
-    agent = PlannerAgent(model, env, repo_files=repo_files, **kwargs)
+    agent = agent_class(model, env, repo_files=repo_files, **kwargs)
     agent.run(
         idea,
         repo_map=render_map(repo_files),

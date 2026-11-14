@@ -27,7 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from rfa import daemon, github, packet, parts, rounds, settings, tasks
+from rfa import daemon, github, packet, parts, rounds, scout, settings, tasks
 from rfa.planner import test_notes, tests_dir
 
 PAGE = Path(__file__).parent / "board.html"
@@ -149,12 +149,16 @@ def snapshot() -> dict:
                 "split": len(task.meta.get("split") or []),
                 "blocked": parts.blocked(task, everything),
                 "progress": parts.progress(task) if task.meta.get("split") else "",
+                "scout": task.meta.get("scout"),
+                "suggested": task.meta.get("suggested"),
+                "kind": task.meta.get("kind"),
                 "diffstat": diffstat(task) if task.stage in ("review", "done") and not task.meta.get("verdict") else None,
             }
             for task in everything
         ],
         "events": tasks.events()[-500:],
         "repos": sorted(configured),
+        "focuses": list(scout.FOCUS),
         "system": daemon.report(),
     }
 
@@ -696,6 +700,7 @@ class Handler(BaseHTTPRequestHandler):
         posts = (
             "/api/move",
             "/api/new",
+            "/api/analyze",
             "/api/pr",
             "/api/edit",
             "/api/reorder",
@@ -746,6 +751,14 @@ class Handler(BaseHTTPRequestHandler):
                 )
             )
             self._json(200, {"id": task.id, "stage": task.stage, "status": task.status})
+            return
+        if self.path == "/api/analyze":
+            try:
+                task = scout.request(str(payload.get("repo") or ""), str(payload.get("focus") or "anything"))
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
+                return
+            self._json(200, {"id": task.id})
             return
         if self.path == "/api/pr":
             try:

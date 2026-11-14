@@ -154,12 +154,15 @@ def run(job: tuple[str, Task], config: DaemonConfig) -> None:
     # `rfa status` import this module only to ask what it would do next.
     from rfa.planner import plan_task
     from rfa.reviewer import review_task
+    from rfa.scout import scout_task
     from rfa.tester import write_tests
     from rfa.worker import run_task
 
     kind, task = job
     with gates.KeepAwake(config.keep_awake):
-        if kind == "plan":
+        if kind == "plan" and task.meta.get("scout"):
+            scout_task(task, settings.load("scout"))
+        elif kind == "plan":
             plan_task(task, settings.load("planner"))
         elif kind == "tests":
             write_tests(task, settings.load("tester"))

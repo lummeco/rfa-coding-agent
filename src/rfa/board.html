@@ -573,6 +573,8 @@ div.rfa-comment { background: color-mix(in srgb, var(--accent) 9%, var(--surface
 }
 .tile.wide { flex: 999 1 520px; }
 .tile.narrow, .stack { flex: 1 1 280px; }
+.stack.wide { flex: 999 1 520px; }
+.find { display: flex; flex-wrap: wrap; gap: 8px; }
 .stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .lbl { margin: 0; font-size: 13px; font-weight: 600; color: var(--text-3); }
 .why { color: var(--text-3); font-size: 13px; }
@@ -1638,6 +1640,47 @@ function onLine(t) {
 }
 
 let homeHtml = "";
+let focus = "anything";   // what the next scout is asked to look for
+
+const short = repo => repo.split("/").pop();
+// A repository is busy while a scout of it is queued or its suggestions wait on you.
+const scouting = repo => state.tasks.some(t => !t.archived && t.repos.includes(repo) && (t.scout || (t.suggested && t.stage === "draft")));
+
+/** What a scout found, for you to plan, edit or dismiss; and, while the machine is free, the buttons that send one out. */
+function scoutTiles() {
+  const found = state.tasks.filter(t => !t.archived && t.suggested && t.stage === "draft");
+  const free = state.system && !state.system.running.length;
+  return (found.length ? `<section class="tile" aria-labelledby="found-h">
+      <div class="sec-head"><h2 id="found-h">Suggested</h2><span class="n">${found.length}</span><span class="why">found by a scout; nothing happens until you plan one</span></div>
+      ${found.map(t => `<article class="item">
+        <div class="row"><span class="tag ${t.kind === "bug" ? "failed" : "judge"}">${esc((t.kind || "idea").toUpperCase())}</span><span>${esc(t.repos.map(short).join(", "))}</span></div>
+        <h3><button data-id="${esc(t.id)}">${esc(t.title)}</button></h3>
+        <p>${inline(String(t.body).trim().split("\n\n")[2] || "")}</p>
+        <div class="acts">
+          <button class="action primary" data-act="approve-idea" data-act-id="${esc(t.id)}">Plan it</button>
+          <button class="action" data-id="${esc(t.id)}">Edit</button>
+          <button class="action quiet" data-act="dismiss" data-act-id="${esc(t.id)}">Dismiss</button>
+        </div>
+      </article>`).join("")}
+    </section>` : "")
+    + (free && state.repos.length ? `<section class="tile" aria-labelledby="find-h">
+      <div class="sec-head"><h2 id="find-h">Find work</h2><span class="why">The machine is free. Have it read a repo and suggest 3 to 5 small fixes.</span></div>
+      <div class="pick" role="group" aria-label="What to look for">${(state.focuses || []).map(f =>
+        `<button data-focus="${esc(f)}" aria-pressed="${f === focus}">${esc(f)}</button>`).join("")}</div>
+      <div class="find">${state.repos.map(r => `<button class="action" data-analyze="${esc(r)}"${scouting(r)
+        ? ` disabled title="Decide on what the last scout of it found first"` : ""}>Analyze ${esc(short(r))}</button>`).join("")}</div>
+    </section>` : "");
+}
+
+async function analyze(repo) {
+  const res = await api("/api/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ repo, focus }),
+  });
+  if (!res.ok) { alert((await res.json()).error); return; }
+  refresh();
+}
 
 function home() {
   const items = turnItems();
@@ -1650,10 +1693,13 @@ function home() {
   const html = `<div class="home">
     <div class="widgets">${nowTile()}${machineTile()}</div>
     <div class="widgets">
-      <section class="tile wide" aria-labelledby="turn-h">
-        <div class="sec-head"><h2 id="turn-h">Your turn</h2><span class="n">${items.length || ""}</span></div>
-        ${items.map(turnItem).join("") || `<div class="clear">Nothing waits on you. New work starts with an idea: press N.</div>`}
-      </section>
+      <div class="stack wide">
+        <section class="tile" aria-labelledby="turn-h">
+          <div class="sec-head"><h2 id="turn-h">Your turn</h2><span class="n">${items.length || ""}</span></div>
+          ${items.map(turnItem).join("") || `<div class="clear">Nothing waits on you. New work starts with an idea: press N.</div>`}
+        </section>
+        ${scoutTiles()}
+      </div>
       <div class="stack">
         <section class="tile" aria-labelledby="ledger-h">
           <h2 class="lbl" id="ledger-h">Ledger</h2>
@@ -2692,6 +2738,10 @@ document.getElementById("views").addEventListener("click", e => {
 document.getElementById("home").addEventListener("click", e => {
   const pick = e.target.closest("button[data-view]");
   if (pick) return setView(pick.dataset.view);
+  const looking = e.target.closest("button[data-focus]");
+  if (looking) { focus = looking.dataset.focus; return home(); }
+  const repo = e.target.closest("button[data-analyze]");
+  if (repo) { repo.disabled = true; return analyze(repo.dataset.analyze); }
   const act = e.target.closest("button[data-act]");
   if (act) {
     const id = act.dataset.actId;
@@ -2701,6 +2751,8 @@ document.getElementById("home").addEventListener("click", e => {
     if (act.dataset.act === "ship") return setVerdict(id, "shipped");
     if (act.dataset.act === "trash") return setVerdict(id, "trashed");
     if (act.dataset.act === "pause") return setPaused(id, true);
+    if (act.dataset.act === "approve-idea") return move(id, "planning");
+    if (act.dataset.act === "dismiss") return toggleArchive(id);
     const t = state.tasks.find(x => x.id === id);
     const i = Number(act.dataset.i);
     if (act.dataset.act === "default") return sendAnswer(t, i, "Default is good");

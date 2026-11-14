@@ -27,10 +27,11 @@ from minisweagent.utils.serialize import recursive_merge
 from rfa import tasks
 
 CONFIG_DIR = Path(__file__).parent / "config"
-STAGES = ("planner", "tester", "coder", "reviewer")
+STAGES = ("planner", "scout", "tester", "coder", "reviewer")
 # A stage that runs in another's container: the tester writes tests where the coder will run them,
-# so it starts from the coder's packaged and workspace settings and overrides only its own.
-INHERITS = {"tester": "coder"}
+# so it starts from the coder's packaged and workspace settings and overrides only its own. The
+# scout is the planner with another prompt.
+INHERITS = {"tester": "coder", "scout": "planner"}
 DEFAULTS = CONFIG_DIR / "planner.yaml"
 # What `reasoning:` may say. litellm turns this into Ollama's `think`, so for a Qwen it is really
 # on or off -- only the graded models (gpt-oss) tell the three levels apart. See `model_config`.

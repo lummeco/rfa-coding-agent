@@ -1609,12 +1609,21 @@ async function analyze(repo) {
 
 /** Put a card at `index` in your line for the desk, or take it out with no index. */
 async function lineUp(id, index) {
+  // Shown at once, as the server will file it; the snapshot that follows is the truth either way.
+  const t = state.tasks.find(x => x.id === id), line = linedUp().filter(x => x.id !== id);
+  if (index === null) t.desk = null;
+  else line.splice(index, 0, t);
+  // A draft given to the desk is handed to the planner: that is what puts it in the line.
+  if (index !== null && t.stage === "draft") Object.assign(t, { stage: "planning", status: "queued", job: "plan" });
+  line.forEach((x, n) => x.desk = n);
+  render();
   const res = await api("/api/desk", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id, index }),
   });
-  if (!res.ok) { alert((await res.json()).error); return; }
+  if (!res.ok) alert((await res.json()).error);
+  lastSnapshot = "";
   refresh();
 }
 

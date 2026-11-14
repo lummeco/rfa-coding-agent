@@ -99,8 +99,12 @@ class Pausable:
         self.task_id = task_id
 
     def halted(self) -> bool:
-        """Has the card been paused, or told to step aside for one that is to be done now?"""
-        return bool(self.task_id) and ((task := find(self.task_id)).paused or bool(task.meta.get("aside")))
+        """Has the card been paused, told to step aside for one that is to be done now, or had its
+        review overruled?"""
+        if not self.task_id:
+            return False
+        task = find(self.task_id)
+        return task.paused or bool(task.meta.get("aside") or task.meta.get("overrule"))
 
     def query(self) -> dict:
         if self.halted():

@@ -577,6 +577,9 @@ def review_task(task: Task, config: dict, model: str = "", reasoning: str = "") 
         tasks.log(type="review_failed", id=task.id, error=str(e))
         return send_back(task, [{"text": str(e)}], output, {"repo": under_test, "ok": False, "at": tasks.now()})
     except tasks.Paused:
+        # Overruled while it ran: your word stands in for the verdict it never gave.
+        if tasks.find(task.id).meta.get("overrule"):
+            return tasks.move(task, "done", actor="reviewer", status="built", finished_at=tasks.now(), overrule=None, error=None)
         tasks.log(type="review_paused", id=task.id)
         return tasks.save(task, status="queued", paused=tasks.find(task.id).paused or None, aside=None)
     except Exception as e:

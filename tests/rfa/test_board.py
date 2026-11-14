@@ -629,3 +629,21 @@ def test_a_suite_that_reports_thousands_of_tests_is_counted_not_sent_whole(tmp_p
     assert (shown["total"], shown["failing"], len(shown["tests"])) == (1000, 1, board.MAX_TESTS)
     assert (len(shown["tests"][0]["name"]), len(shown["tests"][0]["message"])) == (300, 2000)
     assert len(json.dumps(board.snapshot())) < 100_000
+
+
+def test_overruling_a_review_files_the_card_as_built_and_a_running_one_is_told_to_stop(tmp_path, monkeypatch):
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    tasks.init()
+
+    def in_review(idea: str, **meta) -> tasks.Task:
+        task = tasks.move(tasks.move(tasks.move(tasks.create(idea), "todo"), "under-work"), "review", actor="worker")
+        return tasks.save(task, **meta)
+
+    stuck = board.overrule(in_review("a review that failed", status="failed", error="docker down").id)
+    assert (stuck.stage, stuck.status, stuck.meta.get("error")) == ("done", "built", None)
+    # A review with a reviewer on it is not moved out from under it: it is told to stop, and stops.
+    running = board.overrule(in_review("a review that is running", status="reviewing").id)
+    assert (running.stage, running.meta["overrule"]) == ("review", True)
+    assert tasks.Pausable(task_id=running.id).halted() and not tasks.Pausable(task_id=stuck.id).halted()
+    with pytest.raises(ValueError, match="only a card in review"):
+        board.overrule(stuck.id)

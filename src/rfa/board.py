@@ -153,6 +153,7 @@ def snapshot() -> dict:
                 "progress": parts.progress(task) if task.meta.get("split") else "",
                 "scout": task.meta.get("scout"),
                 "desk": task.meta.get("desk"),
+                "overrule": bool(task.meta.get("overrule")),
                 # What the machine would do for this card next, or nothing while it waits on you.
                 "job": None if task.paused or task.archived else daemon.job_for(task, jobs),
                 "now": bool(task.meta.get("now")) and task.stage != "done",
@@ -551,6 +552,24 @@ def retry(id: str) -> tasks.Task:
     return tasks.save(task, status="todo", attempts=None, error=None, paused=None)
 
 
+def overrule(id: str) -> tasks.Task:
+    """Take a card out of review on your own word: built, and yours to judge like any other.
+
+    A review that is running is told to stop instead, and files the card as built when it does --
+    before its next model call. Moving the card out from under it would leave the reviewer holding
+    a card that is no longer where it thinks.
+    """
+    task = tasks.find(id)
+    if task.stage != "review":
+        raise ValueError(f"{id} is in {task.stage}; only a card in review is overruled")
+    tasks.log(type="overruled", id=task.id)
+    if task.status == "reviewing":
+        return tasks.save(task, overrule=True)
+    return tasks.move(
+        task, "done", actor="human", status="built", finished_at=tasks.now(), paused=None, error=None, open_questions=None
+    )
+
+
 def rereview(id: str) -> tasks.Task:
     """Put the landed work in front of the reviewer again: a done card, or a review that failed to run.
 
@@ -732,6 +751,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/analyze",
             "/api/now",
             "/api/desk",
+            "/api/overrule",
             "/api/pr",
             "/api/edit",
             "/api/reorder",
@@ -816,6 +836,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/pause",
             "/api/desk",
             "/api/now",
+            "/api/overrule",
             "/api/retry",
             "/api/rereview",
             "/api/verdict",
@@ -838,6 +859,8 @@ class Handler(BaseHTTPRequestHandler):
                     task = retry(payload["id"])
                 elif self.path == "/api/retest":
                     task = retest(payload["id"])
+                elif self.path == "/api/overrule":
+                    task = overrule(payload["id"])
                 elif self.path == "/api/rereview":
                     task = rereview(payload["id"])
                 elif self.path == "/api/reorder":

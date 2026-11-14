@@ -636,13 +636,6 @@ div.rfa-comment { background: color-mix(in srgb, var(--accent) 9%, var(--surface
 .sec-head .n.idle { color: var(--text-3); }
 button.action.you { background: var(--you); color: var(--on-accent); font-weight: 600; }
 .clear { border: 1px dashed var(--line); border-radius: var(--radius); padding: 16px 20px; color: var(--text-3); font-size: 14px; }
-.ledger { list-style: none; margin: 0; padding: 0; }
-.ledger li { border-bottom: 1px solid var(--line); }
-.ledger button { all: unset; cursor: pointer; display: flex; gap: 10px; align-items: baseline; width: 100%; padding: 8px 2px; font-size: 14px; }
-.ledger button:hover .t { text-decoration: underline; }
-.ledger .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ledger .g { color: var(--green); }
-.ledger .r { font: 12px var(--mono); color: var(--text-3); }
 .linkish { all: unset; cursor: pointer; color: var(--accent); font-size: 14px; }
 .linkish:hover { text-decoration: underline; }
 [hidden] { display: none !important; }
@@ -1039,7 +1032,9 @@ function actionsFor(t) {
     + (t.planned ? move("planning", "Back to planned", "quiet", "ready") : "") + archive;
   // The reviewer takes the pass/send-back edges on its own; this is only the run control. A review
   // that could not run at all says nothing about the code, so it is only ever run again.
-  if (t.stage === "review") return (t.status === "failed" ? `<button class="action primary" id="rereview">Review again</button>` : pause) + archive;
+  // Overruling takes the card out of review on your word: it is built, and yours to judge.
+  if (t.stage === "review") return (t.status === "failed" ? `<button class="action primary" id="rereview">Review again</button>` : pause)
+    + `<button class="action" id="overrule"${t.overrule ? " disabled" : ""}>${t.overrule ? "Stopping the review…" : "Overrule review, mark as done"}</button>` + archive;
   if (t.stage === "done") {
     // Your verdict on built code comes first; everything that sends the card round again is under
     // Next actions. Fix comments needs comments on the latest round; with nothing landed there is
@@ -1615,24 +1610,12 @@ function home() {
   const lined = linedUp(), inLine = new Set(lined.map(t => t.id));
   const ready = state.tasks.filter(t => t.job && !inLine.has(t.id) && !running.has(t.id)).sort(byCreated);
   const drafts = state.tasks.filter(t => !t.archived && t.stage === "draft").sort(byCreated);
-  const verdicts = state.tasks.filter(t => !t.archived && t.verdict);
-  const shipped = verdicts.filter(t => t.verdict === "shipped").sort(byCreated).reverse();
-  const trashed = verdicts.length - shipped.length;
   const does = { answer: t => `Answer ${plural(t.open_questions.length || 1, "question")}`, failed: () => "See what failed",
     approve: () => "Check plan and tests", judge: () => "Judge it" };
   const html = `<div class="home"><div class="widgets">
     <div class="stack deskcol">
       ${deskTile(lined, ready.length)}
       ${machineTile()}
-      <section class="tile" aria-labelledby="ledger-h">
-        <h2 class="lbl" id="ledger-h">Ledger</h2>
-        <div><span class="big">${shipped.length}</span> <span class="why">shipped</span></div>
-        <div class="meter" role="img" aria-label="${shipped.length} shipped, ${trashed} trashed"><i style="flex:${shipped.length}"></i><span style="flex:${trashed}"></span></div>
-        <span class="why">${trashed} trashed</span>
-        <ol class="ledger">${shipped.slice(0, 5).map(t =>
-          `<li><button data-id="${esc(t.id)}"><span class="g" aria-hidden="true">●</span><span class="t">${esc(t.title)}</span><span class="r">↻${(t.rounds || []).length || 1}</span></button></li>`).join("")}</ol>
-        <button class="linkish" data-view="board">All cards, archived ones included</button>
-      </section>
     </div>
     <div class="stack wide">
       ${cardGroup("Your move", items.map(({ kind, t }) => cardRow(t, NEEDS[kind],
@@ -1809,7 +1792,7 @@ const SAID = { created: "Captured", planned: "Planned", answered: "You answered 
   review_failed: "Review failed", review_error: "Review hit a machine error", review_paused: "Review paused", sent_back: "Sent back with comments",
   fix_requested: "You asked for fixes", judged: "You gave your verdict", pr_opened: "Pull request opened", plan_failed: "Planning failed",
   plan_paused: "Planning paused", paused: "Paused", resumed: "Resumed", retried: "Retried", retest: "Tests written again",
-  rereview: "Sent for another review", now: "Marked to do now", scouted: "Suggestions filed", reclaimed: "Picked up again after a restart" };
+  rereview: "Sent for another review", overruled: "You overruled the review", now: "Marked to do now", scouted: "Suggestions filed", reclaimed: "Picked up again after a restart" };
 
 // Whose run the log shows: the planner's, the test writer's, the coder's ("") or the reviewer's.
 let logsOpen = false, logOf = "", testCode = false;
@@ -2019,10 +2002,9 @@ function roundsView(t) {
       html += `<details class="more"><summary>Also changed ${plural(outside.reduce((n, [, fs]) => n + fs.length, 0), "file")} no comment was on</summary>`
         + `<div class="warn">${outside.map(([repo, fs]) => fs.map(f => `<code>${esc(repo)}/${esc(f)}</code>`).join(", ")).join(", ")}</div></details>`;
     html += testsLine(r);
-    const label = r.kind === "original" ? "View diff" : "View diff vs previous round";
-    html += `<button class="action small" data-diff="${r.n}">${openDiffs.has(key) ? "Hide diff" : label}${r.landed ? "" : " (not landed)"}</button>`
-      + (r.n === commentable && openDiffs.has(key) ? ` <span class="hint" style="font-size:12px;color:var(--text-3)">Click a line number to comment.</span>` : "")
-      + `<div class="diffbox" id="diff-${r.n}"></div></section>`;
+    // The first round's diff is the whole change, which All changes shows; a fix has its own.
+    html += (r.kind === "original" ? "" : `<button class="action small" data-diff="${r.n}">${openDiffs.has(key) ? "Hide diff" : "View what this round changed"}${r.landed ? "" : " (not landed)"}</button>`
+      + `<div class="diffbox" id="diff-${r.n}"></div>`) + `</section>`;
   }
   return html;
 }
@@ -2030,15 +2012,12 @@ function roundsView(t) {
 function linksRow(t) {
   const prs = Object.entries(t.prs || {});
   const landed = Object.entries(t.landed || {});
-  const copies = Object.entries(t.copy || {});
   if (!prs.length && !landed.length && !t.link) return "";
   return `<div class="links">`
     + prs.map(([r, u]) => `<span>PR ${link(u)}</span>`).join("")
     + (landed.length && landed.some(([r]) => !(t.prs || {})[r]) ? `<button class="action small" data-pr="${esc(t.id)}">Create GitHub PR</button>` : "")
     + landed.map(([r, b]) => `<span><code>${esc(b)}</code> in ${esc(r)}</span>`).join("")
     + (t.link ? `<span>From ${link(t.link)}</span>` : "")
-    + (copies.length ? `<details><summary>Take it into your current branch</summary>` + copies.map(([r, cmd]) =>
-        `<div class="copy"><code>${esc(cmd)}</code><button class="action" data-copy="${esc(r)}">Copy</button></div>`).join("") + `</details>` : "")
     + `</div>`;
 }
 
@@ -2064,7 +2043,7 @@ async function drawDiffs(t) {
       }
     } catch (e) { box.innerHTML = `<div class="note bad">${esc(e.message)}</div>`; continue; }
     if (document.getElementById(`diff-${r.n}`) !== box) return;   // the panel was redrawn meanwhile
-    paint(box, diffs.get(key), t, r.n === (t.stage === "done" ? latestLanded(t) : -1), "This round changed nothing.");
+    paint(box, diffs.get(key), t, false, "This round changed nothing.");
   }
 }
 
@@ -2082,7 +2061,7 @@ async function drawFullDiff(t) {
     }
   } catch (e) { box.innerHTML = `<div class="note bad">${esc(e.message)}</div>`; return; }
   if (document.getElementById("diff-full") !== box) return;
-  paint(box, diffs.get(key), t, false, "Nothing landed, so there is nothing to compare.");
+  paint(box, diffs.get(key), t, t.stage === "done", "Nothing landed, so there is nothing to compare.");
   const patches = diffs.get(key).repos.map(r => r.patch).join("\n");
   const count = re => (patches.match(re) || []).length, files = count(/^diff --git /gm);
   document.getElementById("full-sum").textContent = `${files} file${files === 1 ? "" : "s"} changed · `
@@ -2366,7 +2345,8 @@ function showDetail(id) {
       + (rs.length ? linksRow(t) + roundsView(t) : `<p class="tests">No round has finished yet. <strong>Logs and thinking</strong> shows the coder as it works.</p>`)
       + `</section>`
       + (latestLanded(t) < 0 ? "" : `<section class="tile"><div class="sec-head"><h2>All changes</h2>`
-        + `<span class="why" id="full-sum">From where the first round started to the latest round.</span><span style="flex:1"></span>`
+        + `<span class="why" id="full-sum">From where the first round started to the latest round.</span>`
+        + (all && t.stage === "done" ? `<span class="why">Click a line number to comment.</span>` : "") + `<span style="flex:1"></span>`
         + `<button class="action" data-tab="${all ? "runs" : "full"}">${all ? "Hide" : "Show"}</button></div>`
         + (all ? `<div class="diffbox" id="diff-full"></div>` : "") + `</section>`)
       + ((t.shots || []).length ? `<section class="tile"><div class="sec-head"><h2>What the reviewer saw</h2><span class="why">${plural(t.shots.length, "screenshot")}</span></div>`
@@ -2549,6 +2529,16 @@ async function retry(id) {
   await refresh();
 }
 
+async function overrule(id) {
+  const res = await api("/api/overrule", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+  if (!res.ok) { alert((await res.json()).error); return; }
+  await refresh();
+}
+
 async function rereview(id) {
   const res = await api("/api/rereview", {
     method: "POST",
@@ -2658,6 +2648,7 @@ document.getElementById("d-actions").addEventListener("click", e => {
   if (e.target.closest("#retry") && openId) return retry(openId);
   if (e.target.closest("#retest") && openId) return retest(openId);
   if (e.target.closest("#rereview") && openId) return rereview(openId);
+  if (e.target.closest("#overrule") && openId) return overrule(openId);
   if (e.target.closest("#save")) return saveIdea();
   if (e.target.closest("#cancel-draft")) { const id = drafting; drafting = null; return showDetail(id); }
   if (e.target.closest("#edit-draft")) return showCapture(state.tasks.find(x => x.id === openId));

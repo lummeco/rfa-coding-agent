@@ -24,11 +24,12 @@ import time
 import webbrowser
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from rfa import daemon, github, packet, parts, rounds, scout, settings, tasks
-from rfa.planner import test_notes, tests_dir
+from rfa.planner import tests_dir
 
 PAGE = Path(__file__).parent / "board.html"
 
@@ -173,10 +174,29 @@ def written_tests(task: tasks.Task) -> dict | None:
     """The tests written ahead of the code, for you to read before you approve: what each one checks
     and why it fails now, and the code itself. Only on a planning card -- after that they are in the
     coder's rounds, red or green."""
-    if task.stage != "planning" or not (notes := test_notes(task.id)):
+    path = tests_dir(task.id) / "tests.json"
+    if task.stage != "planning" or task.archived or not path.exists():
         return None
-    return notes | {
+    return shown_tests(path, path.stat().st_mtime_ns) | {
         "patches": {p.stem: p.read_text(errors="replace") for p in sorted(tests_dir(task.id).glob("*.patch"))}
+    }
+
+
+MAX_TESTS = 200
+"""Tests listed on a card. A suite that reports thousands is counted, not sent to the page whole."""
+
+
+@lru_cache(maxsize=32)
+def shown_tests(path: Path, mtime: int) -> dict:
+    """A card's test notes as the page gets them: the first tests, each field cut to a readable
+    length, and the counts of all of them. Kept until the file changes -- every snapshot asks."""
+    notes = json.loads(path.read_text())
+    tests = notes.get("tests") or []
+    clip = lambda k, v: v if not isinstance(v, str) else v[-2000:] if k == "message" else v[:300]  # noqa: E731
+    return notes | {
+        "tests": [{k: clip(k, v) for k, v in case.items()} for case in tests[:MAX_TESTS]],
+        "total": len(tests),
+        "failing": sum(case.get("outcome") != "passed" for case in tests),
     }
 
 

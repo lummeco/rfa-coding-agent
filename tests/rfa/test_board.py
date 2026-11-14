@@ -615,3 +615,17 @@ def test_the_planner_and_test_writer_runs_are_read_too_with_what_the_model_thoug
     ]
     assert board.progress("20260921-120000-a-task", "tests")["steps"][0]["thought"] == "First tests."
     assert board.progress("20260921-120000-a-task") == {"steps": []}
+
+
+def test_a_suite_that_reports_thousands_of_tests_is_counted_not_sent_whole(tmp_path, monkeypatch):
+    """One card's notes once made every snapshot 47 MB: a test whose name was 20 MB long."""
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    tasks.init()
+    task = tasks.move(tasks.create("an idea"), "planning")
+    (folder := tmp_path / "var" / "runs" / task.id / "tests").mkdir(parents=True)
+    cases = [{"name": "x" * 5000, "outcome": "failed", "message": "m" * 5000}] + [{"name": f"t{n}", "outcome": "passed"} for n in range(999)]
+    (folder / "tests.json").write_text(json.dumps({"command": "pytest", "tests": cases}))
+    shown = board.snapshot()["tasks"][0]["written_tests"]
+    assert (shown["total"], shown["failing"], len(shown["tests"])) == (1000, 1, board.MAX_TESTS)
+    assert (len(shown["tests"][0]["name"]), len(shown["tests"][0]["message"])) == (300, 2000)
+    assert len(json.dumps(board.snapshot())) < 100_000

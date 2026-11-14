@@ -366,7 +366,9 @@ button.action:disabled { opacity: .5; cursor: default; }
 .wt-code .hunk { color: var(--text-3); }
 
 .shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin: 8px 0 0; }
-.shots a { display: block; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--bg); }
+.shots a { display: block; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--bg); color: var(--text-2); text-decoration: none; }
+.shots span { display: block; padding: 6px 10px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.more summary { cursor: pointer; color: var(--text-3); font-size: 13px; padding: 6px 0; }
 .shots img { display: block; width: 100%; height: 120px; object-fit: cover; object-position: top left; }
 .timeline { list-style: none; padding: 0; margin: 8px 0 0; }
 .timeline li {
@@ -441,7 +443,6 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 }
 
 /* A done card: its rounds, newest first, each with what it was asked and what it did. */
-#detail.wide { width: min(1180px, 100vw); }
 #detail footer .spacer { flex: 1; }
 button.action.small { font-size: 12px; padding: 5px 12px; }
 button.action:disabled { opacity: .45; cursor: not-allowed; }
@@ -451,19 +452,6 @@ button.action:disabled { opacity: .45; cursor: not-allowed; }
 .links summary { cursor: pointer; color: var(--text-3); font-size: 12px; }
 .overall { font-size: 15px; margin: 0 0 18px; }
 /* A done card's tabs: stuck to the top of the panel so switching never means scrolling back up. */
-.tabs {
-  position: sticky; top: -20px; z-index: 3; background: var(--surface);
-  display: flex; gap: 2px; overflow-x: auto; margin: -20px -26px 18px; padding: 10px 20px 0;
-  border-bottom: 1px solid var(--line);
-}
-.tabs button {
-  font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer;
-  background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px;
-  padding: 6px 10px 9px; color: var(--text-2);
-}
-.tabs button:hover { color: var(--text); }
-.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 550; }
-.tabs .n { color: var(--text-3); font-variant-numeric: tabular-nums; margin-left: 4px; font-weight: 400; }
 .sec {
   font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
   color: var(--text-3); margin: 0 0 8px; display: flex; gap: 8px; align-items: baseline;
@@ -665,11 +653,10 @@ button.action.you { background: var(--you); color: var(--on-accent); font-weight
 #detail.page #close .back { display: inline; }
 #detail .kick:empty { display: none; }
 /* A card is a page of its own: what it is and where it stands on the left, its rounds and run on the right. */
-#d-facts:empty, #d-steps:empty, #detail .sub:empty { display: none; }
+#d-steps:empty, #detail .sub:empty { display: none; }
 #detail.page {
   width: 100vw; background: var(--bg); box-shadow: none; transition: none; overflow-y: auto; box-sizing: border-box;
-  display: grid; align-content: start; grid-template-columns: minmax(0, 1fr) 320px; column-gap: 16px;
-  grid-template-areas: "bar bar" "head facts" "acts facts" "sheet sheet";
+  display: grid; align-content: start; grid-template-columns: minmax(0, 1fr); grid-template-areas: "bar" "head" "acts" "sheet";
   padding: 0 max(24px, calc((100vw - 1232px) / 2)) 24px;
 }
 #detail.page #close {
@@ -683,8 +670,6 @@ button.action.you { background: var(--you); color: var(--on-accent); font-weight
   display: flex; flex-direction: column; align-items: stretch; gap: 16px;
 }
 #detail.page > footer { grid-area: acts; border: none; background: var(--surface); border-radius: 0 0 26px 26px; padding: 18px 28px 24px; }
-#detail.page #d-facts { grid-area: facts; display: flex; }
-#detail.page #d-facts .tile { flex: 1; }
 #detail.page > .sheet { grid-area: sheet; margin-top: 16px; flex: none; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
 #detail.page h3 { font-size: 30px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.12; margin: 0; }
 #detail.page .sub { font-size: 14px; color: var(--text-3); }
@@ -808,8 +793,7 @@ button.action.you { background: var(--you); color: var(--on-accent); font-weight
 }
 
 @media (max-width: 900px) {
-  #detail.page { grid-template-columns: minmax(0, 1fr); grid-template-areas: "bar" "head" "acts" "facts" "sheet"; padding: 0 16px 24px; row-gap: 0; }
-  #detail.page #d-facts { margin-top: 16px; }
+  #detail.page { padding: 0 16px 24px; }
   #detail.page #d-side { flex: 1 1 100%; }
   #detail.page #d-steps small { display: none; }
   #detail.page #d-steps b { font-size: 10px; overflow: hidden; text-overflow: ellipsis; }
@@ -850,7 +834,6 @@ button.action.you { background: var(--you); color: var(--on-accent); font-weight
     <ol class="steps" id="d-steps"></ol>
     <div class="sub" id="d-sub"></div>
   </header>
-  <div id="d-facts"></div>
   <div class="sheet">
     <div id="d-side"></div>
     <div class="body" id="d-body"></div>
@@ -1793,11 +1776,11 @@ function planTiles(t, notes, body) {
 
 /** The tests written before any code: each opens to what it checks and why it fails now. */
 function testsTile(t) {
-  const w = t.written_tests, tests = w?.tests || [], red = tests.filter(c => c.outcome !== "passed").length;
+  const w = t.written_tests, tests = w?.tests || [], total = w?.total ?? tests.length, red = w?.failing ?? 0;
   if (!w) return t.tests_note && t.stage === "planning" ? `<section class="tile"><h2 class="lbl">Tests</h2><span class="why">${esc(t.tests_note)}</span></section>` : "";
   return `<section class="tile" aria-labelledby="tests-h"><h2 class="lbl" id="tests-h">Tests written first</h2>
-    <div><span class="big plain">${tests.length}</span> <span class="why">test${tests.length === 1 ? "" : "s"}</span></div>
-    <span class="why">${red} fail${red === 1 ? "s" : ""} now, as ${red === 1 ? "it" : "they"} should${tests.length - red ? ` · ${tests.length - red} pass now` : ""}</span>
+    <div><span class="big plain">${total}</span> <span class="why">test${total === 1 ? "" : "s"}</span></div>
+    <span class="why">${red} fail${red === 1 ? "s" : ""} now, as ${red === 1 ? "it" : "they"} should${total - red ? ` · ${total - red} pass now` : ""}${total > tests.length ? ` · the first ${tests.length} listed` : ""}</span>
     <div>${tests.map(c => `<details class="trow"><summary><i class="${c.outcome === "passed" ? "ok" : ""}"></i><span><b>${esc(c.name)}</b>`
       + `<small>${c.outcome === "passed" ? "passes now" : "fails now"}${c.criterion ? ` · criterion ${esc(c.criterion)}` : ""}</small></span></summary>`
       + (c.checks ? `<p>${esc(c.checks)}</p>` : "") + (c.message ? `<pre>${esc(c.message)}</pre>` : "") + `</details>`).join("")}</div>
@@ -1810,10 +1793,22 @@ function sideFor(t, plain, body, history) {
   const owner = t.parent ? state.tasks.find(x => x.id === t.parent) : null;
   const track = owner ? partsTrack(owner, t.id) : t.parts.length || t.split ? partsTrack(t, t.id) : "";
   const today = sections(body).find(x => /^current/i.test(x.title));
-  return (track ? `<section class="tile">${track}</section>` : "") + (!plain ? "" : testsTile(t)
-    + (today ? `<section class="tile"><h2 class="lbl">How it works today</h2><div class="md small">${md(today.text)}</div></section>` : "")
-    + (history ? `<section class="tile">${history.replace("<h2>", `<h2 class="lbl">`)}</section>` : ""));
+  return factsFor(t) + (track ? `<section class="tile">${track}</section>` : "") + (!plain ? "" : testsTile(t)
+    + (today ? `<section class="tile"><h2 class="lbl">How it works today</h2><div class="md small">${md(today.text)}</div></section>` : ""))
+    + (history ? `<section class="tile">${history.replace("<h2>", `<h2 class="lbl">`)}</section>` : "");
 }
+
+// A card's events as you would say them. The daemon restarting is not about the card, and a run
+// starting is already said by the move that started it.
+const QUIET = new Set(["daemon_started", "run_started", "baseline", "review_started", "reordered", "fetch_failed"]);
+const MOVED = { draft: "Back to a draft", planning: "Sent to planning", todo: "Queued for coding", "under-work": "Coding started", review: "Review started", done: "Finished" };
+const SAID = { created: "Captured", planned: "Planned", answered: "You answered a question", tests_started: "Test writing started",
+  tests_written: "Tests written", tests_skipped: "Tests skipped", run_finished: "Coding finished", run_paused: "Coding paused",
+  run_error: "Coding hit a machine error", reviewed: "Reviewed", review_asked: "The reviewer asked you a question",
+  review_failed: "Review failed", review_error: "Review hit a machine error", review_paused: "Review paused", sent_back: "Sent back with comments",
+  fix_requested: "You asked for fixes", judged: "You gave your verdict", pr_opened: "Pull request opened", plan_failed: "Planning failed",
+  plan_paused: "Planning paused", paused: "Paused", resumed: "Resumed", retried: "Retried", retest: "Tests written again",
+  rereview: "Sent for another review", now: "Marked to do now", scouted: "Suggestions filed", reclaimed: "Picked up again after a restart" };
 
 // Whose run the log shows: the planner's, the test writer's, the coder's ("") or the reviewer's.
 let logsOpen = false, logOf = "", testCode = false;
@@ -1856,9 +1851,13 @@ async function loadShots(t, names = t.shots || []) {
 
 function shotsGrid(t) {
   const have = (t.shots || []).map(n => [n, shotUrls.get(`${t.id}/${t.attempts}/${n}`)]).filter(([, u]) => u);
-  if (!have.length) return "";
-  return `<div class="shots">` + have.map(([n, u]) =>
-    `<a href="${u}" target="_blank" rel="noreferrer"><img src="${u}" alt="${esc(n)}" title="${esc(n)}"></a>`).join("") + `</div>`;
+  const cell = ([n, u]) => `<a href="${u}" target="_blank" rel="noreferrer" title="${esc(n)}"><img src="${u}" alt=""><span>${esc(n.replace(/\.png$/, ""))}</span></a>`;
+  // The reviewer names each shot for what it shows: the ones taken before the change, or while it
+  // was finding its way, are folded under the ones that show the result.
+  const aside = have.filter(([n]) => /^(before|debug)\b/i.test(n)), main = have.filter(([n]) => !/^(before|debug)\b/i.test(n));
+  return (main.length ? `<div class="shots">${main.map(cell).join("")}</div>` : "")
+    + (aside.length ? `<details class="more"${main.length ? "" : " open"}><summary>${plural(aside.length, "before and debug shot")}</summary>`
+      + `<div class="shots">${aside.map(cell).join("")}</div></details>` : "");
 }
 
 // --- the run log -----------------------------------------------------------------------------
@@ -2015,7 +2014,8 @@ function roundsView(t) {
     if (r.summary && r.kind === "original" && rs.length > 1) html += `<p>${esc(r.summary)}</p>`;
     const outside = Object.entries(r.outside || {});
     if (outside.length)
-      html += `<div class="warn">Also changed files no comment was on: ${outside.map(([repo, fs]) => fs.map(f => `<code>${esc(repo)}/${esc(f)}</code>`).join(", ")).join(", ")}</div>`;
+      html += `<details class="more"><summary>Also changed ${plural(outside.reduce((n, [, fs]) => n + fs.length, 0), "file")} no comment was on</summary>`
+        + `<div class="warn">${outside.map(([repo, fs]) => fs.map(f => `<code>${esc(repo)}/${esc(f)}</code>`).join(", ")).join(", ")}</div></details>`;
     html += testsLine(r);
     const label = r.kind === "original" ? "View diff" : "View diff vs previous round";
     html += `<button class="action small" data-diff="${r.n}">${openDiffs.has(key) ? "Hide diff" : label}${r.landed ? "" : " (not landed)"}</button>`
@@ -2264,15 +2264,13 @@ function showDetail(id) {
   // Writing a comment: a refresh must not throw the half-typed text away with the panel.
   if (commentAt && detailId === id) return;
   // A card opened while its coder works opens on the run: that is what there is to look at.
-  if (detailId !== id && t.stage === "under-work" && LIVE.has(t.status)) tab = "log", watching = id;
+  if (detailId !== id) testCode = false, logsOpen = t.stage === "under-work" && LIVE.has(t.status), logOf = "", watching = logsOpen ? id : null;
   openId = id;
   document.getElementById("detail").classList.add("page");
-  if (detailId !== id) testCode = logsOpen = false;
   const { yours } = standing(t);
   document.getElementById("d-kick").innerHTML = kickFor(t);
   document.getElementById("d-title").textContent = t.title;
   document.getElementById("d-steps").innerHTML = stepsFor(t);
-  document.getElementById("d-facts").innerHTML = factsFor(t);
   document.getElementById("d-sub").textContent = t.stage === "planning" && t.status === "ready"
     ? "Approving sends the plan and its tests to the coder. It codes until the tests pass and may not change them." : "";
   const from = (t.branches || []).map(b => b.split("@")[1]).join(", ");
@@ -2319,10 +2317,10 @@ function showDetail(id) {
       : `<div class="note"><strong>Open questions</strong><ul>${t.open_questions.map(q => `<li>${esc(q)}</li>`).join("")}</ul></div>`) : "";
   head += questions;
 
-  const mine = state.events.filter(e => e.id === t.id);
+  const mine = state.events.filter(e => e.id === t.id && !QUIET.has(e.type));
   const history = mine.length
     ? `<h2>History</h2><ul class="timeline">${mine.map(e =>
-        `<li><time>${when(e.ts)}</time><span>${esc(e.type)}${e.to ? ` → ${esc(e.to)}` : ""}`
+        `<li><time>${when(e.ts)}</time><span>${esc(e.type === "moved" ? MOVED[e.to] || `Moved to ${e.to}` : SAID[e.type] || e.type.replaceAll("_", " "))}`
         + `${e.url ? ` ${link(e.url)}` : ""}</span></li>`).join("")}</ul>`
     : "";
 
@@ -2340,16 +2338,14 @@ function showDetail(id) {
   // A card that reached the coder is read round by round; the rest is still the packet and its notes.
   const rounded = ran && !editing;
   const rs = t.rounds || [];
-  if ((tab === "shots" && !(t.shots || []).length) || (tab === "full" && latestLanded(t) < 0)) tab = "runs";
-  const diffing = tab === "full" || (tab === "runs" && [...openDiffs].some(k => k.startsWith(`${id}/`)));
-  document.getElementById("detail").classList.toggle("wide", Boolean(rounded && diffing));
+  if (tab !== "full" || latestLanded(t) < 0) tab = "runs";
   const coded = testCode && t.written_tests;
   const sideHtml = sideFor(t, !rounded && !editing, body, history);
   if (document.getElementById("d-side").dataset.from !== sideHtml) {
     document.getElementById("d-side").innerHTML = sideHtml;
     document.getElementById("d-side").dataset.from = sideHtml;
   }
-  panel.classList.toggle("one", Boolean(editing || logsOpen || rounded || coded));
+  panel.classList.toggle("one", Boolean(editing || logsOpen || coded));
   let html;
   if (editing) {
     // A planned card is edited section by section; the rest of the packet is preserved on save.
@@ -2361,24 +2357,18 @@ function showDetail(id) {
       + (t.offline ? `<div class="note">${esc(t.offline)}</div>` : "")
       + (prNote?.id === id ? `<div class="note${prNote.bad ? " bad" : ""}">${esc(prNote.text)}</div>` : "")
       + (t.paused ? `<div class="note">${LIVE.has(t.status) ? "Pausing — the run stops before its next model call." : "Paused until you <strong>Resume</strong>."}</div>` : "");
-    const tabs = [
-      ["runs", "Runs", rs.length],
-      ...(latestLanded(t) >= 0 ? [["full", "Full diff"]] : []),
-      ...((t.shots || []).length ? [["shots", "Screenshots", t.shots.length]] : []),
-      ["history", "History", mine.length],
-      ["log", LIVE.has(t.status) && t.stage === "under-work" ? "Live run ●" : "Run log"],
-    ];
-    const content = {
-      runs: () => rs.length ? linksRow(t) + roundsView(t)
-        : `<p class="tests">No round has finished yet — the <strong>Run log</strong> shows the coder as it works.</p><div class="md">${md(body)}</div>`,
-      full: () => `<p class="tests" id="full-sum">From where the first round started to the latest round.</p><div class="diffbox" id="diff-full"></div>`,
-      shots: () => shotsGrid(t) || `<div class="hint">loading the screenshots…</div>`,
-      history: () => history.replace("<h2>History</h2>", "") || `<div class="hint">Nothing recorded yet.</div>`,
-      log: () => `<section class="live"><div id="ctx" class="ctx"></div><div class="run" id="run"></div></section>`,
-    }[tab];
-    html = `<div class="tabs" role="tablist">${tabs.map(([key, label, n]) =>
-        `<button role="tab" data-tab="${key}" aria-selected="${tab === key}">${label}${n ? `<span class="n">${n}</span>` : ""}</button>`).join("")}</div>`
-      + top + content();
+    // What was built, round by round; every change together, when you ask; and what the reviewer saw.
+    const all = tab === "full";
+    html = (top ? `<section class="tile">${top}</section>` : "")
+      + `<section class="tile"><div class="sec-head"><h2>Result</h2><span class="why">${plural(rs.length, "round")}</span></div>`
+      + (rs.length ? linksRow(t) + roundsView(t) : `<p class="tests">No round has finished yet. <strong>Logs and thinking</strong> shows the coder as it works.</p>`)
+      + `</section>`
+      + (latestLanded(t) < 0 ? "" : `<section class="tile"><div class="sec-head"><h2>All changes</h2>`
+        + `<span class="why" id="full-sum">From where the first round started to the latest round.</span><span style="flex:1"></span>`
+        + `<button class="action" data-tab="${all ? "runs" : "full"}">${all ? "Hide" : "Show"}</button></div>`
+        + (all ? `<div class="diffbox" id="diff-full"></div>` : "") + `</section>`)
+      + ((t.shots || []).length ? `<section class="tile"><div class="sec-head"><h2>What the reviewer saw</h2><span class="why">${plural(t.shots.length, "screenshot")}</span></div>`
+        + (shotsGrid(t) || `<div class="hint">loading the screenshots…</div>`) + `</section>` : "");
   } else {
     html = coded ? testsView(t) : planTiles(t, head, body);
   }
@@ -2388,11 +2378,8 @@ function showDetail(id) {
   if (detailId !== id || editing || drawnFrom !== lastBody) {
     panel.innerHTML = html;
     lastBody = drawnFrom;
-    // Sticky offsets count from inside the panel's 20px padding, which the tabs bar reaches up into.
-    const tabs = panel.querySelector(".tabs");
-    panel.style.setProperty("--under-tabs", `${tabs ? tabs.offsetHeight - 20 : 0}px`);
-    if (rounded && tab === "runs") drawDiffs(t);
-    if (rounded && tab === "full") drawFullDiff(t);
+    if (rounded && !logsOpen) drawDiffs(t);
+    if (rounded && !logsOpen && tab === "full") drawFullDiff(t);
   }
   page.scrollTop = saved;
   detailId = id;
@@ -2490,7 +2477,6 @@ function closeDetail() {
   lastBody = "";
   openDiffs.clear();
   tab = "runs";
-  document.getElementById("detail").classList.remove("wide");
   // A card page closes as it opened, at once; it stays a page until a form opens the side panel.
   document.getElementById("detail").classList.remove("open");
   delete document.getElementById("d-side").dataset.from;
@@ -2762,9 +2748,6 @@ document.getElementById("d-body").addEventListener("click", e => {
   const pick = e.target.closest("button[data-tab]");
   if (pick) {
     tab = pick.dataset.tab;
-    // The log tab is the run log opened: it polls while the run is live, while it is open.
-    watching = tab === "log" ? openId : null;
-    document.getElementById("d-body").scrollTop = 0;
     return showDetail(openId);
   }
   const answer = e.target.closest("button[data-answer]");
@@ -2822,7 +2805,7 @@ document.getElementById("d-body").addEventListener("change", e => {
   drawCapture();
 });
 document.getElementById("close").addEventListener("click", closeDetail);
-for (const id of ["d-side", "d-facts"]) document.getElementById(id).addEventListener("click", e => {
+document.getElementById("d-side").addEventListener("click", e => {
   if (e.target.closest("[data-tests]")) { testCode = true; return showDetail(openId); }
   const el = e.target.closest("[data-id], a[data-open]");
   if (!el) return;

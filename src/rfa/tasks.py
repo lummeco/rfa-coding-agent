@@ -63,8 +63,9 @@ ID_RE = re.compile(r"[0-9a-z][0-9a-z-]{0,79}")
 FRONT_MATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?(.*)\Z", re.DOTALL)
 
 
-class Loader(yaml.SafeLoader):
-    """YAML, except that a timestamp stays the string it was written as.
+class Loader(getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
+    """YAML, except that a timestamp stays the string it was written as. libyaml's parser where it
+    is installed: the board reads every card several times for one snapshot.
 
     `created: 2026-09-20T06:07:10.864Z` is a datetime to PyYAML, which then dumps it back in a
     different format and cannot be put in the board's JSON at all. Front matter is a text format:

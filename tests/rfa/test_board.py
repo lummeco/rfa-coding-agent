@@ -594,3 +594,24 @@ def test_a_build_waiting_for_a_verdict_carries_the_size_of_its_latest_round(tmp_
         (rounds.run_dir(task.id) / f"round-{n}" / "web.patch").write_text(f"diff --git a/x b/x\n--- a/x\n+++ b/x\n{patch}")
     (card,) = [t for t in board.snapshot()["tasks"] if t["id"] == task.id]
     assert card["diffstat"] == {"added": 2, "removed": 1, "files": 1} and card["progress"] == ""
+
+
+def test_the_planner_and_test_writer_runs_are_read_too_with_what_the_model_thought(tmp_path, monkeypatch):
+    monkeypatch.setenv("RFA_HOME", str(tmp_path))
+    for of, command in (("plan", "grep -rn Dialog src"), ("tests", "npm test")):
+        (run := tmp_path / "var" / "runs" / "20260921-120000-a-task" / of).mkdir(parents=True)
+        (run / "trajectory.json").write_text(
+            json.dumps(
+                {
+                    "messages": [
+                        {"role": "assistant", "content": f"First {of}.", "extra": {"actions": [{"command": command}]}},
+                        {"role": "tool", "content": "ok", "extra": {"returncode": 0}},
+                    ]
+                }
+            )
+        )
+    assert board.progress("20260921-120000-a-task", "plan")["steps"] == [
+        {"commands": ["grep -rn Dialog src"], "returncode": 0, "output": "ok", "thought": "First plan."}
+    ]
+    assert board.progress("20260921-120000-a-task", "tests")["steps"][0]["thought"] == "First tests."
+    assert board.progress("20260921-120000-a-task") == {"steps": []}

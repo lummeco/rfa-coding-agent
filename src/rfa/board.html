@@ -4,46 +4,43 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RFA</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <style>
 :root {
-  --bg: #eef0f2;
+  --bg: #f2f2f7;
   --surface: #ffffff;
-  --surface-2: #f6f7f9;
-  --text: #111418;
-  --text-2: #4a515c;
-  --text-3: #5f6672;
-  --line: #dce0e5;
-  --accent: #1d4ed8;
-  --green: #15803d;
-  --amber: #b45309;
-  --red: #b91c1c;
-  --purple: #7e22ce;
-  --you: #c2410c;
-  --shadow: 0 1px 2px rgba(17, 20, 24, 0.04);
-  --shadow-lift: 0 6px 24px rgba(17, 20, 24, 0.10);
+  --surface-2: #e8e8ed;
+  --text: #1d1d1f;
+  --text-2: #3a3a3c;
+  --text-3: #636366;
+  --line: #e5e5ea;
+  --accent: #0071e3;
+  --on-accent: #ffffff;
+  --green: #1d7d3f;
+  --amber: #b25000;
+  --red: #c4281c;
+  --purple: #8944ab;
+  --you: #b25000;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-lift: 0 8px 28px rgba(0, 0, 0, 0.12);
   --radius: 14px;
-  --band: #111418; --band-2: #1f242c; --band-line: #2b313a;
-  --band-text: #f3f4f6; --band-dim: #9ca3af; --band-live: #60a5fa;
-  --sans: Geist, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --mono: "Geist Mono", var(--mono);
+  --band: #1c1c1e; --band-2: #2c2c2e; --band-line: #3a3a3c;
+  --band-text: #f5f5f7; --band-dim: #aeaeb2; --band-live: #64d2ff;
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0b0d10; --surface: #15181d; --surface-2: #1c2027;
-    --text: #f3f4f6; --text-2: #c3c8d0; --text-3: #9097a3; --line: #2a3039;
-    --accent: #3b6fe0; --green: #22a55a; --amber: #f59e0b; --red: #f87171; --purple: #c084fc; --you: #fb923c;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3); --shadow-lift: 0 6px 24px rgba(0, 0, 0, 0.5);
-    --band: #15181d; --band-2: #1f242c; --band-line: #2b313a;
+    --bg: #000000; --surface: #1c1c1e; --surface-2: #2c2c2e;
+    --text: #f5f5f7; --text-2: #d1d1d6; --text-3: #aeaeb2; --line: #3a3a3c;
+    --accent: #0a84ff; --on-accent: #000000; --green: #30d158; --amber: #ff9f0a; --red: #ff6961; --purple: #bf5af2; --you: #ff9f0a;
+    --shadow: none; --shadow-lift: 0 8px 28px rgba(0, 0, 0, 0.6);
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0b0d10; --surface: #15181d; --surface-2: #1c2027;
-  --text: #f3f4f6; --text-2: #c3c8d0; --text-3: #9097a3; --line: #2a3039;
-  --accent: #3b6fe0; --green: #22a55a; --amber: #f59e0b; --red: #f87171; --purple: #c084fc; --you: #fb923c;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3); --shadow-lift: 0 6px 24px rgba(0, 0, 0, 0.5);
-  --band: #15181d; --band-2: #1f242c; --band-line: #2b313a;
+  --bg: #000000; --surface: #1c1c1e; --surface-2: #2c2c2e;
+  --text: #f5f5f7; --text-2: #d1d1d6; --text-3: #aeaeb2; --line: #3a3a3c;
+  --accent: #0a84ff; --on-accent: #000000; --green: #30d158; --amber: #ff9f0a; --red: #ff6961; --purple: #bf5af2; --you: #ff9f0a;
+  --shadow: none; --shadow-lift: 0 8px 28px rgba(0, 0, 0, 0.6);
 }
 
 * { box-sizing: border-box; }
@@ -65,14 +62,11 @@ header {
   padding: 22px 32px 18px;
   flex: none;
 }
-header h1 { font: 500 20px var(--mono); letter-spacing: -0.02em; margin: 0; }
-header .tagline { color: var(--text-3); font-size: 13px; margin-right: 6px; }
+header h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
 header .count { color: var(--text-3); font-size: 13px; }
 header .spacer { flex: 1; }
-body > header { align-items: center; flex-wrap: wrap; row-gap: 10px; }
-header .tagline, .chip, button.action { white-space: nowrap; }
-@media (max-width: 1100px) { header .hint, header .tagline { display: none; } }
-header .hint { color: var(--text-3); font-size: 12px; }
+body > header { align-items: center; flex-wrap: wrap; row-gap: 10px; box-sizing: border-box; width: min(1280px, 100%); margin: 0 auto; padding: 20px 24px 16px; }
+button.action { white-space: nowrap; }
 
 #board {
   flex: 1;
@@ -231,15 +225,15 @@ header .hint { color: var(--text-3); font-size: 12px; }
 button.action {
   font: inherit; font-size: 14px; font-weight: 500;
   display: inline-flex; align-items: center; gap: 6px; min-height: 38px;
-  border: 1px solid var(--line); border-radius: 10px; padding: 0 16px;
-  background: var(--surface); color: var(--text); cursor: pointer;
+  border: none; border-radius: 980px; padding: 0 18px;
+  background: var(--surface-2); color: var(--text); cursor: pointer;
   transition: opacity .15s ease;
 }
 button.action:hover { opacity: .8; }
-button.action.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-button.action.quiet { background: transparent; border-color: transparent; color: var(--text-2); padding-left: 8px; }
+button.action.primary { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+button.action.quiet { background: transparent; color: var(--text-2); padding-left: 8px; }
 button.action:disabled { opacity: .5; cursor: default; }
-#capture { background: var(--text); border-color: var(--text); color: var(--bg); }
+#capture { background: var(--text); color: var(--bg); font-weight: 600; }
 
 .note {
   background: var(--surface-2);
@@ -381,7 +375,8 @@ button.action:disabled { opacity: .5; cursor: default; }
 }
 .timeline time { color: var(--text-3); font-variant-numeric: tabular-nums; flex: none; }
 
-/* The status strip: what the daemon is doing and why it might not be. */
+/* The status strip: only why the board could not load. */
+#strip:empty { display: none; }
 #strip {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
   padding: 0 28px 14px; font-size: 12px; color: var(--text-2);
@@ -569,71 +564,51 @@ div.rfa-comment { background: color-mix(in srgb, var(--accent) 9%, var(--surface
 .views button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
 .views .count { margin-left: 5px; font-variant-numeric: tabular-nums; }
 .views .n { color: var(--you); font-variant-numeric: tabular-nums; margin-left: 4px; }
-#gates { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip {
-  font: 12px var(--mono); color: var(--text-2);
-  border: 1px solid var(--line); background: var(--surface); border-radius: 980px; padding: 4px 10px;
-}
-.chip.bad { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, transparent); }
 #home { flex: 1; min-height: 0; overflow-y: auto; }
-.home { max-width: 1440px; margin: 0 auto; padding: 0 32px 40px; display: flex; flex-direction: column; gap: 26px; }
-.band {
-  border: 1px solid var(--band-line);
-  background: var(--band); color: var(--band-text); border-radius: 18px; padding: 24px 28px 20px;
-  display: flex; flex-direction: column; gap: 20px;
+.home { max-width: 1280px; margin: 0 auto; padding: 0 24px 24px; display: flex; flex-direction: column; gap: 16px; }
+.widgets { display: flex; flex-wrap: wrap; gap: 16px; align-items: stretch; }
+.tile {
+  box-sizing: border-box; min-width: 0; background: var(--surface); border-radius: 26px; padding: 22px 24px;
+  display: flex; flex-direction: column; gap: 12px;
 }
-.band .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
-.band .kicker {
-  display: inline-flex; align-items: center; gap: 8px; color: var(--band-live);
-  font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase;
-}
-.band .kicker.idle { color: var(--band-dim); }
-.band .kicker.blocked { color: #fca5a5; }
-.beacon { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-.kicker:not(.idle) .beacon { box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 25%, transparent); animation: pulse 1.8s ease-in-out infinite; }
-.band h2 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; flex: 1 1 380px; }
-.band h2 .sub { color: var(--band-dim); font-size: 14px; font-weight: 400; letter-spacing: 0; margin-left: 6px; }
-.band .watch { font: inherit; font-size: 14px; background: none; border: none; color: #bfdbfe; cursor: pointer; padding: 0; }
-.band .watch:hover { text-decoration: underline; }
-.track-box { overflow-x: auto; }
-.track {
-  list-style: none; margin: 0; padding: 0; min-width: 640px;
-  display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); position: relative;
-}
-.track::before, .track .rail {
-  content: ""; position: absolute; left: calc(100% / 12); top: 14px; height: 2px; background: var(--band-line);
-}
-.track::before { right: calc(100% / 12); }
-.track .rail { background: var(--band-live); }
-.track li { display: flex; flex-direction: column; align-items: center; gap: 6px; position: relative; text-align: center; }
-.track .stop {
-  width: 30px; height: 30px; border-radius: 50%; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
-  font: 12px var(--mono); background: var(--band); color: var(--band-dim); border: 2px solid var(--band-line);
-}
-.track .done .stop { background: var(--accent); border-color: var(--accent); color: #fff; }
-.track .now .stop { color: #93c5fd; border-color: var(--band-live); box-shadow: 0 0 0 6px color-mix(in srgb, var(--band-live) 20%, transparent); }
-.track .you .stop { border-style: dashed; border-color: var(--you); color: var(--you); }
-.track b { font-size: 14px; font-weight: 600; color: var(--band-dim); }
-.track .done b, .track .now b { color: var(--band-text); }
-.track .you b { color: var(--you); }
-.track small { font-size: 12px; color: var(--band-dim); max-width: 170px; }
-.then { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-top: 1px solid var(--band-line); padding-top: 14px; font-size: 13px; color: #c9ced6; }
-.then .lbl { font: 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--band-dim); }
-.then button { font: inherit; font-size: 13px; color: inherit; border: none; background: var(--band-2); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
-.then button:hover { color: #fff; }
-.then .arrow { color: var(--band-dim); }
-.cols { display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-start; }
-.turn { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
-.side { flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+.tile.wide { flex: 999 1 520px; }
+.tile.narrow, .stack { flex: 1 1 280px; }
+.stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.lbl { margin: 0; font-size: 13px; font-weight: 600; color: var(--text-3); }
+.why { color: var(--text-3); font-size: 13px; }
+/* Now: what the one machine is on, with the orb saying so before you read a word. */
+.nowtile { padding: 26px 28px; gap: 18px; }
+.nowtile .top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; }
+.nowtile .words { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.kicker { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--you); }
+.kicker.idle { color: var(--text-3); }
+.kicker.blocked { color: var(--red); }
+.kicker i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.nowtile h2 { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.1; overflow-wrap: anywhere; }
+.nowtile h2 small { display: block; font-size: 15px; font-weight: 400; letter-spacing: 0; color: var(--text-3); margin-top: 8px; }
+#orb { flex: none; width: 190px; height: 190px; color: var(--text); }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+.steps li { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-3); }
+.steps li::before { content: ""; height: 6px; border-radius: 3px; background: var(--line); margin-bottom: 4px; }
+.steps .done::before { background: var(--accent); }
+.steps .at::before { background: #ff9f0a; }
+.steps b { font-size: 13px; font-weight: 500; }
+.steps .at b { color: var(--text); font-weight: 600; }
+.nowtile .acts { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: auto; font-size: 14px; color: var(--text-3); }
+.nowtile .acts .next { all: unset; cursor: pointer; color: var(--accent); }
+.nowtile .acts .next:hover { text-decoration: underline; }
+.meter { display: flex; gap: 2px; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+.meter i { background: var(--green); }
+.kv { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+.lbl + .kv { border-top: none; padding-top: 0; }
+.kv b { font-weight: 600; text-align: right; }
+.kv b.bad { color: var(--red); }
+.kv code { display: inline-block; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; font: 12px var(--mono); }
+.big { font-size: 40px; font-weight: 700; letter-spacing: -0.03em; line-height: 1; color: var(--green); }
 .sec-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
-.sec-head h2 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
-.side .sec-head h2 { font-size: 16px; }
-.sec-head .n { font: 13px var(--mono); color: var(--you); }
-.sec-head .why { color: var(--text-3); font-size: 13px; }
-.item {
-  background: var(--surface); border-radius: var(--radius); border: 1px solid var(--line);
-  padding: 18px 20px; display: flex; flex-direction: column; gap: 8px;
-}
+.sec-head h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.sec-head .n { font-weight: 600; color: var(--you); }
+.item { border-top: 1px solid var(--line); padding: 16px 0 6px; display: flex; flex-direction: column; gap: 8px; }
 .item .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font: 12px var(--mono); color: var(--text-3); }
 .tag { border-radius: 6px; padding: 2px 8px; font-weight: 500; }
 .tag.answer { background: color-mix(in srgb, var(--you) 16%, transparent); color: var(--you); }
@@ -648,10 +623,9 @@ div.rfa-comment { background: color-mix(in srgb, var(--accent) 9%, var(--surface
 .item p.err { color: var(--red); font: 12.5px/1.5 var(--mono); white-space: pre-wrap; max-height: 5.5em; overflow: hidden; }
 .item .facts { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--text-2); }
 .item .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
-button.action.ship { background: var(--green); border-color: var(--green); color: #fff; }
-button.action.you { background: var(--you); border-color: var(--you); color: #fff; }
+button.action.ship { background: var(--green); color: var(--on-accent); font-weight: 600; }
+button.action.you { background: var(--you); color: var(--on-accent); font-weight: 600; }
 .clear { border: 1px dashed var(--line); border-radius: var(--radius); padding: 16px 20px; color: var(--text-3); font-size: 14px; }
-.panel { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--line); padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
 .onl { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); }
 .onl:hover { border-color: var(--text-3); }
 .onl:focus-visible { outline: 2px solid var(--accent); }
@@ -663,11 +637,6 @@ button.action.you { background: var(--you); border-color: var(--you); color: #ff
 .bar i.passed { background: var(--accent); }
 .bar i.now { background: linear-gradient(90deg, var(--accent) 35%, color-mix(in srgb, var(--accent) 30%, transparent) 35%); }
 .bar i.stuck { background: var(--red); }
-.tally { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.tally div { background: var(--surface); border-radius: 12px; border: 1px solid var(--line); padding: 10px 14px; }
-.tally b { display: block; font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.tally span { font-size: 12px; color: var(--text-3); }
-.tally .g { color: var(--green); } .tally .y { color: var(--you); }
 .ledger { list-style: none; margin: 0; padding: 0; }
 .ledger li { border-bottom: 1px solid var(--line); }
 .ledger button { all: unset; cursor: pointer; display: flex; gap: 10px; align-items: baseline; width: 100%; padding: 8px 2px; font-size: 14px; }
@@ -702,32 +671,68 @@ button.action.you { background: var(--you); border-color: var(--you); color: #ff
 #close .back, #detail.page #close .x { display: none; }
 #detail.page #close .back { display: inline; }
 #detail .kick:empty { display: none; }
-#detail .kick { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; font: 12px var(--mono); color: var(--text-2); }
-#detail .kick span { padding: 3px 8px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--line); }
-#detail .kick .live { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); border-color: transparent; }
-#detail .kick .you { background: color-mix(in srgb, var(--you) 14%, transparent); color: var(--you); border-color: transparent; }
-#detail .kick .bad { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red); border-color: transparent; }
 /* A card is a page of its own: what it is and where it stands on the left, its rounds and run on the right. */
+#d-facts:empty, #d-steps:empty, #detail .sub:empty { display: none; }
 #detail.page {
-  width: 100vw; background: var(--bg); box-shadow: none; transition: none;
-  display: grid; grid-template-rows: auto auto minmax(0, 1fr); grid-template-areas: "head" "acts" "sheet";
+  width: 100vw; background: var(--bg); box-shadow: none; transition: none; overflow-y: auto; box-sizing: border-box;
+  display: grid; align-content: start; grid-template-columns: minmax(0, 1fr) 320px; column-gap: 16px;
+  grid-template-areas: "bar bar" "head facts" "acts facts" "sheet sheet";
+  padding: 0 max(24px, calc((100vw - 1232px) / 2)) 24px;
 }
-#detail.page > header, #detail.page > footer, #detail.page > .sheet {
-  width: min(1440px, 100%); margin: 0 auto; box-sizing: border-box; padding-left: 40px; padding-right: 40px;
-}
-#detail.page > header { grid-area: head; border: none; padding-top: 18px; padding-bottom: 0; }
-#detail.page > footer { grid-area: acts; border: none; padding-top: 14px; padding-bottom: 18px; }
-#detail.page > .sheet { grid-area: sheet; gap: 28px; }
-#detail.page h3 { font-size: 28px; letter-spacing: -0.025em; max-width: 1000px; margin: 0 0 6px; }
 #detail.page #close {
-  position: static; width: auto; height: auto; min-height: 36px; border-radius: 8px; background: none;
-  color: var(--accent); font: inherit; font-size: 14px; padding: 0; margin-bottom: 8px;
+  grid-area: bar; justify-self: start; position: static; width: auto; height: auto; min-height: 44px; margin: 14px 0 6px;
+  border-radius: 8px; background: none; color: var(--accent); font: inherit; font-weight: 500; padding: 0;
 }
 #detail.page #close:hover { text-decoration: underline; }
-#detail.page #d-side { flex: 0 0 400px; min-width: 0; overflow-y: auto; padding-bottom: 32px; }
-#detail.page .body {
-  background: var(--surface); border: 1px solid var(--line); border-bottom: none; border-radius: 18px 18px 0 0;
+/* The header and its actions are one tile: what the card is, where it stands, and what you can do. */
+#detail.page > header {
+  grid-area: head; border: none; background: var(--surface); border-radius: 26px 26px 0 0; padding: 26px 28px 0;
+  display: flex; flex-direction: column; align-items: stretch; gap: 16px;
 }
+#detail.page > footer { grid-area: acts; border: none; background: var(--surface); border-radius: 0 0 26px 26px; padding: 18px 28px 24px; }
+#detail.page #d-facts { grid-area: facts; display: flex; }
+#detail.page #d-facts .tile { flex: 1; }
+#detail.page > .sheet { grid-area: sheet; margin-top: 16px; flex: none; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+#detail.page h3 { font-size: 30px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.12; margin: 0; }
+#detail.page .sub { font-size: 14px; color: var(--text-3); }
+#detail.page #d-steps { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+#detail.page footer .action.primary { min-height: 46px; padding: 0 26px; font-size: 16px; }
+#detail.page footer[data-yours] .action.primary { background: #ff9f0a; color: #000; }
+#logs { margin-left: auto; }
+#detail.page #d-side { flex: 0 0 320px; order: 2; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+#detail.page #d-side:empty { display: none; }
+/* The body is a column of tiles for a plan, and one tile for what has tabs, a form or a log. */
+#detail.page .body { flex: 1 1 400px; min-width: 0; overflow: visible; padding: 0; display: flex; flex-direction: column; gap: 16px; }
+#detail.page .body.one { display: block; background: var(--surface); border-radius: 26px; padding: 20px 26px 26px; }
+#detail.page .body.one.editing { display: flex; }
+.prow { display: flex; gap: 14px; padding: 14px 0 2px; border-top: 1px solid var(--line); }
+.prow > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.pnum {
+  flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--surface-2);
+  display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600;
+}
+.pcheck { flex: none; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%; box-sizing: border-box; border: 2px solid var(--text-3); }
+.yours { font-size: 12px; font-weight: 600; color: var(--you); }
+.md.goal p { font-size: 19px; line-height: 1.4; letter-spacing: -0.01em; margin: 0; }
+.md.small { font-size: 14px; color: var(--text-2); }
+.big.plain { color: var(--text); }
+.trow { border-top: 1px solid var(--line); }
+.trow summary { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 6px 0; cursor: pointer; list-style: none; }
+.trow summary::-webkit-details-marker { display: none; }
+.trow summary i { flex: none; width: 10px; height: 10px; border-radius: 50%; background: #ff9f0a; }
+.trow summary i.ok { background: var(--green); }
+.trow summary span { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow-wrap: anywhere; }
+.trow summary b { font-weight: 600; font-size: 14px; }
+.trow small { font-size: 13px; color: var(--text-3); }
+.trow p { margin: 0 0 10px 22px; font-size: 14px; }
+.trow pre {
+  margin: 0 0 14px 22px; padding: 10px 12px; border-radius: 12px; background: var(--bg); color: var(--you);
+  font: 12.5px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 14em; overflow: auto;
+}
+.cxbar { display: inline-flex; gap: 4px; align-items: center; }
+.cxbar i { width: 18px; height: 6px; border-radius: 3px; background: var(--line); }
+.cxbar i.on { background: var(--text); }
+.run .thought { margin: 10px 0 2px; color: var(--band-dim); font: 13px/1.5 var(--sans); white-space: pre-wrap; max-height: 9em; overflow: auto; }
 .side-h { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
 .ptrack { list-style: none; margin: 0 0 18px; padding: 0; }
 .ptrack > li { display: flex; gap: 14px; }
@@ -769,10 +774,6 @@ button.action.you { background: var(--you); border-color: var(--you); color: #ff
 .handoff .lbl { font: 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--you); margin-bottom: 4px; }
 .handoff.empty { background: transparent; border-style: dashed; border-color: var(--line); color: var(--text-3); }
 .handoff .md p:last-child { margin-bottom: 0; }
-.facts-list { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; font-size: 13px; }
-.facts-list dt { color: var(--text-3); }
-.facts-list dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
-.facts-list code { font: 12px var(--mono); }
 .side-box { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; margin-bottom: 18px; }
 /* The live run: a dark instrument panel, the same as the line on the home page. */
 .live {
@@ -813,21 +814,19 @@ button.action.you { background: var(--you); border-color: var(--you); color: #ff
 }
 
 @media (max-width: 900px) {
-  #detail.page { display: flex; flex-direction: column; overflow-y: auto; }
-  #detail.page > footer { order: 1; }
-  #detail.page > .sheet { order: 2; flex: none; }
-  #detail.page > header, #detail.page > footer, #detail.page > .sheet { padding-left: 16px; padding-right: 16px; }
-  #detail.page > .sheet { display: flex; flex-direction: column; gap: 16px; }
-  #detail.page #d-side { flex: none; overflow: visible; padding-bottom: 0; }
-  #detail.page .body { overflow: visible; border-radius: 18px; border-bottom: 1px solid var(--line); }
+  #detail.page { grid-template-columns: minmax(0, 1fr); grid-template-areas: "bar" "head" "acts" "facts" "sheet"; padding: 0 16px 24px; row-gap: 0; }
+  #detail.page #d-facts { margin-top: 16px; }
+  #detail.page #d-side { flex: 1 1 100%; }
+  #detail.page #d-steps small { display: none; }
+  #detail.page #d-steps b { font-size: 10px; overflow: hidden; text-overflow: ellipsis; }
 }
 
 @media (max-width: 700px) {
-  header { padding: 18px 20px 14px; }
+  body > header { padding: 16px 16px 12px; }
   #board { padding: 0 20px 20px; grid-auto-columns: minmax(252px, 1fr); }
   .home { padding: 0 16px 28px; }
-  .band { padding: 20px 18px 16px; }
-  header .hint, header .tagline, #gates { display: none; }
+  .nowtile h2 { font-size: 24px; }
+  .steps small { display: none; }
 }
 </style>
 </head>
@@ -835,16 +834,13 @@ button.action.you { background: var(--you); border-color: var(--you); color: #ff
 
 <header>
   <h1>rfa</h1>
-  <span class="tagline">one machine, one line</span>
   <div class="views" id="views">
     <button data-view="home" aria-pressed="true">Your turn<span class="n" id="turn-n"></span></button>
     <button data-view="board" aria-pressed="false">All cards<span class="count" id="count"></span></button>
   </div>
   <span class="spacer"></span>
-  <div id="gates"></div>
   <button class="action" id="analytics">Analytics</button>
-  <button class="action primary" id="capture">New idea</button>
-  <span class="hint"><kbd>N</kbd> new · <kbd>V</kbd> view · <kbd>Esc</kbd> close</span>
+  <button class="action primary" id="capture" title="N">New idea</button>
 </header>
 
 <div id="strip"></div>
@@ -854,12 +850,14 @@ button.action.you { background: var(--you); border-color: var(--you); color: #ff
 
 <div id="scrim"></div>
 <aside id="detail" aria-hidden="true">
+  <button id="close" title="Close" aria-label="Close"><span class="x">✕</span><span class="back">← Home</span></button>
   <header>
-    <button id="close" title="Close" aria-label="Close"><span class="x">✕</span><span class="back">← Back</span></button>
     <div class="kick" id="d-kick"></div>
     <h3 id="d-title"></h3>
+    <ol class="steps" id="d-steps"></ol>
     <div class="sub" id="d-sub"></div>
   </header>
+  <div id="d-facts"></div>
   <div class="sheet">
     <div id="d-side"></div>
     <div class="body" id="d-body"></div>
@@ -1377,67 +1375,202 @@ const partOf = t => {
   return owner ? ` · part ${t.part} of ${owner.parts.length} of ${owner.title}` : "";
 };
 
-function strip() {
-  const sys = state.system;
-  if (!sys) return;
-  const gate = name => sys.gates.find(g => g.name === name);
-  const held = [gate("power"), gate("memory")].filter(Boolean);
-  document.getElementById("gates").innerHTML = held.map(g =>
-    `<span class="chip${g.ok ? "" : " bad"}" title="${esc(g.name)} gate">${esc(g.detail)}</span>`).join("")
-    + (sys.model ? `<span class="chip" title="default model">${esc(sys.model)}</span>` : "");
+// --- the orb: the machine's state as a ball of dots, read before any word on the page ----------
+
+// Dots in rows of latitude: a row is what turns, scans or lights up. The cube has dots of its own,
+// a grid on each face, so its faces read as faces.
+const ORB_ROWS = 11, GRID = [-0.48, -0.24, 0, 0.24, 0.48], orbDots = [], cubeDots = [];
+for (let r = 0; r < ORB_ROWS; r++) {
+  const lat = (-75 + 150 * r / (ORB_ROWS - 1)) * Math.PI / 180, n = Math.max(4, Math.round(24 * Math.cos(lat)));
+  for (let i = 0; i < n; i++) orbDots.push({ r, lat, a: 2 * Math.PI * i / n });
+}
+for (let axis = 0; axis < 3; axis++) for (const side of [-1, 1]) for (const u of GRID) for (const v of GRID) {
+  const p = [0, 0, 0], n = [0, 0, 0];
+  p[axis] = 0.6 * side; p[(axis + 1) % 3] = u; p[(axis + 2) % 3] = v; n[axis] = side;
+  cubeDots.push({ p, n });
+}
+// mode: idle | blocked | planning | tests | coding | reviewing | waiting. `cube` and `grey` ease
+// between 0 and 1, so one state turns into the next instead of cutting to it.
+const orb = { mode: "idle", t: 0, yaw: 0.6, pitch: 0, roll: 0, vel: null, rows: new Array(ORB_ROWS).fill(0),
+  phase: "spin", pt: 0, twists: 0, tw: null, cube: 0, grey: 1, last: 0 };
+const orbStill = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const band = tw => [...Array(tw.width)].map((_, i) => tw.start + i);
+
+function orbEndTwist() {
+  if (orb.tw) band(orb.tw).forEach(r => orb.rows[r] = orb.tw.from[r] + orb.tw.dir * Math.PI / 2);
+  orb.tw = null;
 }
 
-function band() {
+function orbStep(dt) {
+  const o = orb, k = orbStill ? 1 : Math.min(1, dt * 5);
+  o.t += dt;
+  o.cube += ((o.mode === "waiting") - o.cube) * k;
+  o.grey += ((o.mode === "idle" || o.mode === "blocked") - o.grey) * k;
+  if (o.mode === "idle") o.yaw += dt * 0.3;
+  if (o.mode === "reviewing") o.yaw += dt * 0.2;
+  if (o.mode === "tests") o.yaw += dt * 0.25;
+  if (o.mode === "coding") o.rows.forEach((_, r) => o.rows[r] += dt * (r % 2 ? -1 : 1) * (0.5 + 0.35 * (r * 7 % 3)));
+  if (o.mode !== "planning") {
+    // Out of a tumble, the ball settles upright again.
+    const wrap = a => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
+    orbEndTwist();
+    Object.assign(o, { phase: "spin", pt: 0, vel: null, pitch: wrap(o.pitch) * (1 - k), roll: wrap(o.roll) * (1 - k) });
+    return;
+  }
+  // Planning: tumble in a new random direction, slow to a stop, then turn four bands of rows a
+  // quarter turn each -- drifting a little all the while, so it never looks stalled.
+  o.pt += dt;
+  if (o.phase === "spin") {
+    if (!o.vel) {
+      const v = [0, 0, 0].map(() => Math.random() - 0.5), len = Math.hypot(...v) || 1;
+      o.vel = v.map(c => c / len * 3.2);
+    }
+    const speed = Math.sin(Math.PI * Math.min(1, o.pt / 1.8)) * dt;
+    o.yaw += o.vel[0] * speed; o.pitch += o.vel[1] * speed; o.roll += o.vel[2] * speed;
+    if (o.pt > 1.8) Object.assign(o, { phase: "hold", pt: 0, vel: null });
+    return;
+  }
+  o.yaw += dt * 0.25;
+  if (o.phase === "hold" && o.pt <= 1) return;
+  if (o.phase === "hold" || o.pt > 0.75) {
+    orbEndTwist();
+    o.twists = o.phase === "hold" ? 0 : o.twists + 1;
+    o.pt = 0;
+    if (o.twists >= 4) return void (o.phase = "spin");
+    const width = 1 + Math.floor(Math.random() * 3);
+    o.phase = "twist";
+    o.tw = { width, start: Math.floor(Math.random() * (ORB_ROWS - width + 1)), dir: Math.random() < 0.5 ? -1 : 1, from: o.rows.slice() };
+    return;
+  }
+  const p = Math.min(1, o.pt / 0.55), e = p < 0.5 ? 2 * p * p : 1 - (-2 * p + 2) ** 2 / 2;
+  band(o.tw).forEach(r => o.rows[r] = o.tw.from[r] + o.tw.dir * Math.PI / 2 * e);
+}
+
+function orbDraw(el) {
+  const o = orb, size = el.clientWidth, dpr = devicePixelRatio || 1, rad = size * 0.4;
+  if (el.width !== Math.round(size * dpr)) el.width = el.height = Math.round(size * dpr);
+  const ctx = el.getContext("2d"), ink = getComputedStyle(el).color.match(/\d+/g).slice(0, 3).map(Number);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, size, size);
+  const dot = (x, y, r, rgb, alpha) => {
+    ctx.fillStyle = `rgba(${rgb},${alpha})`;
+    ctx.beginPath();
+    ctx.arc(size / 2 + x * rad, size / 2 - y * rad, r, 0, 2 * Math.PI);
+    ctx.fill();
+  };
+  if (o.cube < 0.99) {
+    // Blocked strains a little each way and falls back, swelling and fading as it does.
+    const blocked = o.mode === "blocked", breath = 0.5 + 0.5 * Math.sin(o.t * 2);
+    const yaw = o.yaw + (blocked ? 0.14 * Math.sin(o.t * 2) : 0), tilt = 0.35 + o.pitch;
+    const cy = Math.cos(yaw), sy = Math.sin(yaw), ct = Math.cos(tilt), st = Math.sin(tilt), cz = Math.cos(o.roll), sz = Math.sin(o.roll);
+    const glow = (blocked ? 0.1 + 0.9 * breath : 1) * (1 - o.cube), swell = blocked ? 0.88 + 0.12 * breath : 1;
+    const base = [255, 159, 10].map((c, i) => c + ([142, 142, 147][i] - c) * o.grey);
+    const scan = (Math.sin(o.t * 1.4) * 0.5 + 0.5) * (ORB_ROWS - 1);
+    const spotX = Math.cos(o.t * 0.9) * 0.5, spotY = Math.sin(o.t * 1.4) * 0.45;
+    for (const d of orbDots) {
+      const a = d.a + o.rows[d.r], cl = Math.cos(d.lat), x = cl * Math.cos(a), y = Math.sin(d.lat), z = cl * Math.sin(a);
+      const x0 = x * cy + z * sy, z1 = -x * sy + z * cy, x1 = x0 * cz - y * sz, y1 = x0 * sz + y * cz;
+      const y2 = y1 * ct - z1 * st, z2 = y1 * st + z1 * ct, depth = Math.max(0, Math.min(1, (z2 + 1.1) / 2.2));
+      // What is lit: the rows being turned, the band scanning for tests, the spot the reviewer is under.
+      const lit = o.tw && band(o.tw).includes(d.r) ? 1
+        : o.mode === "tests" ? Math.max(0, 1 - Math.abs(d.r - scan) / 1.6)
+        : o.mode === "reviewing" && z2 > 0 ? Math.min(1, Math.max(0, 1 - Math.hypot(x1 - spotX, y2 - spotY) / 0.52) * 1.6) : 0;
+      const dim = o.mode === "tests" ? 0.45 + 0.55 * lit : o.mode === "reviewing" ? 0.22 + 0.78 * lit : 1;
+      dot(x1 * swell, y2 * swell, (1 + 1.9 * depth) * (1 + (o.mode === "reviewing" ? 1.1 : 0.5) * lit),
+        base.map((c, i) => Math.round(c + (ink[i] - c) * lit)), (0.18 + 0.82 * depth) * glow * dim);
+    }
+  }
+  if (o.cube > 0.01) {
+    // Waiting on you: a cube balanced on one corner, turning slowly about the upright diagonal.
+    // Near dots are larger; a face coming round brightens gradually as it passes edge-on.
+    const c45 = Math.SQRT1_2, ct = Math.cos(0.9553), st = Math.sin(0.9553), cs = Math.cos(o.t * 0.45), ss = Math.sin(o.t * 0.45);
+    const turn = ([x, y, z]) => {
+      const x0 = (x + z) * c45, z1 = (z - x) * c45, y2 = y * ct - z1 * st, z2 = y * st + z1 * ct;
+      return [x0 * cs + z2 * ss, y2, -x0 * ss + z2 * cs];
+    };
+    const seen = cubeDots.map(d => ({ p: turn(d.p), facing: turn(d.n)[2] })).sort((a, b) => a.p[2] - b.p[2]);
+    for (const { p, facing } of seen) {
+      const near = 0.95 / (1 - p[2] * 0.3), edge = Math.max(0, Math.min(1, (facing + 0.25) / 0.5)), front = edge * edge * (3 - 2 * edge);
+      dot(p[0] * near, p[1] * near, (1.5 + front) * near, "255,159,10", (0.1 + front * (0.2 + 0.7 * Math.max(0, facing))) * o.cube);
+    }
+  }
+}
+
+function orbTick(now) {
+  const el = document.getElementById("orb");
+  orbStep(orbStill ? 0 : Math.min(0.05, (now - orb.last) / 1000));
+  orb.last = now;
+  if (el?.offsetParent) orbDraw(el);
+  requestAnimationFrame(orbTick);
+}
+requestAnimationFrame(orbTick);
+
+/** What the one machine is on, where that is on the line, and what comes after. Sets the orb's mode. */
+function nowTile() {
   const sys = state.system;
   if (!sys) return "";
   const blocked = sys.gates.filter(g => ["power", "memory"].includes(g.name) && !g.ok);
-  const run = sys.running[0];
-  // The machine's place on the line: where the running card is, else where the next job will be.
-  const at = run ? (AT[run.status] ?? 3) : sys.next ? JOB_AT[sys.next.job] ?? 3 : -1;
-  const on = run || sys.next;
+  const run = sys.running[0], on = run || sys.next, turn = turnItems().length;
   const card = on && state.tasks.find(t => t.id === on.id);
-  let kicker, cls = "";
-  if (!sys.services.daemon) kicker = "Stopped", cls = "idle";
-  else if (run) kicker = "Now running";
-  else if (sys.next && blocked.length) kicker = `Held · ${blocked.map(g => g.detail).join("; ")}`, cls = "blocked";
-  else if (sys.next) kicker = "Up next";
-  else kicker = "Waiting for work", cls = "idle";
-  const title = on
-    ? `${VERB[at]} <b>${esc(on.title)}</b><span class="sub">${esc(card ? partOf(card).slice(3) : "")}${card && partOf(card) ? " · " : ""}${esc(on.model)}</span>`
-    : `Nothing on the line<span class="sub">capture an idea, or approve a plan</span>`;
+  // Only a power or memory gate "blocks"; and the machine waits on you only when it has nothing of its own.
+  orb.mode = !sys.services.daemon ? "idle"
+    : run ? ({ planning: "planning", "writing-tests": "tests", reviewing: "reviewing" }[run.status] || "coding")
+    : sys.next && blocked.length ? "blocked" : turn && !sys.next ? "waiting" : "idle";
+  const at = run ? (AT[run.status] ?? 3) : sys.next ? JOB_AT[sys.next.job] ?? 3 : orb.mode === "waiting" ? 5 : -1;
+  const [kicker, cls] = !sys.services.daemon ? ["Stopped", "idle"] : run ? ["Now running", ""]
+    : orb.mode === "blocked" ? [`Held · ${blocked.map(g => g.detail).join("; ")}`, "blocked"]
+    : sys.next ? ["Up next", "idle"] : orb.mode === "waiting" ? ["Waiting on you", ""] : ["Idle", "idle"];
+  const title = on ? `${VERB[at]} ${esc(on.title)}<small>${esc([card && partOf(card).slice(3), on.model].filter(Boolean).join(" · "))}</small>`
+    : orb.mode === "waiting" ? `${plural(turn, "thing")} need${turn === 1 ? "s" : ""} you<small>The machine has nothing else to do.</small>`
+    : `Nothing on the line<small>Capture an idea, or approve a plan.</small>`;
   const live = state.tasks.filter(t => !t.archived && !t.parent);
   const count = stage => live.filter(t => t.stage === stage).length;
-  const turn = turnItems().length;
   const notes = [
     count("draft") ? plural(count("draft"), "draft") : "no drafts",
     count("planning") ? `${count("planning")} in planning` : "empty",
-    "written before each card's code",
+    "before code",
     count("todo") ? `${count("todo")} approved` : "empty",
     count("review") ? `${count("review")} in review` : "empty",
-    turn ? `${turn} waiting on you` : "nothing waiting",
+    turn ? `${turn} waiting` : "nothing waiting",
   ];
-  const track = STATIONS.map((name, i) => {
-    const where = i === 5 ? "you" : i < at ? "done" : i === at ? "now" : "";
-    return `<li class="${where}"><span class="stop">${i < at && i !== 5 ? "✓" : i + 1}</span><b>${name}</b><small>${esc(notes[i])}</small></li>`;
-  }).join("");
-  const rail = at > 0 ? `<span class="rail" style="width: calc(${at} * 100% / 6)"></span>` : "";
   // After this job: plans that wait for the planner, then approved cards and parts, in the daemon's order.
   const after = [
     ...state.tasks.filter(t => !t.archived && t.stage === "planning" && t.status === "queued").map(t => ["plan", t]),
     ...state.tasks.filter(t => !t.archived && t.stage === "todo" && !t.split).map(t => ["code", t]),
   ].filter(([, t]) => t.id !== on?.id);
   const then = after.length
-    ? after.slice(0, 4).map(([verb, t]) => `<button data-id="${esc(t.id)}">${verb} ${esc(t.title)}</button>`).join(`<span class="arrow">→</span>`)
-      + (after.length > 4 ? `<span>+${after.length - 4} more</span>` : "")
-    : `<span>nothing else queued</span>`;
-  return `<section class="band" aria-label="The line">
-    <div class="head">
-      <span class="kicker ${cls}"><span class="beacon"></span>${esc(kicker)}</span>
-      <h2>${title}</h2>
-      ${on ? `<button class="watch" data-id="${esc(on.id)}">${run ? "Watch the run" : "Open the card"}</button>` : ""}
+    ? `Then: ` + after.slice(0, 2).map(([verb, t]) => `<button class="next" data-id="${esc(t.id)}">${verb} ${esc(t.title)}</button>`).join(", ")
+      + (after.length > 2 ? ` +${after.length - 2} more` : "")
+    : "Then: nothing else queued";
+  return `<section class="tile wide nowtile" aria-label="Now">
+    <div class="top">
+      <div class="words"><span class="kicker ${cls}"><i></i>${esc(kicker)}</span><h2>${title}</h2></div>
+      <canvas id="orb" role="img" aria-label="The machine is ${orb.mode}"></canvas>
     </div>
-    <div class="track-box"><ol class="track">${rail}${track}</ol></div>
-    <div class="then"><span class="lbl">Then</span>${then}</div>
+    <ol class="steps">${STATIONS.map((name, i) =>
+      `<li class="${on && i < at ? "done" : i === at ? "at" : ""}"><b>${name}</b><small>${esc(notes[i])}</small></li>`).join("")}</ol>
+    <div class="acts">
+      ${on ? `<button class="action primary" data-id="${esc(on.id)}">${run ? "Watch the run" : "Open the card"}</button>` : ""}
+      ${run ? `<button class="action" data-act="pause" data-act-id="${esc(run.id)}">Pause</button>` : ""}
+      <span>${then}</span>
+    </div>
+  </section>`;
+}
+
+/** The gates a run has to pass, and what it would run with. */
+function machineTile() {
+  const sys = state.system;
+  if (!sys) return "";
+  const gate = name => sys.gates.find(g => g.name === name) || { ok: true, detail: "unknown" };
+  const memory = gate("memory"), power = gate("power"), free = memory.detail.match(/(\d+)% free/);
+  const row = (label, value, ok = true) => `<div class="kv"><span>${label}</span><b class="${ok ? "" : "bad"}">${esc(value)}</b></div>`;
+  return `<section class="tile narrow" aria-labelledby="machine-h">
+    <h2 class="lbl" id="machine-h">Machine</h2>
+    ${row("Memory", memory.detail, memory.ok)}
+    ${free ? `<div class="meter" aria-hidden="true"><i style="flex:${free[1]}"></i><span style="flex:${100 - free[1]}"></span></div>` : ""}
+    ${row("Power", power.detail, power.ok)}
+    ${row("Model", sys.model || "none")}
+    ${row("Daemon", sys.services.daemon ? "running" : "stopped", Boolean(sys.services.daemon))}
   </section>`;
 }
 
@@ -1513,32 +1646,29 @@ function home() {
   const line = top.filter(t => ["todo", "under-work", "review"].includes(t.stage) && t.status !== "failed" && t.status !== "question");
   const verdicts = state.tasks.filter(t => !t.archived && t.verdict);
   const shipped = verdicts.filter(t => t.verdict === "shipped").sort(byCreated).reverse();
+  const trashed = verdicts.length - shipped.length;
   const html = `<div class="home">
-    ${band()}
-    <div class="cols">
-      <section class="turn" aria-labelledby="turn-h">
-        <div class="sec-head"><h2 id="turn-h">Your turn</h2>
-          <span class="n">${items.length ? `${items.length} waiting on you` : ""}</span>
-          <span class="why">answers first: they hold up the line</span></div>
+    <div class="widgets">${nowTile()}${machineTile()}</div>
+    <div class="widgets">
+      <section class="tile wide" aria-labelledby="turn-h">
+        <div class="sec-head"><h2 id="turn-h">Your turn</h2><span class="n">${items.length || ""}</span></div>
         ${items.map(turnItem).join("") || `<div class="clear">Nothing waits on you. New work starts with an idea: press N.</div>`}
       </section>
-      <aside class="side">
-        <section class="panel" aria-labelledby="line-h">
-          <div class="sec-head"><h2 id="line-h">On the line</h2><span class="why">approved, in order</span></div>
-          ${line.map(onLine).join("") || `<span class="why">Nothing approved.</span>`}
-        </section>
-        <section aria-labelledby="ledger-h" style="display: flex; flex-direction: column; gap: 10px">
-          <div class="sec-head"><h2 id="ledger-h">Ledger</h2><span class="why">your verdicts</span></div>
-          <div class="tally">
-            <div><b class="g">${shipped.length}</b><span>shipped</span></div>
-            <div><b>${verdicts.length - shipped.length}</b><span>trashed</span></div>
-            <div><b class="y">${items.filter(i => i.kind === "judge").length}</b><span>to judge</span></div>
-          </div>
-          <ol class="ledger">${shipped.slice(0, 8).map(t =>
+      <div class="stack">
+        <section class="tile" aria-labelledby="ledger-h">
+          <h2 class="lbl" id="ledger-h">Ledger</h2>
+          <div><span class="big">${shipped.length}</span> <span class="why">shipped</span></div>
+          <div class="meter" role="img" aria-label="${shipped.length} shipped, ${trashed} trashed"><i style="flex:${shipped.length}"></i><span style="flex:${trashed}"></span></div>
+          <span class="why">${trashed} trashed</span>
+          <ol class="ledger">${shipped.slice(0, 5).map(t =>
             `<li><button data-id="${esc(t.id)}"><span class="g" aria-hidden="true">●</span><span class="t">${esc(t.title)}</span><span class="r">↻${(t.rounds || []).length || 1}</span></button></li>`).join("")}</ol>
           <button class="linkish" data-view="board">All cards, archived ones included</button>
         </section>
-      </aside>
+        ${line.length ? `<section class="tile" aria-labelledby="line-h">
+          <h2 class="lbl" id="line-h">On the line</h2>
+          ${line.map(onLine).join("")}
+        </section>` : ""}
+      </div>
     </div>
   </div>`;
   if (html !== homeHtml) document.getElementById("home").innerHTML = homeHtml = html;
@@ -1602,52 +1732,107 @@ function partsTrack(owner, here) {
     + `<p style="font-size:13px;color:var(--text-2);margin:0 0 18px">${end}</p>`;
 }
 
-/** Where a card that is not split stands on the line: the same six stops as the home page. */
-function cardTrack(t) {
+/** A packet's markdown as its sections, by heading; and a section's list items. */
+const sections = body => String(body || "").split(/^## /m).slice(1)
+  .map(x => ({ title: x.split("\n")[0].trim(), text: x.slice(x.indexOf("\n") + 1).trim() }));
+const bullets = text => text.split("\n").map(l => l.match(/^(?:[-*]|\d+\.)\s+(.*)/)?.[1]).filter(Boolean);
+
+/** Where a card stands, with your two decisions as steps of their own: the plan, and the build. */
+function standing(t) {
   const ready = t.stage === "planning" && ["ready", "question"].includes(t.status);
-  const at = t.verdict ? 6 : t.stage === "draft" ? 0
-    : t.stage === "planning" ? (ready ? 5 : t.status === "writing-tests" || t.planned ? 2 : 1)
-    : t.stage === "todo" || t.stage === "under-work" ? 3 : t.stage === "review" ? 4 : 5;
-  const you = t.stage === "done" ? (t.verdict ? t.verdict : t.status === "failed" ? "failed: open the runs" : "your verdict")
-    : ready ? (t.status === "question" ? "answer its questions" : "approve the plan") : "";
-  const rs = (t.rounds || []).length;
-  const notes = [when(t.created), t.plan_model || "", t.written_tests ? "written" : "", [t.model, rs && `round ${rs}`].filter(Boolean).join(" · "),
-    t.booted ? (t.booted.ok ? "✓ boots" : "✗ won't boot") : "", you];
-  const rows = STATIONS.map((name, i) => {
-    const where = i === 5 && at === 5 ? "you" : i < at || (i === 2 && t.written_tests && at >= 2) ? "done" : i === at ? "now" : "later";
-    return `<li class="${where}"><div class="rail"><span class="num">${where === "done" ? "✓" : i + 1}</span>${i === 5 ? "" : `<i class="${i < at ? "on" : ""}"></i>`}</div>
-      <div style="padding:3px 0 16px"><b style="font-weight:600">${name}</b> <span style="color:var(--text-3);font-size:13px">${esc(notes[i])}</span></div></li>`;
-  }).join("");
-  return `<h2 class="side-h">On the line</h2><ol class="ptrack">${rows}</ol>`;
+  const at = t.verdict ? 7 : t.stage === "draft" ? 0
+    : t.stage === "planning" ? (ready ? 3 : t.status === "writing-tests" || t.planned ? 2 : 1)
+    : ["todo", "under-work"].includes(t.stage) ? 4 : t.stage === "review" ? 5 : 6;
+  return { at, yours: at === 3 || at === 6 || t.status === "question" };
 }
 
-function sideFor(t) {
-  const owner = t.parent ? state.tasks.find(x => x.id === t.parent) : null;
-  const track = owner ? partsTrack(owner, t.id) : t.parts.length || t.split ? partsTrack(t, t.id) : cardTrack(t);
-  const landed = Object.entries(t.landed || {});
-  const facts = [
-    ["Repos", esc(t.repos.join(", ") || "none")],
-    owner ? ["Part of", `<a href="#" data-open="${esc(owner.id)}">${esc(owner.title)}</a>`] : null,
-    t.branches?.length ? ["Starts from", `<code>${esc(t.branches.map(b => b.split("@")[1]).join(", "))}</code>`] : null,
-    landed.length ? ["Landed on", landed.map(([r, b]) => `<code>${esc(b)}</code> in ${esc(r)}`).join("<br>")] : null,
-    t.complexity ? ["Complexity", `${esc(t.complexity)} of 5`] : null,
-    t.plan_model ? ["Planned by", esc(`${t.plan_model}${t.plan_reasoning ? ` (${t.plan_reasoning})` : ""}`)] : null,
-    t.model ? ["Coded by", esc(`${t.model}${t.reasoning ? ` (${t.reasoning})` : ""}`)] : null,
-    t.attempts ? ["Retries", esc(t.attempts)] : null,
-    ["Captured", esc(when(t.created))],
-  ].filter(Boolean);
-  return track + `<div class="side-box"><dl class="facts-list">${facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl></div>`;
+function stepsFor(t) {
+  const { at } = standing(t), rs = (t.rounds || []).length;
+  const notes = [when(t.created), t.plan_model, at > 2 || t.written_tests ? "written" : "", "you",
+    [t.model, rs && `round ${rs}`].filter(Boolean).join(" · "), t.booted ? (t.booted.ok ? "boots" : "won't boot") : "", t.verdict || "you"];
+  return ["Idea", "Plan", "Tests", "Approve", "Code", "Review", "Verdict"].map((name, i) =>
+    `<li class="${i < at ? "done" : i === at ? "at" : ""}"><b>${name}</b><small>${esc(notes[i] || "")}</small></li>`).join("");
 }
 
 function kickFor(t) {
-  const live = LIVE.has(t.status) && !t.paused;
-  const cls = live ? "live" : t.status === "failed" ? "bad" : t.status === "question" || (t.stage === "done" && !t.verdict) || t.status === "ready" ? "you" : "";
-  const owner = t.parent && state.tasks.find(x => x.id === t.parent);
-  return [
-    `<span class="${cls}">${esc((LABEL[t.stage] || t.stage).toUpperCase())} · ${esc(t.status.toUpperCase())}${t.paused ? " · PAUSED" : ""}</span>`,
-    owner ? `<span>PART ${esc(t.part)} OF ${owner.parts.length}</span>` : t.parts.length ? `<span>${t.parts.length} PARTS</span>` : "",
-    t.repos.length ? `<span>${esc(t.repos.join(", "))}</span>` : "",
-  ].join("");
+  const { yours } = standing(t), owner = t.parent && state.tasks.find(x => x.id === t.parent);
+  const cls = t.status === "failed" ? "blocked" : yours || (LIVE.has(t.status) && !t.paused) ? "" : "idle";
+  return `<span class="kicker ${cls}"><i></i>${yours ? "Waiting on you · " : ""}${esc(LABEL[t.stage] || t.stage)} · ${esc(t.status)}`
+    + `${t.paused ? " · paused" : ""}${owner ? ` · part ${esc(t.part)} of ${owner.parts.length}` : ""}</span>`;
+}
+
+function factsFor(t) {
+  const owner = t.parent ? state.tasks.find(x => x.id === t.parent) : null, landed = Object.entries(t.landed || {});
+  const facts = [
+    ["Repos", esc(t.repos.map(r => r.split("/").pop()).join(", ") || "none")],
+    owner ? ["Part of", `<a href="#" data-open="${esc(owner.id)}">${esc(owner.title)}</a>`] : null,
+    t.branches?.length ? ["Starts from", `<code>${esc(t.branches.map(b => b.split("@")[1]).join(", "))}</code>`] : null,
+    landed.length ? ["Landed on", landed.map(([, b]) => `<code title="${esc(b)}">${esc(b)}</code>`).join("<br>")] : null,
+    t.complexity ? ["Complexity", `<span class="cxbar" role="img" aria-label="${esc(t.complexity)} of 5">${[1, 2, 3, 4, 5].map(n => `<i class="${n <= t.complexity ? "on" : ""}"></i>`).join("")}</span>`] : null,
+    t.plan_model ? ["Planned by", esc([t.plan_model, t.plan_reasoning].filter(Boolean).join(" · "))] : null,
+    t.model ? ["Coded by", esc([t.model, t.reasoning].filter(Boolean).join(" · "))] : null,
+    t.attempts ? ["Retries", esc(t.attempts)] : null,
+    ["Captured", esc(when(t.created))],
+  ].filter(Boolean);
+  return `<section class="tile" aria-labelledby="facts-h"><h2 class="lbl" id="facts-h">Card</h2>${facts.map(([k, v]) =>
+    `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join("")}</section>`;
+}
+
+/** The plan as tiles: the goal, each decision with its reason, and what done means as a checklist. */
+function planTiles(t, notes, body) {
+  const found = sections(body), take = re => found.find(x => re.test(x.title));
+  const goal = take(/^goal/i), decisions = take(/^decisions/i), accept = take(/^acceptance/i);
+  const noted = notes ? `<section class="tile">${notes}</section>` : "";
+  if (!found.length) return noted + `<section class="tile"><div class="md">${md(body)}</div></section>`;
+  const list = (title, section, row) => !section ? "" : `<section class="tile"><div class="sec-head"><h2>${title}</h2></div>`
+    + (bullets(section.text).map(row).join("") || `<div class="md">${md(section.text)}</div>`) + `</section>`;
+  return noted
+    + (goal ? `<section class="tile"><h2 class="lbl">Goal</h2><div class="md goal">${md(goal.text)}</div></section>` : "")
+    + list("Decisions", decisions, (d, i) => {
+      // A decision reads "what -- why"; one you gave as an answer says so.
+      const [what, ...why] = d.split(" -- ");
+      return `<div class="prow"><span class="pnum">${i + 1}</span><div><b>${inline(what)}</b>`
+        + (why.length ? `<span class="why">${inline(why.join(" -- "))}</span>` : "")
+        + (d.includes("the owner's answer to:") ? `<span class="yours">Your answer</span>` : "") + `</div></div>`;
+    })
+    + list("Done when", accept, c => `<div class="prow"><span class="pcheck"></span><div>${inline(c)}</div></div>`)
+    + found.filter(x => ![goal, decisions, accept].includes(x) && !/^current/i.test(x.title)).map(x =>
+      `<section class="tile"><h2 class="lbl">${esc(x.title)}</h2><div class="md">${md(x.text)}</div></section>`).join("");
+}
+
+/** The tests written before any code: each opens to what it checks and why it fails now. */
+function testsTile(t) {
+  const w = t.written_tests, tests = w?.tests || [], red = tests.filter(c => c.outcome !== "passed").length;
+  if (!w) return t.tests_note && t.stage === "planning" ? `<section class="tile"><h2 class="lbl">Tests</h2><span class="why">${esc(t.tests_note)}</span></section>` : "";
+  return `<section class="tile" aria-labelledby="tests-h"><h2 class="lbl" id="tests-h">Tests written first</h2>
+    <div><span class="big plain">${tests.length}</span> <span class="why">test${tests.length === 1 ? "" : "s"}</span></div>
+    <span class="why">${red} fail${red === 1 ? "s" : ""} now, as ${red === 1 ? "it" : "they"} should${tests.length - red ? ` · ${tests.length - red} pass now` : ""}</span>
+    <div>${tests.map(c => `<details class="trow"><summary><i class="${c.outcome === "passed" ? "ok" : ""}"></i><span><b>${esc(c.name)}</b>`
+      + `<small>${c.outcome === "passed" ? "passes now" : "fails now"}${c.criterion ? ` · criterion ${esc(c.criterion)}` : ""}</small></span></summary>`
+      + (c.checks ? `<p>${esc(c.checks)}</p>` : "") + (c.message ? `<pre>${esc(c.message)}</pre>` : "") + `</details>`).join("")}</div>
+    <button class="linkish" data-tests="1">Read the test code</button>
+  </section>`;
+}
+
+/** Beside the plan: the parts a card is built in, its tests, how things work today, and its history. */
+function sideFor(t, plain, body, history) {
+  const owner = t.parent ? state.tasks.find(x => x.id === t.parent) : null;
+  const track = owner ? partsTrack(owner, t.id) : t.parts.length || t.split ? partsTrack(t, t.id) : "";
+  const today = sections(body).find(x => /^current/i.test(x.title));
+  return (track ? `<section class="tile">${track}</section>` : "") + (!plain ? "" : testsTile(t)
+    + (today ? `<section class="tile"><h2 class="lbl">How it works today</h2><div class="md small">${md(today.text)}</div></section>` : "")
+    + (history ? `<section class="tile">${history.replace("<h2>", `<h2 class="lbl">`)}</section>` : ""));
+}
+
+// Whose run the log shows: the planner's, the test writer's, the coder's ("") or the reviewer's.
+let logsOpen = false, logOf = "", testCode = false;
+const LOGS = [["plan", "Planner"], ["tests", "Test writer"], ["", "Coder"], ["review", "Reviewer"]];
+const logFor = t => t.stage === "review" ? "review" : t.stage !== "planning" ? "" : t.status === "planning" || !t.planned ? "plan" : "tests";
+
+function logsView() {
+  return `<div class="sec-head"><h2>Logs and thinking</h2><span style="flex:1"></span><button class="action" id="logs-back">Back to the card</button></div>
+    <div class="pick" style="margin:12px 0 4px">${LOGS.map(([of, label]) => `<button data-log="${of}" aria-pressed="${logOf === of}">${label}</button>`).join("")}</div>
+    <section class="live"><div id="ctx" class="ctx"></div><div class="run" id="run"></div></section>`;
 }
 
 let view = "home";
@@ -1685,7 +1870,6 @@ function shotsGrid(t) {
   return `<div class="shots">` + have.map(([n, u]) =>
     `<a href="${u}" target="_blank" rel="noreferrer"><img src="${u}" alt="${esc(n)}" title="${esc(n)}"></a>`).join("") + `</div>`;
 }
-const gallery = t => shotsGrid(t) && `<h2>What the reviewer saw</h2>` + shotsGrid(t);
 
 // --- the run log -----------------------------------------------------------------------------
 
@@ -1699,7 +1883,7 @@ function runStep(s, cls) {
   const cmds = s.commands.map(shortCmd);
   const mark = cls === "now" ? "…" : s.returncode && !s.exit ? `✗${s.returncode}` : "✓";
   const open = cls === "bad" || s.exit;
-  return `<details class="step ${cls}"${open ? " open" : ""}>
+  return (s.thought ? `<p class="thought">${esc(s.thought)}</p>` : "") + `<details class="step ${cls}"${open ? " open" : ""}>
     <summary title="${esc(s.commands.join("\n"))}"><span class="mark">${esc(mark)}</span><span class="cmd">${esc(cmds.join(" ; ") || "finished")}</span></summary>
     ${cmds.length ? `<pre class="full">${esc(cmds.join("\n"))}</pre>` : ""}
     ${s.output ? `<pre class="out">${esc(s.output)}</pre>` : ""}
@@ -1741,9 +1925,9 @@ async function drawRun(id) {
   if (!box || watching !== id) return;
   // Follow new output only while the user is at the bottom: if they have scrolled up to read
   // earlier steps, new steps must not move the view; at the bottom, they land at the bottom.
-  const body = document.getElementById("d-body");
+  const body = document.getElementById("detail");
   const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight <= 40;
-  const of = (state.tasks.find(t => t.id === id) || {}).stage === "review" ? "review" : "";
+  const of = logsOpen ? logOf : (state.tasks.find(t => t.id === id) || {}).stage === "review" ? "review" : "";
   const res = await api(`/api/run?id=${encodeURIComponent(id)}&of=${of}`);
   if (!res.ok) return;
   const { steps, now, again, context } = await res.json();
@@ -2093,16 +2277,14 @@ function showDetail(id) {
   if (detailId !== id && t.stage === "under-work" && LIVE.has(t.status)) tab = "log", watching = id;
   openId = id;
   document.getElementById("detail").classList.add("page");
+  if (detailId !== id) testCode = logsOpen = false;
+  const { yours } = standing(t);
   document.getElementById("d-kick").innerHTML = kickFor(t);
-  const sideHtml = sideFor(t);
-  if (document.getElementById("d-side").dataset.from !== sideHtml) {
-    document.getElementById("d-side").innerHTML = sideHtml;
-    document.getElementById("d-side").dataset.from = sideHtml;
-  }
   document.getElementById("d-title").textContent = t.title;
-  // The goal under the title, as the plan says it; the facts are in the side column now.
-  document.getElementById("d-sub").textContent =
-    (t.packet?.goal || (String(t.body || "").split(/^## Goal\s*$/mi)[1] || "").split(/^## /m)[0]).trim().split("\n")[0].slice(0, 320);
+  document.getElementById("d-steps").innerHTML = stepsFor(t);
+  document.getElementById("d-facts").innerHTML = factsFor(t);
+  document.getElementById("d-sub").textContent = t.stage === "planning" && t.status === "ready"
+    ? "Approving sends the plan and its tests to the coder. It codes until the tests pass and may not change them." : "";
   const from = (t.branches || []).map(b => b.split("@")[1]).join(", ");
   const reading = (t.context_branches || []).map(b => b.split("/").pop()).join(", ");
 
@@ -2138,8 +2320,6 @@ function showDetail(id) {
   if (t.status === "queued" && t.stage === "planning" && !t.paused)
     head += `<div class="note">${t.planned ? "Planned. Waiting to have its tests written" : "Waiting for the planner"} — <code>rfa plan</code></div>`;
   if (t.status === "writing-tests") head += `<div class="note">Writing the tests from this packet — the <strong>Run log</strong> is not kept for this step; it lands here when done.</div>`;
-  if (t.stage === "planning" && t.status === "ready")
-    head += `<div class="note">Read the packet and the tests written from it. <strong>Approve</strong> sends both to the coder, who codes until the tests pass and may not change them.</div>`;
   const asking = t.stage === "review" || t.status === "question";
   const questions = (t.stage === "planning" || t.stage === "review") && t.open_questions?.length ? (t.packet || asking
       ? `<div class="note"><strong>${t.stage === "review" ? "The reviewer asks" : "Open questions"}</strong> — an answer goes into the packet as a decision${t.stage === "review" ? ", and the last one sends the card back to the reviewer" : t.status === "question" ? ", and the last one sends the card on to have its tests written" : ""}.<ul class="oq">${t.open_questions.map((q, i) =>
@@ -2163,7 +2343,8 @@ function showDetail(id) {
   // Re-rendering the card that is already open must not yank the panel back to the top; a new
   // card, or coming back from editing, starts at the top.
   const panel = document.getElementById("d-body");
-  const saved = detailId === id && !editing ? panel.scrollTop : 0;
+  const page = document.getElementById("detail");
+  const saved = detailId === id && !editing ? page.scrollTop : 0;
   panel.classList.toggle("editing", editing);
   // A card that reached the coder is read round by round; the rest is still the packet and its notes.
   const rounded = ran && !editing;
@@ -2171,10 +2352,19 @@ function showDetail(id) {
   if ((tab === "shots" && !(t.shots || []).length) || (tab === "full" && latestLanded(t) < 0)) tab = "runs";
   const diffing = tab === "full" || (tab === "runs" && [...openDiffs].some(k => k.startsWith(`${id}/`)));
   document.getElementById("detail").classList.toggle("wide", Boolean(rounded && diffing));
+  const coded = testCode && t.written_tests;
+  const sideHtml = sideFor(t, !rounded && !editing, body, history);
+  if (document.getElementById("d-side").dataset.from !== sideHtml) {
+    document.getElementById("d-side").innerHTML = sideHtml;
+    document.getElementById("d-side").dataset.from = sideHtml;
+  }
+  panel.classList.toggle("one", Boolean(editing || logsOpen || rounded || coded));
   let html;
   if (editing) {
     // A planned card is edited section by section; the rest of the packet is preserved on save.
     html = head + (t.packet ? packetEdit(t) : `<textarea id="edit-body">${esc(fullBody)}</textarea>`);
+  } else if (logsOpen) {
+    html = logsView();
   } else if (rounded) {
     const top = (asking ? questions : "") + (t.error ? `<div class="note bad">${esc(t.error)}</div>` : "")
       + (t.offline ? `<div class="note">${esc(t.offline)}</div>` : "")
@@ -2199,11 +2389,11 @@ function showDetail(id) {
         `<button role="tab" data-tab="${key}" aria-selected="${tab === key}">${label}${n ? `<span class="n">${n}</span>` : ""}</button>`).join("")}</div>`
       + top + content();
   } else {
-    html = head + `<div class="md">${md(body)}${testsView(t)}${gallery(t)}${history}</div>`;
+    html = coded ? testsView(t) : planTiles(t, head, body);
   }
   // Redrawing the same thing would close every open diff and the `details` you opened; only a change redraws.
   // Compared by what it is drawn from, not by the html: "3m ago" becoming "4m ago" is no change.
-  const drawnFrom = JSON.stringify([t, mine, prNote?.id === id && prNote, watching === id, tab, shotsGrid(t)]);
+  const drawnFrom = JSON.stringify([t, mine, prNote?.id === id && prNote, watching === id, tab, shotsGrid(t), testCode, logsOpen, logOf]);
   if (detailId !== id || editing || drawnFrom !== lastBody) {
     panel.innerHTML = html;
     lastBody = drawnFrom;
@@ -2213,15 +2403,17 @@ function showDetail(id) {
     if (rounded && tab === "runs") drawDiffs(t);
     if (rounded && tab === "full") drawFullDiff(t);
   }
-  panel.scrollTop = saved;
+  page.scrollTop = saved;
   detailId = id;
   if (watching === id) drawRun(id);
   if ((t.shots || []).length) loadShots(t);
   if (editing) {
     document.getElementById("d-actions").innerHTML = `<button class="action primary" id="save-edit">Save</button><button class="action quiet" id="cancel-edit">Cancel</button>`;
   } else {
-    document.getElementById("d-actions").innerHTML = actionsFor(t);
+    document.getElementById("d-actions").innerHTML = actionsFor(t)
+      + (t.stage === "draft" ? "" : `<button class="action" id="logs" aria-pressed="${logsOpen}">Logs and thinking</button>`);
   }
+  document.getElementById("d-actions").toggleAttribute("data-yours", yours && !editing);
   openPanel();
   // Measured once the panel shows: hidden, every textarea is zero tall.
   panel.querySelectorAll(".pe-list textarea, .oq textarea").forEach(grow);
@@ -2230,13 +2422,6 @@ function showDetail(id) {
 /** The tests written before any code: what each one checks and why it fails now, then the code, file by file. */
 function testsView(t) {
   const w = t.written_tests;
-  if (!w) return t.tests_note && t.stage === "planning" ? `<h2>Tests</h2><p class="tests">${esc(t.tests_note)}</p>` : "";
-  const items = (w.tests || []).map(c => `<li><div class="wt-head">`
-      + `<span class="wt-state${c.outcome === "passed" ? " green" : ""}">${c.outcome === "passed" ? "passes now" : "fails now"}</span>`
-      + `<code>${esc(c.name)}</code>${c.criterion ? `<span class="wt-crit">criterion ${esc(c.criterion)}</span>` : ""}</div>`
-      + (c.checks ? `<p>${esc(c.checks)}</p>` : "")
-      + (c.message ? `<details><summary>Why it fails now</summary><pre>${esc(c.message)}</pre></details>` : "")
-      + `</li>`).join("");
   const code = Object.entries(w.patches || {}).flatMap(([repo, patch]) =>
     String(patch).split(/^(?=diff --git )/m).filter(c => c.startsWith("diff --git ")).map(chunk => {
       const path = chunk.match(/^diff --git a\/.+? b\/(.+)$/m)?.[1] || "";
@@ -2249,10 +2434,8 @@ function testsView(t) {
         : `<span class="${l[0] === "+" ? "add" : l[0] === "-" ? "del" : ""}">${esc(l)}</span>`).join("\n");
       return `<details class="wt-code" open><summary><code>${esc(repo)}/${esc(path)}</code>${added ? " — new" : ""}</summary><pre><code>${body}</code></pre></details>`;
     })).join("");
-  const red = (w.tests || []).filter(c => c.outcome !== "passed").length;
-  return `<h2>Tests written first</h2>`
-    + `<p class="tests">${w.summary ? `${esc(w.summary)} ` : ""}${(w.tests || []).length} new, ${red} failing now · run by <code>${esc(w.command)}</code></p>`
-    + `<ul class="wt-list">${items}</ul><h2>The test code</h2>${code}`;
+  return `<div class="sec-head"><h2>Test code</h2><span style="flex:1"></span><button class="action" data-tests="0">Back to the plan</button></div>`
+    + `<div class="md"><p class="tests">${w.summary ? `${esc(w.summary)} ` : ""}Run by <code>${esc(w.command)}</code>. The coder may not change these.</p>${code}</div>`;
 }
 
 async function retest(id) {
@@ -2317,7 +2500,7 @@ function closeDetail() {
   document.getElementById("detail").classList.remove("wide");
   // A card page closes as it opened, at once; it stays a page until a form opens the side panel.
   document.getElementById("detail").classList.remove("open");
-  document.getElementById("d-side").dataset.from = "";
+  delete document.getElementById("d-side").dataset.from;
   document.getElementById("detail").setAttribute("aria-hidden", "true");
   document.getElementById("scrim").classList.remove("open");
 }
@@ -2333,7 +2516,6 @@ async function refresh() {
   if (text === lastSnapshot) return;
   state = JSON.parse(lastSnapshot = text);
   render();
-  strip();
 }
 
 // The server says "changed" the moment a file the board is drawn from does, and the board redraws
@@ -2475,6 +2657,12 @@ document.getElementById("d-actions").addEventListener("click", e => {
     menuOpen = !menuOpen;
     return e.target.closest(".menu").classList.toggle("open", menuOpen);
   }
+  if (e.target.closest("#logs")) {
+    logsOpen = !logsOpen;
+    logOf = logFor(state.tasks.find(x => x.id === openId));
+    watching = logsOpen ? openId : null;
+    return showDetail(openId);
+  }
   if (e.target.closest("#fix") && openId) return fixComments(openId);
   if (e.target.closest("#retry") && openId) return retry(openId);
   if (e.target.closest("#retest") && openId) return retest(openId);
@@ -2512,6 +2700,7 @@ document.getElementById("home").addEventListener("click", e => {
     if (act.dataset.act === "retry") return retry(id);
     if (act.dataset.act === "ship") return setVerdict(id, "shipped");
     if (act.dataset.act === "trash") return setVerdict(id, "trashed");
+    if (act.dataset.act === "pause") return setPaused(id, true);
     const t = state.tasks.find(x => x.id === id);
     const i = Number(act.dataset.i);
     if (act.dataset.act === "default") return sendAnswer(t, i, "Default is good");
@@ -2529,6 +2718,10 @@ document.getElementById("analytics").addEventListener("click", showAnalytics);
 document.getElementById("d-body").addEventListener("click", e => {
   const opening = e.target.closest("a[data-open]");
   if (opening) { e.preventDefault(); return showDetail(opening.dataset.open); }
+  if (e.target.closest("[data-tests]")) { testCode = false; return showDetail(openId); }
+  if (e.target.closest("#logs-back")) { logsOpen = false; watching = null; return showDetail(openId); }
+  const log = e.target.closest("button[data-log]");
+  if (log) { logOf = log.dataset.log; return showDetail(openId); }
   const t = state.tasks.find(x => x.id === openId);
   const diff = e.target.closest("button[data-diff]");
   if (diff && t) return toggleDiff(t, Number(diff.dataset.diff));
@@ -2610,7 +2803,8 @@ document.getElementById("d-body").addEventListener("change", e => {
   drawCapture();
 });
 document.getElementById("close").addEventListener("click", closeDetail);
-document.getElementById("d-side").addEventListener("click", e => {
+for (const id of ["d-side", "d-facts"]) document.getElementById(id).addEventListener("click", e => {
+  if (e.target.closest("[data-tests]")) { testCode = true; return showDetail(openId); }
   const el = e.target.closest("[data-id], a[data-open]");
   if (!el) return;
   e.preventDefault();

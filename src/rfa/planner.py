@@ -23,7 +23,7 @@ from minisweagent.agents.default import AgentConfig, DefaultAgent
 from minisweagent.environments import get_environment
 from minisweagent.exceptions import InterruptAgentFlow, Submitted
 from minisweagent.models import get_model
-from rfa import parts, settings, tasks
+from rfa import parts, rounds, settings, tasks
 from rfa.packet import Packet, problems
 from rfa.tasks import Task
 
@@ -412,7 +412,7 @@ def plan_task(task: Task, config: dict, model: str = "", reasoning: str = "") ->
             reference,
             parts.progress(task),
             task_id=task.id,
-            **config.get("agent", {}),
+            **({"output_path": rounds.run_dir(task.id) / "plan" / "trajectory.json"} | config.get("agent", {})),
         )
     except tasks.Paused:
         # Back in the queue, held: resuming plans it again from the start.

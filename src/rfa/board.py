@@ -203,7 +203,8 @@ def progress(id: str, of: str = "") -> dict:
 
     `of=review` is the reviewer's own session, which lives one folder deeper so that reviewing a
     card does not write over the coding run it is judging -- whichever pass wrote last, the code
-    review's or the app's. Otherwise it is the latest round's.
+    review's or the app's. `of=plan` and `of=tests` are the planner's and the test writer's, each in
+    a folder of its own. Otherwise it is the latest round's.
     """
     if not tasks.ID_RE.fullmatch(id):
         return {"steps": []}
@@ -213,6 +214,8 @@ def progress(id: str, of: str = "") -> dict:
     path = (
         (reviewed or [run / "review" / "trajectory.json"])[-1]
         if of == "review"
+        else run / of / "trajectory.json"
+        if of in ("plan", "tests")
         else (coded or [run / "trajectory.json"])[-1]
     )
     if not path.exists():
@@ -244,13 +247,16 @@ def progress(id: str, of: str = "") -> dict:
 
 def steps_of(messages: list[dict]) -> tuple[list[dict], list[str]]:
     """One conversation's commands and what came back, and the command still waiting for its answer."""
-    steps, ran = [], None
+    steps, ran, thought = [], None, ""
     for message in messages:
         extra = message.get("extra") or {}
         if message.get("role") == "assistant":
             ran = [action.get("command", "") for action in extra.get("actions", [])]
+            # What the model wrote before the command: its reasoning, where it gave any.
+            thought = message["content"].strip()[-4000:] if isinstance(message.get("content"), str) else ""
         elif message.get("role") == "tool" and ran is not None:
-            steps.append({"commands": ran, "returncode": extra.get("returncode"), "output": tail(message)})
+            step = {"commands": ran, "returncode": extra.get("returncode"), "output": tail(message)}
+            steps.append(step | ({"thought": thought} if thought else {}))
             ran = None
         elif message.get("role") == "exit":
             # The command that ended the run gets no observation of its own: the exit is its answer.
